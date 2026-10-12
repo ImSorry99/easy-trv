@@ -6,6 +6,7 @@ Owner: Oliver. Living document. The technical design in `docs/specs/` is derived
 
 - **P1 Native first.** Use what the thermostat can do by itself: its regulation, its inputs, later its schedules and timers. Home Assistant only feeds values and checks that they arrived. Fewer writes, more asynchrony, more robustness, less load on HA.
 - **P2 Profiles, not hard-coded devices.** A thermostat is driven through a *profile*. A profile states which device and minimum firmware it fits, what the device can do natively, and how Easy TRV talks to it. Phase 1 ships exactly one profile: *Sonoff TRVZB native*. If a native path turns out not to work well, a second profile may drive the same device differently. The native profile is always the first choice.
+- **P2a Profiles are data, shipped and tested.** Built-in profiles are declarative files, tested on real hardware with a stated firmware. Users do not click a device together; they take a shipped profile. Anyone can copy a shipped profile into their HA config folder, adapt it, and select it. Shipped profiles are never edited in place.
 - **P3 Lean.** No `climate` entity, no regulator, no entity per setting. One status entity per room.
 - **P4 Verified, not assumed.** Every write is read back. A write that does not arrive becomes visible.
 - **P5 Reuse.** Prefer HA and ZHA built-ins (availability, areas, Repairs, selectors, device registry) over own mechanisms.
@@ -28,10 +29,11 @@ Owner: Oliver. Living document. The technical design in `docs/specs/` is derived
 
 ## Profiles
 
-- **F1** A profile declares: device match (manufacturer, model), minimum firmware, capabilities, and for each capability the operation (what to write, what to read back, how to compare).
+- **F1** A profile declares: device match (manufacturer, model), minimum firmware, capabilities, and for each capability the operation (what to write, what to read back, how to compare). Profiles are declarative (YAML), not code.
 - **F2** A thermostat below the profile's minimum firmware is not driven. A Repairs issue names the required firmware.
 - **F3** Phase 1 profile settings per room: built-in open-window detection (on / off / leave), hysteresis (0.2–1.0 K or leave). Window contacts are not used in Phase 1; the TRVZB has no input for them.
-- **F4** Later: profile selectable per thermostat. Phase 1 auto-selects the only one.
+- **F4** Per room, the profile is *auto* (the shipped profile matching the thermostats) or an explicit choice from all shipped and user profiles that match. Per-thermostat choice later.
+- **F5** User profiles live in `<config>/easy_trv/profiles/*.yaml`. They are validated at start; an invalid file produces a Repairs issue naming the file and the problem, and is ignored.
 
 ## Robustness
 

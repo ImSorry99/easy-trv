@@ -1,6 +1,6 @@
 # Profile: Sonoff TRVZB (native)
 
-`id = sonoff_trvzb_native` · match `SONOFF` / `TRVZB` on ZHA · minimum firmware **1.2.1** · research: `docs/research/02-trvzb-zha-profil.md`
+`id = sonoff_trvzb_native` · match `SONOFF` / `TRVZB` on ZHA · minimum firmware **1.2.1** · shipped as `profiles/builtin/sonoff_trvzb_native.yaml` (the YAML is shown in `docs/concept/profiles.md`) · research: `docs/research/02-trvzb-zha-profil.md`
 
 ## Capabilities and operations
 

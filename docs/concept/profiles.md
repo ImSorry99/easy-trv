@@ -23,9 +23,44 @@ An **operation** is what the adapter executes: `(endpoint, cluster, attribute, r
 - **Firmware fit.** A profile and each capability carry a minimum firmware. A thermostat below it is not driven; the user gets a Repairs issue naming the version instead of silent `UNSUPPORTED_ATTRIBUTE` failures.
 - **Other devices later.** A new thermostat model is a new profile, not a change to the core.
 
+## Profiles are data
+
+A profile is a YAML document, not Python. Shipped profiles live inside the integration (`profiles/builtin/*.yaml`), user profiles in `<config>/easy_trv/profiles/*.yaml`. Both go through the same schema validation at startup; an invalid user file becomes a Repairs issue (`profile_invalid_<file>`) and is skipped. Shipped files are read-only; to change one, copy it, give it a new `id`, adapt it, select it.
+
+```yaml
+schema: 1
+id: sonoff_trvzb_native
+name: Sonoff TRVZB (native)
+match: { manufacturer: SONOFF, model: TRVZB }
+min_firmware: "1.2.1"
+tested_firmware: ["1.3.0", "1.4.4"]
+capabilities:
+  external_temperature:
+    intent: set_room_temperature
+    write: { endpoint: 1, cluster: 0xFC11, attribute: 0x600D, encode: temperature_centi, range: [0, 99.9] }
+    verify: { rule: equals }
+    also_read: [0x600E]              # read in the same request; signals apply
+  source_select:
+    intent: set_source
+    write: { endpoint: 1, cluster: 0xFC11, attribute: 0x600E, encode: { map: { external: 1, internal: 0 } } }
+    verify: { rule: one_of, external: [1, 3], internal: [0] }
+    signals: { 2: failsafe }
+  window_detection_flag:
+    intent: apply_settings.window_detection
+    write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6000, encode: bool }
+    verify: { rule: equals }
+  hysteresis:
+    intent: apply_settings.hysteresis
+    min_firmware: "1.3.0"
+    write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6011, encode: kelvin_centi_negative, range: [0.2, 1.0] }
+    verify: { rule: equals }
+```
+
+The vocabulary is small on purpose: a fixed set of intents (`set_room_temperature`, `set_source`, `apply_settings.*`), a fixed set of encoders (`temperature_centi`, `kelvin_centi_negative`, `bool`, `map`, `const`), two verify rules (`equals`, `one_of`) and named signals. New vocabulary is added in code when a new device needs it; profiles only combine it.
+
 ## Selection
 
-Phase 1: the only profile is auto-assigned to every thermostat it matches; a thermostat matched by no profile is rejected in the room form (`no_profile`). Later: a per-thermostat profile selector, defaulting to the native profile.
+Per room: `auto` (the shipped profile that matches the room's thermostats) or an explicit profile id from all shipped and user profiles that match. A thermostat matched by no profile is rejected in the room form (`no_profile`); a thermostat not matched by an explicitly chosen profile too (`profile_mismatch`). Per-thermostat selection is a later step.
 
 ## Boundaries
 
