@@ -1,276 +1,120 @@
-# Easy TRV — Design Specification (Phase 1)
+# Easy TRV — Technical design, Phase 1
 
-| | |
-|---|---|
-| Status | Approved design, 2026-10-12 (brainstorming with Oliver) |
-| Domain | `easy_trv` |
-| Scope | Phase 1: feed Sonoff TRVZB (ZHA) with an external room temperature, apply a small device profile, verify every write, surface failures |
-| Research | `docs/research/01-bestehende-loesungen.md`, `02-trvzb-zha-profil.md`, `03-ha-integrations-architektur.md` |
-| Planning source of truth | Obsidian vault `10 Projekte/Easy TRV/` (wishes, roadmap, decisions). This file is the technical contract. |
+Derived from `REQUIREMENTS.md` (2026-10-12). Device specifics live in `docs/profiles/sonoff-trvzb-native.md`, the profile concept in `docs/concept/profiles.md`. This document is for whoever implements; Oliver reviews the requirements, not this file.
 
-## 1. Purpose and non-goals
-
-Easy TRV is a Home Assistant custom integration for people who own Sonoff TRVZB radiator thermostats connected through ZHA and want them to regulate on a *room* temperature instead of the sensor inside the valve body. The TRVZB has a native input for exactly that (attribute `external_temperature_sensor_value`). Easy TRV groups thermostats and sensors into rooms, keeps that input fed, and tells you when it could not.
-
-It deliberately does **not**:
-
-- regulate (no PID, no setpoint shifting, no valve-percentage writes, no hysteresis in HA). The TRVZB firmware regulates.
-- create a `climate` entity, presets, schedules, or any per-room `number` entities.
-- handle window contacts in Phase 1. The TRVZB has **no** Zigbee input for an external window state; Phase 1 only enables the device's built-in open-window detection.
-- handle presence, outdoor temperature cut-off, battery warnings (HA does that), or the adaptive mode switch (user sets it in ZHA).
-
-Officially supported hardware: Sonoff TRVZB (Gen 1, `SONOFF`/`TRVZB`) with firmware ≥ 1.2.1 on ZHA. Other thermostats and Zigbee2MQTT are out of scope.
-
-Success for Phase 1: Oliver's four TRVs (3 × living room, 1 × bedroom) regulate on the room hygrometers, a silent fallback of the TRV to its internal sensor is detected and corrected, and a thermostat that stops accepting writes shows up as a Repairs issue instead of a cold room.
-
-## 2. Environment and device facts that drive the design
-
-Verified in `docs/research/02-trvzb-zha-profil.md` (quirk source, Zigbee2MQTT converter, zigpy, zha, HA core read on 2026-10-12).
-
-| Fact | Consequence |
-|---|---|
-| Manufacturer cluster `0xFC11` on endpoint 1; attributes are written **without** a manufacturer code (`manufacturer_code=None` in the quirk, same in Sonoff's own script and Z2M). | Adapter never passes a manufacturer code. |
-| `0x600D external_temperature_sensor_value`: `int16s`, 0.01 °C, valid 0–9990 (0.0–99.9 °C); out-of-range values are silently ignored by the device. | Values are clamped/validated before writing; negative values are never written. |
-| `0x600E external_temperature_sensor_enable`: written as 0 (internal) / 1 (external); the device itself reports 2 (external source offline = fail-safe) and 3 (external restored). | Verification of "external" accepts {1, 3}; reading 2 is the fail-safe signal and triggers a re-enable. |
-| The TRV falls back to its internal sensor after roughly 2 h without a new write (reported independently by the Z2M converter author and HA community; not documented by Sonoff). | A heartbeat write is mandatory even when the room temperature does not change. Default 20 min. |
-| The ZHA quirk exposes `0x600E` as a `switch`; `is_on = bool(value)`, so 2 and 3 both show as "on". | The fail-safe is invisible in HA without a raw read. Easy TRV reads the raw attribute after every write. |
-| With the external source active the TRV reports the external value as `local_temperature`; `climate.current_temperature` therefore shows the fed value. | Useful for the user; useless as a verification source (it is what we wrote). |
-| `0x6000 open_window` is the on/off flag of the **device's own** detection (drop > 1.5 K within 4.5 min → valve closed, target 12 °C, ends after rise, manual change or 30 min). | Phase 1 "window handling" = write this flag once per room profile. |
-| `0x6011 temperature_control_accuracy`: `int16s`, −100…−20 (−1.0…−0.2 K), default −100; firmware ≥ 1.3.0. | Optional profile value "hysteresis". |
-| Firmware gates: 0x600D/0x600E ≥ 1.2.1, 0x6011 ≥ 1.3.0, 0x6014–0x6016 ≥ 1.4.0, 0x6017 ≥ 1.4.4. ZHA stores the OTA `current_file_version` as device `sw_version` (e.g. `0x00001404` = 1.4.4). | Writes are gated by parsed `sw_version`; an `UNSUPPORTED_ATTRIBUTE` response raises a "firmware too old" issue. |
-| The TRVZB is a sleepy end device: writes are queued at the parent and delivered on the next poll (seconds); reads may time out while it sleeps. | Verify delay default 10 s; write timeout 20 s; retries with backoff; one serial writer per room. |
-| A write to 0x600D may wake a TRV that was switched off from HA (single forum report, unverified). | Option `pause_when_off` (default on) suspends writes to a TRV whose `hvac_mode` is `off`; spike S1 decides whether the default stays. |
-| The quirk is built into ZHA since HA 2026.3 (zhaquirks 2.3.0 covers all 17 attributes). A second custom quirk for the same model conflicts. | Easy TRV ships **no** quirk and uses the existing `CustomSonoffCluster` by attribute name. |
-| ZHA internals (`homeassistant.components.zha.helpers`, the `zha` library) are not a public API; they broke in 2024.8, 2026.6 and 2026.8. | All ZHA access lives in one adapter module with four calls; an import/attribute failure turns into `ConfigEntryNotReady` plus a Repairs issue, never a crash in a callback. |
-| HA 2026.8 restricts a device to one config entry and at most one subentry. | One room device per subentry is exactly the allowed shape. |
-
-Minimum Home Assistant version: **2026.8.0** (subentries exist since 2025.3, the built-in quirk since 2026.3, the device-registry rules since 2026.8). Developed and tested against 2026.10.x (Oliver's instance).
-
-## 3. Configuration model
-
-### 3.1 Shape
-
-- **One config entry** (`single_config_entry: true`, title "Easy TRV"). Creating it shows no form; defaults live in options.
-- **One config subentry per room**, `subentry_type = "room"`, created from the entry card button "Add room", edited via "Reconfigure", removed via "Delete". A room has a `unique_id` = casefolded name (unique within the entry).
-- **Options flow** on the entry for global parameters.
-- Any change (options, subentry add/update/remove) triggers one update listener that calls `hass.config_entries.async_schedule_reload(entry_id)`. The subentry reconfigure step therefore uses `async_update_and_abort`, never the reload variant (which raises when update listeners exist).
-
-### 3.2 Room subentry (two steps)
-
-Step `user`:
-
-| Field | Selector | Notes |
-|---|---|---|
-| `name` | Text, required | Room title |
-| `area` | Area selector filtered to areas containing ZHA climate entities, optional | Used only to prefill step 2 (`er.async_entries_for_area`, plus device-inherited areas). Stored for reference. |
-
-Step `entities`:
-
-| Field | Selector | Validation |
-|---|---|---|
-| `trvs` | Entity, multiple, filter `{integration: zha, domain: climate}` | ≥ 1; each must resolve to a ZHA device with an IEEE (error `not_zha`); duplicates across rooms are rejected (error `trv_in_other_room`) |
-| `temp_sensors` | Entity, multiple, **reorder = true**, filter `{domain: sensor, device_class: temperature}` | Order is priority. May be empty: then the room only applies the profile and leaves the source internal. |
-| `window_detection` | Select `on` / `off` / `leave` (default `on`) | Writes `0x6000` once at room start |
-| `hysteresis` | Select `leave` / `0.2` / `0.4` / `0.6` / `0.8` / `1.0` K (default `leave`) | Writes `0x6011` once at room start; gated to firmware ≥ 1.3.0 |
-
-Reconfigure shows both steps' fields in one form, prefilled from the subentry data.
-
-### 3.3 Global options
-
-| Key | Default | Range | Meaning |
-|---|---|---|---|
-| `heartbeat_minutes` | 20 | 5–90 | Rewrite the external value at least this often while a sensor is active |
-| `verify_delay_seconds` | 10 | 2–60 | Wait between write and read-back |
-| `max_attempts` | 3 | 1–10 | Total attempts per logical write before it counts as failed |
-| `min_delta_kelvin` | 0.1 | 0.1–1.0 | Minimum change versus the last written value that triggers a write |
-| `debounce_seconds` | 30 | 0–300 | Sensor changes are coalesced for this long before writing |
-| `sensor_stale_minutes` | 120 | 10–720 | A sensor that has not reported for longer is treated as unusable |
-| `pause_when_off` | true | bool | Suspend external-temperature writes to a TRV whose `hvac_mode` is `off` |
-
-Fixed constants (not user-facing): write timeout 20 s, backoff 5 s → 15 s → 45 s (45 s repeated), startup grace: wait for `EVENT_HOMEASSISTANT_STARTED` before the first sync.
-
-### 3.4 Translations
-
-`strings.json` (= `translations/en.json`) and `translations/de.json` cover `config`, `options`, `config_subentries.room` (title, `entry_type`, `initiate_flow.user` = "Add room", `initiate_flow.reconfigure` = "Edit room", steps, errors, aborts), `issues.*`, and `entity.sensor.room_status` with state translations.
-
-## 4. Runtime architecture
+## 1. Architecture
 
 ```
 custom_components/easy_trv/
-  __init__.py          setup/unload: gateway, one RoomController per room subentry, runtime_data, reload listener
-  config_flow.py       EasyTrvConfigFlow, RoomSubentryFlow, EasyTrvOptionsFlow
-  const.py             domain, keys, defaults, attribute ids, firmware gates
-  controller.py        RoomController: HA events -> core events; core commands -> adapter/HA; timers; serial writer
+  __init__.py            setup/unload: adapter, profile registry, one RoomController per room subentry, runtime_data, reload listener
+  config_flow.py         EasyTrvConfigFlow, RoomSubentryFlow (area or custom), EasyTrvOptionsFlow
+  const.py               domain, config keys, defaults, event names, issue ids
+  controller.py          RoomController: HA events → core events; core commands → profile/adapter/HA; timers; one serial worker per room
   core/
-    model.py           frozen dataclasses: RoomConfig, GlobalParams, RoomState, TrvState, events, commands
-    room_logic.py      RoomLogic.handle(event, now, state) -> (state, [commands])  — pure, no HA imports
-    values.py          rounding/encoding helpers (°C <-> raw int16), firmware parsing, validity checks
+    model.py             frozen dataclasses: RoomConfig, GlobalParams, RoomState, TrvState, Intent, events, commands
+    room_logic.py        RoomLogic.handle(event, now, state) -> (state, [commands]) — pure, no HA imports
+    values.py            temperature validity, rounding (Decimal, half-up to 0.1 K), firmware parsing
+  profiles/
+    base.py              Profile protocol, Capability enum, Operation + VerifyRule dataclasses, registry
+    sonoff_trvzb_native.py
   adapters/
-    zha_gateway.py     TrvGateway Protocol + ZhaLibraryGateway (the only module importing zha/zigpy/ZHA helpers)
-  sensor.py            RoomStatusSensor (one per room)
-  diagnostics.py       config entry diagnostics dump
+    zha_gateway.py       TrvGateway protocol + ZhaLibraryGateway (only module importing zha/zigpy/ZHA helpers)
+  sensor.py              RoomStatusSensor
+  diagnostics.py
   strings.json, translations/{en,de}.json, icons.json, manifest.json, quality_scale.yaml
 ```
 
-Principles:
+Layers and rules:
 
-- **No `DataUpdateCoordinator`.** Nothing is polled. Inputs are HA state-change events (`async_track_state_change_event` over the room's sensors and TRV climate entities) and a per-room time tick (`async_track_time_interval`, 60 s) that drives heartbeat, staleness and retry timing.
-- **Pure core.** `RoomLogic` receives events (`SensorStateChanged`, `TrvStateChanged`, `Tick`, `DebounceElapsed`, `WriteResult`, `Start`, `Stop`) with `now` as a parameter and returns commands (`WriteAttribute`, `ReadAttributes`, `ScheduleTimer`, `SetStatus`, `RaiseIssue`, `ClearIssue`, `FireEvent`, `Log`). No timers, no awaits, no HA imports → table-driven unit tests.
-- **Thin controller.** Translates HA events, executes commands, owns the asyncio side: one `asyncio.Queue` + worker task per room so writes and their verify delays are strictly serial per room. Retry delays are scheduled with `async_call_later`. Everything is registered with `entry.async_on_unload`.
-- **One adapter.** `TrvGateway` Protocol: `resolve_ieee(climate_entity_id) -> str`, `is_available(ieee) -> bool`, `write_attribute(target, raw_value)`, `read_attributes(target_cluster, [attribute_ids]) -> dict`. `ZhaLibraryGateway` implements it via `get_zha_gateway(hass).get_device(EUI64)` → `Device.write_zigbee_attribute(...)` / `Device.async_get_cluster(...).read_attributes([...], allow_cache=False)`. Entity → IEEE resolution goes through the entity registry (`platform == "zha"`, `device_id`) and `async_get_zha_device_proxy`. A `FakeGateway` with programmable outcomes is used in tests.
-- **State lives in `entry.runtime_data`** (`EasyTrvRuntimeData(gateway, rooms: dict[subentry_id, RoomController])`).
-- **Firmware version** is read once per TRV at room start from the device registry `sw_version` (`0xMMNNPP` nibbles → major.minor.patch); unparsable → no gating, rely on the device's `UNSUPPORTED_ATTRIBUTE` answer.
+- **Core** (`core/`) is pure Python. It receives events (`Start`, `Stop`, `SensorStateChanged`, `TrvStateChanged`, `Tick`, `DebounceElapsed`, `OperationResult`) with `now` as a parameter and returns commands (`Execute(intent, trv)`, `ScheduleTimer`, `SetStatus`, `RaiseIssue`, `ClearIssue`, `FireEvent`, `Log`). No timers, no awaits.
+- **Profiles** (`profiles/`) turn an `Intent` for one thermostat into `Operation`s (`endpoint, cluster, attribute, raw_value, verify: VerifyRule`). A `VerifyRule` is `Equals(raw)` or `OneOf({…})` plus optional `signals: {raw: SignalName}` (e.g. `{2: "failsafe"}`). Profiles also expose `capabilities` with per-capability `min_firmware`.
+- **Adapter** (`adapters/`) executes operations: `resolve(climate_entity_id) -> DeviceRef(ieee, manufacturer, model, firmware)`, `is_available(ieee)`, `write(ieee, op)`, `read(ieee, endpoint, cluster, [attributes]) -> dict`. `ZhaLibraryGateway` uses `homeassistant.components.zha.helpers.get_zha_gateway` / `async_get_zha_device_proxy`, `Device.write_zigbee_attribute`, `Device.async_get_cluster(...).read_attributes(..., allow_cache=False)`. Any import or lookup failure → `ConfigEntryNotReady` + Repairs issue `zha_api_incompatible`. A `FakeGateway` serves the tests.
+- **Controller** is thin: translates HA state events, runs one `asyncio.Queue` worker per room (write → wait → read → compare → `OperationResult` back into core), schedules retries and the debounce timer with `async_call_later`, registers everything on `entry.async_on_unload`.
+- No `DataUpdateCoordinator`: nothing is polled. Inputs are `async_track_state_change_event` (room sensors + thermostat climate entities) and a 60 s `async_track_time_interval` tick that drives refresh, timeout and retry bookkeeping.
+- State lives in `entry.runtime_data` (`EasyTrvRuntimeData(gateway, profiles, rooms: dict[subentry_id, RoomController])`).
 
-## 5. Room logic
+## 2. Configuration model
 
-### 5.1 State
+- **Entry**: one, `single_config_entry: true`, title "Easy TRV", created without a form.
+- **Room subentry** (`subentry_type = "room"`), two steps:
+  1. `kind`: *From area* (AreaSelector filtered to areas with ZHA climate entities) or *Custom room* (name). From area: the room name is the area name and step 2 is prefilled with the area's entities (entity area, or device area when the entity has none). The `area_id` is stored; reconfigure re-prefills from it.
+  2. `entities`: `trvs` (EntitySelector, multiple, filter `{integration: zha, domain: climate}`; ≥ 1; each must resolve to a ZHA device matched by a profile, errors `not_zha` / `no_profile`; not already in another room, error `trv_in_other_room`), `temp_sensors` (EntitySelector, multiple, `reorder=True`, filter `{domain: sensor, device_class: temperature}`; thermostat-own temperature entities are excluded from the prefill), `humidity_sensors` (same, `device_class: humidity`; stored only), `window_detection` (select `on` / `off` / `leave`, default `on`), `hysteresis` (select `leave` / `0.2` … `1.0`, default `leave`).
+  - Create: `async_create_entry(title, data, unique_id=casefold(name))`. Reconfigure: `async_update_and_abort` (the entry's update listener reloads; the reload variant raises when listeners exist).
+- **Options** (entry): `refresh_minutes` 20 (5–90), `verify_delay_seconds` 10 (2–60), `max_attempts` 3 (1–10), `min_delta_kelvin` 0.1 (0.1–1.0), `sensor_timeout_minutes` 120 (0 = off, 10–720).
+- Internal constants: debounce 5 s (coalesce bursts of sensor reports), operation timeout 20 s, backoff `[5, 15, 45]` s, tick 60 s, first sync after `EVENT_HOMEASSISTANT_STARTED`.
+- One update listener → `async_schedule_reload` on any options or subentry change.
+- `strings.json` = `translations/en.json`; `translations/de.json` translated. Covers config, options, `config_subentries.room` (steps, errors, aborts, `initiate_flow.user` "Add room"), `issues.*`, `entity.sensor.room_status`.
 
-```
-RoomState
-  source: "external" | "internal"           # what we last successfully told the TRVs
-  active_sensor: entity_id | None
-  last_written_value: float | None          # °C, 1 decimal
-  last_value_write: datetime | None         # last *verified* value write
-  pending_change: bool                      # a sensor change is waiting for the debounce window
-  trvs: dict[entity_id, TrvState]
-  profile_applied: bool
+## 3. Room logic
 
-TrvState
-  ieee: str
-  firmware: (major, minor, patch) | None
-  hvac_mode: str | None                     # from climate state
-  available: bool                           # from climate state (mirrors ZHA device availability)
-  health: "ok" | "paused" | "unavailable" | "error"
-  attempts: dict[attribute_id, int]
-  last_error: str | None
-  failsafe_seen_at: datetime | None
-```
+State: `source` (external | internal | none), `active_sensor`, `last_written` (°C), `last_value_write` (ts of last verified value write), `pending_change`, per-thermostat `TrvState(ieee, profile_id, firmware, available, health ∈ {ok, unavailable, unsupported, error}, attempts: dict[attribute, int], last_error, failsafe_seen_at)`, `settings_applied`.
 
-### 5.2 Sensor selection
+A sensor is **usable** when: state not `unavailable`/`unknown`; parses as float; unit °C (°F converted; anything else unusable, warned once); 0.0 ≤ v ≤ 99.9; and, if `sensor_timeout_minutes > 0`, `now − last_reported ≤ timeout`. Active sensor = first usable in configured order.
 
-A sensor is **usable** when all hold: state not `unknown`/`unavailable`; state parses as float; unit is °C (°F is converted; other units → unusable with one warning); 0.0 ≤ value ≤ 99.9; `now − state.last_reported ≤ sensor_stale_minutes`.
-
-The **active sensor** is the first usable sensor in the configured order. Re-evaluated on every sensor event and every tick.
-
-The value written is the active sensor's value rounded half-up to 0.1 K (`Decimal.quantize`), encoded as `int(value * 100)`.
-
-### 5.3 Transitions
-
-| Trigger | Condition | Commands |
+| Trigger | Condition | Intents (per writable thermostat) |
 |---|---|---|
-| **Start** (room start or reload, after HA started) | — | Apply profile (5.4). Then, only if `temp_sensors` is non-empty: a usable sensor exists → `enable := 1` then `value`; none usable → `enable := 0`. Rooms without configured sensors never touch the source. All verified. |
-| **Sensor change** | usable sensor exists, `abs(value − last_written_value) ≥ min_delta` or `last_written_value is None` | mark `pending_change` and emit `ScheduleTimer(debounce_seconds)`; the controller fires a `DebounceElapsed` event after that delay (re-armed on every further change) → `value` write to every writable TRV using the value current at that moment |
-| **Heartbeat** (tick) | `source == external` and `now − last_value_write ≥ heartbeat` | `value` write (current active sensor value, even if unchanged) |
-| **Source lost** | no usable sensor and `source == external` | `enable := 0` once; `source = internal`; status `degraded`; no further value writes |
-| **Source regained** | usable sensor and `source == internal` | `enable := 1` then `value`; `source = external` |
-| **Fail-safe detected** | read-back of `0x600E` returns 2 while `source == external` | immediately `enable := 1` then `value`; fire `easy_trv_failsafe_detected`; log info once; `failsafe_seen_at = now` |
-| **TRV paused** | `pause_when_off` and TRV `hvac_mode == off` | TRV health `paused`; no external writes to it; profile writes unaffected |
-| **TRV resumed** | `hvac_mode` leaves `off` or TRV becomes available again | resync this TRV: `enable` (current source) and, if external, `value` |
-| **TRV unavailable** | climate state `unavailable` | health `unavailable`; no writes; room status `degraded`; no Repairs issue (ZHA already shows it) |
+| Start | — | `ApplySettings` once per thermostat (skip capabilities below firmware → issue `trv_firmware`); then, if `temp_sensors` configured: usable → `SetSource(external)`, `SetRoomTemperature`; none usable → `SetSource(internal)`. No sensors configured → source untouched. |
+| Sensor change | usable sensor and (`last_written is None` or `|v − last_written| ≥ min_delta`) | arm debounce; on `DebounceElapsed` → `SetRoomTemperature(current)` |
+| Refresh (tick) | `source == external` and `now − last_value_write ≥ refresh_minutes` | `SetRoomTemperature(current)` (same value is fine) |
+| Source lost | no usable sensor, `source == external` | `SetSource(internal)` once; status degraded |
+| Source regained | usable sensor, `source != external` | `SetSource(external)`, `SetRoomTemperature` |
+| Fail-safe signal | read-back of source reports signal `failsafe` while `source == external` | `SetSource(external)`, `SetRoomTemperature`; event `failsafe_detected`; `failsafe_seen_at = now` |
+| Thermostat unavailable | climate state `unavailable` | health `unavailable`; skip; status degraded; no issue |
+| Thermostat back | available again | resync: `SetSource(current)`, `SetRoomTemperature` if external |
 
-"Writable TRV" = available, not paused, firmware supports the attribute.
+Writable = available and not `unsupported`. The HVAC mode of the thermostat is irrelevant to writing (requirement T6). Every verified value write sets `last_value_write` and clears `attempts[attribute]`.
 
-Every verified write updates `last_value_write` (for value writes) and resets `attempts[attribute]` to 0.
+## 4. Operation pipeline
 
-### 5.4 Profile
+Per thermostat and operation, executed by the room's serial worker:
 
-Applied at room start and after reconfigure, once, verified like any write, independent of the sensor path:
+1. Preconditions: thermostat available; capability firmware OK (else result `unsupported`, no retry, issue `trv_firmware`).
+2. `write(ieee, op)` within 20 s.
+3. `sleep(verify_delay_seconds)`.
+4. `read(ieee, op.endpoint, op.cluster, [op.attribute] + op.also_read)` within 20 s, cache bypassed. For the TRVZB value write `also_read = [0x600E]`.
+5. Apply `op.verify`: `ok`, `mismatch`, or a **signal** (e.g. `failsafe`) that is routed to the core as its own event rather than as a failure.
+6. Result → `OperationResult(trv, op, outcome ∈ {ok, mismatch, error(msg), timeout, unsupported, signal(name)})`.
 
-- `window_detection`: `on` → `0x6000 := 1`, `off` → `0x6000 := 0`, `leave` → nothing.
-- `hysteresis`: value `k` → `0x6011 := −round(k × 100)`; `leave` → nothing; firmware < 1.3.0 → skip with a "firmware" issue (warning) for that TRV.
+Retry (core): `mismatch` / `error` / `timeout` → `attempts += 1`; `< max_attempts` → `ScheduleTimer(backoff[min(n−1, 2)])` then the same intent again (a newer intent for the same thermostat and attribute supersedes a pending retry); otherwise health `error`, `RaiseIssue(trv_unreachable)`, `FireEvent(write_failed)`. Attempts, backoff and health are per thermostat; the worker continues with the next queued operation regardless of outcome.
 
-The profile is **not** re-asserted periodically. The user may change the device's switches in ZHA at any time; Easy TRV only sets them at start/reconfigure.
-
-## 6. Write pipeline
-
-A logical write for one TRV and one attribute runs as:
-
-1. Preconditions: TRV available (else outcome `skipped: unavailable`), firmware gate passes (else outcome `unsupported`).
-2. `write_attribute(target, raw)` inside `asyncio.timeout(20)`.
-3. `await sleep(verify_delay_seconds)`.
-4. `read_attributes(cluster 0xFC11, [attribute] + [0x600E if attribute == 0x600D])` with `allow_cache=False`, same timeout.
-5. Compare raw values:
-   - `0x600D`: read == written.
-   - `0x600E` expecting external: read ∈ {1, 3}; expecting internal: read == 0.
-   - Any read of `0x600E == 2` while expecting external → fail-safe path (5.3), reported as outcome `failsafe`.
-   - `0x6000`: read == written. `0x6011`: read == written.
-6. Outcome → `WriteResult(ok | mismatch | error(message) | timeout | unsupported | failsafe)` fed back into `RoomLogic`.
-
-Retry policy (in `RoomLogic`): on `mismatch`, `error`, `timeout` increment `attempts[attribute]`; if `< max_attempts` schedule the same logical write after backoff `[5, 15, 45][min(n−1, 2)]` s; otherwise mark TRV `error` and emit `RaiseIssue` + `FireEvent(write_failed)`. `unsupported` never retries; it raises the firmware issue. A newer logical write for the same TRV/attribute supersedes a pending retry (latest value wins).
-
-Isolation: attempts, backoff and health are per TRV. A failing TRV never blocks writes to the other TRVs of the room; the serial worker simply moves on after each outcome.
-
-## 7. Error reporting
+## 5. Errors and visibility
 
 | Channel | When | Details |
 |---|---|---|
-| Repairs issue `trv_unreachable_<ieee>` | TRV reaches `max_attempts` for any attribute | `is_fixable=False`, `severity=ERROR`, `is_persistent=False`, placeholders `room`, `trv`, `attribute`, `attempts`, `error`; text tells the user to check battery, Zigbee range, or re-pair. Deleted on the next verified write to that TRV. |
-| Repairs issue `trv_firmware_<ieee>` | `UNSUPPORTED_ATTRIBUTE` or firmware gate fails | `severity=WARNING`, placeholders `trv`, `attribute`, `required`, `installed`. Deleted when the attribute later verifies. |
-| Repairs issue `zha_api_incompatible` | adapter import/lookup fails at setup | `severity=ERROR`; setup raises `ConfigEntryNotReady`. Deleted on successful setup. |
-| Bus events | `easy_trv_write_failed`, `easy_trv_recovered`, `easy_trv_failsafe_detected` | Payload: `room`, `room_id` (subentry id), `trv_entity_id`, `ieee`, and for failures `attribute`, `attempts`, `error`. For automations/notifications. |
-| Room status sensor | always | see §8 |
-| Log | once per transition | `warning` on TRV OK→error, `info` on error→OK and on fail-safe detection, `debug` decision log for every evaluation ("sensor X 21.3 °C, delta 0.2 ≥ 0.1 → write") |
+| Repairs `trv_unreachable_<ieee>` | `max_attempts` exhausted | `severity=ERROR`, not fixable, placeholders `room`, `trv`, `attribute`, `attempts`, `error`, actionable text (battery, range, re-pair). Deleted on the next verified operation for that thermostat; then event `recovered`. |
+| Repairs `trv_firmware_<ieee>` | capability/profile minimum not met or `UNSUPPORTED_ATTRIBUTE` | `severity=WARNING`, placeholders `trv`, `capability`, `required`, `installed`. Deleted when the capability later verifies. |
+| Repairs `zha_api_incompatible` | adapter cannot be constructed | `severity=ERROR`; setup raises `ConfigEntryNotReady`. |
+| Events | `easy_trv_write_failed`, `easy_trv_recovered`, `easy_trv_failsafe_detected` | payload `room`, `room_id`, `trv_entity_id`, `ieee`, plus `attribute`, `attempts`, `error` for failures |
+| Log | once per transition | warning OK→error, info error→OK and fail-safe; debug decision log per evaluation |
+| Status sensor | always | one per room device (`identifiers={(DOMAIN, subentry_id)}`): `sensor`, `device_class=ENUM`, options `ok`/`degraded`/`error`, `EntityCategory.DIAGNOSTIC`, `has_entity_name`, `unique_id=f"{subentry_id}_status"`. `ok`: all thermostats ok and (if sensors configured) external active. `degraded`: no usable sensor though configured, any thermostat unavailable/unsupported, or fail-safe within the last refresh period. `error`: any thermostat in error. Attributes, written only on change: `active_sensor`, `source`, `trv_health`, `last_error`. |
+| Diagnostics | on download | options, every room config and full `RoomState` including timestamps and attempt counters |
 
-No `persistent_notification`. No entity per error.
+No `persistent_notification`, no entity per error, no entities besides the status sensor.
 
-## 8. Entities and devices
+## 6. Tests and tooling
 
-- One **device** per room (`identifiers={(DOMAIN, subentry_id)}`, name = room title, manufacturer "Easy TRV"), registered with `config_subentry_id`.
-- One **sensor** per room: `translation_key="room_status"`, `device_class=ENUM`, `options=["ok","degraded","error"]`, `entity_category=DIAGNOSTIC`, `has_entity_name=True`, `unique_id=f"{subentry_id}_status"`, `should_poll=False`.
-  - `ok`: every TRV healthy (or paused by user choice) and, if sensors are configured, an external source is active.
-  - `degraded`: no usable sensor although sensors are configured, or any TRV unavailable, or a fail-safe was seen within the last heartbeat period.
-  - `error`: any TRV in `error`.
-  - Attributes, written only when they change: `active_sensor`, `source`, `trv_health` (map entity_id → health), `last_error`. No timestamps in attributes (recorder bloat); they live in diagnostics.
-- **Diagnostics** (`diagnostics.py`): entry options, every room's config and full `RoomState` including timestamps and attempt counters. Nothing to redact.
-- No other entities. Explicitly no `climate`, `number`, `switch`, `button`.
-
-## 9. Testing strategy
-
-| Layer | Tooling | What |
+| Layer | Tooling | Coverage |
 |---|---|---|
-| `core/` | plain pytest, no HA | table-driven cases for sensor selection (priority, stale, unit, range), every transition in §5.3, retry/backoff counting, fail-safe path, pause/resume, profile gating |
-| controller | `pytest-homeassistant-custom-component` (pinned to HA 2026.10.x), `FakeGateway`, `freezer` + `async_fire_time_changed` | end-to-end through HA states: set sensor states, advance time, assert gateway calls and their order; verify serial execution; Repairs issues raised/cleared; events fired; status sensor states and attributes |
-| config flow | same | create entry, add/reconfigure/remove room subentry, validation errors, options flow, prefill from area |
-| device | manual checklist in `docs/testing-on-device.md` | run on Oliver's four TRVs: write/read-back values, fail-safe after 2 h without writes, spikes S1–S3 |
+| core + profiles | plain pytest | sensor selection (priority, timeout, unit, range), every row of §3, retry counting, fail-safe routing, profile planning and firmware gating, value rounding/encoding |
+| controller | `pytest-homeassistant-custom-component` pinned to HA 2026.10.x, `FakeGateway`, `freezer` + `async_fire_time_changed` | HA states in → gateway calls out, in order; serial worker; issues raised/cleared; events; status sensor |
+| config flow | same | entry, room from area / custom, validation errors, reconfigure, options |
+| device | `docs/testing-on-device.md` | manual checklist on Oliver's four thermostats, spikes S1–S4 |
 
-Target: ≥ 95 % coverage on `core/` and `controller.py`; CI runs ruff (check + format), mypy strict for `core/` and `adapters/`, pytest, hassfest and the HACS action.
+Tooling: start from `ludeeus/integration_blueprint` (trimmed), `pyproject.toml` + `uv`, Ruff, mypy strict for `core/`, `profiles/`, `adapters/`, GitHub Actions (hassfest, HACS action, lint, tests), `hacs.json` with `homeassistant: "2026.8.0"`, `manifest.json` with `dependencies: ["zha"]`, `integration_type: hub`, `iot_class: local_push`, `single_config_entry: true`. Target ≥ 95 % coverage on `core/`, `profiles/`, `controller.py`.
 
-## 10. Project skeleton and tooling
-
-- Start from `ludeeus/integration_blueprint` (current, HA ≥ 2026.6.4, Python 3.14, Ruff, hassfest + HACS workflows); remove its sample API/coordinator/entities.
-- `pyproject.toml` with `uv` dependency groups (`dev`: `pytest-homeassistant-custom-component==<matching 2026.10.x>`, `ruff`, `mypy`). `asyncio_mode = "auto"`.
-- `manifest.json`: `domain easy_trv`, `name "Easy TRV"`, `version 0.1.0`, `config_flow true`, `single_config_entry true`, `dependencies ["zha"]`, `integration_type "hub"`, `iot_class "local_push"`, `codeowners ["@ImSorry99"]`, `loggers ["custom_components.easy_trv"]`, `requirements []`.
-- `hacs.json`: `name "Easy TRV"`, `homeassistant "2026.8.0"`, `render_readme true`.
-- `quality_scale.yaml` tracking Bronze/Silver rules plus Gold `diagnostics`, `entity-category`, `entity-translations`, `repair-issues`, `reconfiguration-flow`, `devices`.
-- Repo docs: `README.md` (English, user-facing), `docs/specs/` (this file and successors), `docs/plans/` (implementation plans), `docs/research/`, `docs/adr/` (from the first contested decision on), `docs/testing-on-device.md`.
-- Git: `main` branch, conventional commits, GitHub `ImSorry99/easy-trv`, releases tagged `vX.Y.Z` for HACS.
-
-## 11. Spikes to run on real hardware before or during implementation
-
-| Id | Question | Why it matters | Method |
-|---|---|---|---|
-| S1 | Does a write to `0x600D` switch a TRV that is `off` back on? | Decides whether `pause_when_off` stays default on | Switch one TRV off in HA, write a value via the ZHA device page ("Manage Zigbee device" → cluster 0xFC11), observe `hvac_mode` |
-| S2 | Does the TRV *report* `0x600E = 2` on fail-safe, or only answer reads? | If it reports, the controller can react immediately via an attribute listener; otherwise the heartbeat read is the detection | Stop writes for > 2 h, watch ZHA debug log / quirk switch state, then read raw |
-| S3 | Does the built-in open-window detection trigger at all while the external source is active and the hygrometer reports slowly? | Validates the Phase 1 window decision; if it never triggers, window contacts move up the roadmap | Open a window with external source active, watch `hvac_action`/display "OP" |
-| S4 | Confirm endpoint 1 and the exact raw read-back values for `0x600D` after a write (does the device round?) | Verification compares exact ints | Write 2135 and 2140, read back |
-
-## 12. Decisions (short log)
+## 7. Decisions
 
 | # | Decision | Reason |
 |---|---|---|
-| D1 | Process: Superpowers (brainstorm → spec → plan → TDD); planning notes in the Obsidian vault | Oliver's choice; already in the flow; vault is the planning source per his tool-docs rule |
-| D2 | Name `Easy TRV`, domain `easy_trv` | Oliver's suggestion |
-| D3 | No climate entity, no regulation | Core of the idea; existing solutions are judged bloated |
-| D4 | Windows in Phase 1 = device detection flag only | TRVZB has no window input; sensors move to the roadmap ("if it is not enough, we adapt") |
-| D5 | Direct ZHA adapter for write and read-back | Only path that sees the fail-safe state; small surface, encapsulated |
-| D6 | Exactly one diagnostic status sensor per room | Visibility without entity clutter |
-| D7 | One entry + room subentries | HA-native room UI, global options once |
-| D8 | Event-driven + tick, pure core logic | Nothing to poll; testability |
-| D9 | `pause_when_off` default on, pending S1 | Avoid waking a TRV the user switched off |
-| D10 | ZHA + TRVZB only, officially | Attribute-level integration is device specific by nature |
-| D11 | Ship no quirk | Built-in quirk is complete; a second one conflicts |
+| D1 | Superpowers process; planning notes in the vault, technical docs in the repo | Oliver's choice and his tool-docs rule |
+| D2 | Name `Easy TRV`, domain `easy_trv` | Oliver |
+| D3 | No climate entity, no regulation | Principle P1/P3 |
+| D4 | Profile layer between room logic and device | Principle P2; native first with a fallback path that does not touch the core |
+| D5 | Phase 1 window handling = device detection flag | TRVZB has no window input; contacts move to the roadmap |
+| D6 | Direct ZHA adapter for write and read-back | Only path that sees the fail-safe; small surface, encapsulated |
+| D7 | One status sensor per room | Visibility without clutter |
+| D8 | One entry + room subentries, rooms from areas or custom | HA-native UI, matches how Oliver organises rooms |
+| D9 | Writes independent of HVAC mode | Requirement T6; spike S1 watches for side effects |
+| D10 | ZHA + TRVZB only, officially | Profiles are device specific by nature |
+| D11 | No own quirk | Built-in quirk is complete; a second one conflicts |
 | D12 | Minimum HA 2026.8.0 | Device-registry rules for one device per subentry |
-
-## 13. Roadmap pointer
-
-The ordered roadmap (window contacts, presence, room setpoint without a climate entity, native weekly schedules, profiles, outdoor cut-off, adaptive-mode switch, learning) lives in the vault note `Easy TRV — Wünsche & TODO`. Each roadmap item gets its own spec in `docs/specs/` before implementation.
