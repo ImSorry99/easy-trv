@@ -15,3 +15,5 @@ htmlcov/
 .claude/
 # Superpowers plan workspaces (scratch)
 .superpowers/
+# uv cache kept inside the repo (sandbox cannot write the default location)
+.uv-cache/
