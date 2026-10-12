@@ -13,3 +13,5 @@ htmlcov/
 .vscode/
 # Claude session artefacts
 .claude/
+# Superpowers plan workspaces (scratch)
+.superpowers/
