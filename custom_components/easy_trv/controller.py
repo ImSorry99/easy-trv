@@ -255,6 +255,12 @@ class RoomController:
         self._worker_task = self._hass.async_create_background_task(
             self._worker(), f"easy_trv room {config.name}"
         )
+        # The state starts fresh, so issues from before a reload (a re-paired or
+        # updated thermostat, say) are stale. Whatever still holds is raised
+        # again by the first operations.
+        for trv in config.trvs:
+            issues.clear_unreachable(self._hass, trv.ieee)
+            issues.clear_firmware(self._hass, trv.ieee)
         self._dispatch(
             Start(
                 sensors=tuple(

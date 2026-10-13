@@ -91,8 +91,8 @@ Attributes:
 
 | Issue | Severity | Raised when | Cleared |
 |---|---|---|---|
-| `trv_unreachable` | Error | A thermostat did not accept a write after all attempts. Check battery and Zigbee signal. | On the next verified write. |
-| `trv_firmware` | Warning | The thermostat's firmware is too old for a capability (for example hysteresis below 1.3.0). | After a firmware update and a restart of Home Assistant. |
+| `trv_unreachable` | Error | A thermostat did not accept a write after all attempts. Check battery and Zigbee signal. | On the next verified write, or when the integration is reloaded. |
+| `trv_firmware` | Warning | The thermostat's firmware is too old for a capability (for example hysteresis below 1.3.0). | After a firmware update and a reload of the integration. |
 | `zha_api_incompatible` | Error | Easy TRV cannot use the installed ZHA's internal API. Setup is retried. | When setup works. |
 | `profile_invalid` | Warning | A user profile file is invalid and is ignored. The issue names the file and the problem. | When the file loads cleanly after you fix it and reload the integration. |
 

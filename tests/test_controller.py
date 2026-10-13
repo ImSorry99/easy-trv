@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
+from custom_components.easy_trv import issues
 from custom_components.easy_trv.const import (
     DOMAIN,
     EVENT_FAILSAFE,
@@ -370,6 +371,27 @@ async def test_recovery_clears_the_unreachable_issue(
     assert controller.status == RoomStatus.OK
     assert issue(hass, "trv_unreachable_0011") is None
     assert [e.data["trv_entity_id"] for e in recovered] == ["climate.a"]
+
+
+async def test_start_clears_stale_thermostat_issues(hass, controller, gateway) -> None:
+    # Issues left over from before a reload: the controller starts from a fresh
+    # state, so it must not inherit them (a still-valid problem is raised again
+    # by the first operations).
+    placeholders = {"room": "Living", "trv": "climate.a", "attribute": "x"}
+    for ieee in (IEEE_A, IEEE_B, "00:99"):
+        issues.raise_unreachable(hass, ieee, placeholders)
+        issues.raise_firmware(hass, ieee, placeholders)
+
+    await controller.async_start()
+
+    # Cleared by the start itself, before the worker has written anything.
+    assert gateway.writes == []
+    for ieee in ("0011", "0022"):
+        assert issue(hass, f"trv_unreachable_{ieee}") is None
+        assert issue(hass, f"trv_firmware_{ieee}") is None
+    # A thermostat of another room keeps its issues.
+    assert issue(hass, "trv_unreachable_0099") is not None
+    assert issue(hass, "trv_firmware_0099") is not None
 
 
 def with_source_signals(profile, signals):

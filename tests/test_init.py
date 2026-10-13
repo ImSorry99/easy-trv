@@ -317,6 +317,27 @@ async def test_adding_a_room_reloads_and_adds_its_status_sensor(
 # --- Unload ---------------------------------------------------------------
 
 
+async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
+    hass, freezer, entry, fake_gateway
+) -> None:
+    # The thermostat never confirms the value: three attempts, then an error.
+    fake_gateway.read_override[("00:11", VALUE)] = 2000
+    await start(hass, entry)
+    await advance(hass, freezer, 25)
+    issues_registry = ir.async_get(hass)
+    assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is not None
+    assert hass.states.get("sensor.living_status").state == "error"
+
+    # Re-paired or fixed: the thermostat answers again, the entry is reloaded.
+    del fake_gateway.read_override[("00:11", VALUE)]
+    await hass.config_entries.async_reload(entry.entry_id)
+    await settle(hass)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is None
+    assert hass.states.get("sensor.living_status").state == "ok"
+
+
 async def test_unload_stops_the_controllers(hass, freezer, entry, fake_gateway) -> None:
     await start(hass, entry)
     fake_gateway.writes.clear()
