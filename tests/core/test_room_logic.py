@@ -1192,6 +1192,45 @@ def test_an_unavailable_thermostat_is_not_sent_the_failed_capability() -> None:
     assert executes(cmds) == [("climate.b", SetRoomTemperature(21.3))]
 
 
+def test_an_exhausted_value_write_does_not_postpone_the_failed_capability() -> None:
+    st = errored_on(SetSource("external"))
+    # The value keeps failing as well and gives up just before the refresh.
+    at = T0 + timedelta(minutes=19)
+    for _ in range(3):
+        st, _ = logic().handle(result("climate.a", TEMP, Failed("busy")), at, st)
+    assert st.trvs["climate.a"].error_capability == "source"
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert ("climate.a", SetSource("external")) in executes(cmds)
+
+
+def test_a_capability_is_not_sent_again_while_its_retry_is_pending() -> None:
+    st = errored_on(SetSource("external"))
+    st, _ = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    late = T0 + timedelta(minutes=39, seconds=50)
+    st, _ = logic().handle(
+        result("climate.a", SetSource("external"), Failed("busy")), late, st
+    )
+    assert "source" in st.trvs["climate.a"].pending_retry
+    st, cmds = logic().handle(Tick(), T0 + timedelta(minutes=40), st)
+    assert ("climate.a", SetSource("external")) not in executes(cmds)
+    assert st.trvs["climate.a"].attempts["source"] == 1
+
+
+def test_a_capability_is_not_sent_again_while_its_retries_are_running() -> None:
+    st = errored_on(SetSource("external"))
+    st, _ = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    late = T0 + timedelta(minutes=39, seconds=50)
+    st, _ = logic().handle(
+        result("climate.a", SetSource("external"), Failed("busy")), late, st
+    )
+    st, cmds = logic().handle(RetryDue("climate.a", "source"), late, st)
+    assert executes(cmds) == [("climate.a", SetSource("external"))]
+    assert "source" not in st.trvs["climate.a"].pending_retry
+    st, cmds = logic().handle(Tick(), T0 + timedelta(minutes=40), st)
+    assert ("climate.a", SetSource("external")) not in executes(cmds)
+    assert st.trvs["climate.a"].attempts["source"] == 1
+
+
 def test_a_failed_source_write_is_sent_again_while_the_room_is_on_its_own_sensor() -> (
     None
 ):

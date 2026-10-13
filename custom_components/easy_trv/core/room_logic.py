@@ -347,14 +347,13 @@ class RoomLogic:
                 ScheduleRetry(trv, capability, delay)
             ]
         reported = self._reported(current)
-        updated = replace(
-            updated,
-            health=TrvHealth.ERROR,
-            last_error=error,
-            last_error_retry=now,
-        )
+        updated = replace(updated, health=TrvHealth.ERROR, last_error=error)
         if not reported:
             updated = replace(updated, error_capability=capability)
+        if updated.error_capability == capability:
+            # Only the reported capability moves the clock: another write that
+            # keeps failing must not postpone the one that is sent again.
+            updated = replace(updated, last_error_retry=now)
         if isinstance(event.intent, (SetWindowDetection, SetHysteresis)):
             # The setting never arrived: apply it again on the next resync.
             updated = replace(updated, settings_applied=False)
@@ -558,6 +557,7 @@ class RoomLogic:
             current = trvs[trv]
             capability = current.error_capability
             intent = intents.get(capability) if capability is not None else None
+            attempts = current.attempts.get(capability, 0) if capability else 0
             if (
                 current.health is not TrvHealth.ERROR
                 or capability is None
@@ -566,6 +566,9 @@ class RoomLogic:
                     current.last_error_retry is not None
                     and now - current.last_error_retry < self._params.refresh
                 )
+                # A chain of retries is still running: let it finish first.
+                or capability in current.pending_retry
+                or 0 < attempts < self._params.max_attempts
             ):
                 continue
             trvs[trv] = replace(
