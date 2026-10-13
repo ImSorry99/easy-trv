@@ -73,6 +73,14 @@ def test_every_flow_error_and_abort_is_translated(path: Path) -> None:
     assert set(data["config"]["abort"]) == {"single_instance_allowed"}
 
 
+@pytest.mark.parametrize("path", [STRINGS, EN, DE])
+def test_room_subentry_has_no_title_string(path: Path) -> None:
+    # hassfest only tolerates this key for custom integrations, with a warning.
+    room = load(path)["config_subentries"]["room"]
+    assert "title" not in room
+    assert "entry_type" in room
+
+
 @pytest.mark.parametrize("path", [EN, DE])
 def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     data = load(path)

@@ -505,6 +505,30 @@ async def test_room_rejects_non_zha_and_unmatched_profile(hass, entry) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_rejects_a_zha_entity_that_is_not_a_thermostat(hass, entry) -> None:
+    # The entity picker only filters in the browser; a posted switch of a ZHA
+    # thermostat's device must not pass for a thermostat.
+    device = dr.async_get(hass).async_get(
+        er.async_get(hass).async_get("climate.a").device_id
+    )
+    add_entity(hass, "switch.a_child_lock", "zha", device=device)
+
+    result = await open_entities_step(hass, entry)
+    flow_id = result["flow_id"]
+    result = await room_flows(hass).async_configure(
+        flow_id, entities_input(trvs=["switch.a_child_lock"])
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"trvs": "not_zha"}
+
+    result = await room_flows(hass).async_configure(
+        flow_id, entities_input(trvs=["climate.a", "switch.a_child_lock"])
+    )
+    assert result["errors"] == {"trvs": "not_zha"}
+    assert not entry.subentries
+
+
 @pytest.mark.usefixtures("area_with_trvs", "foreign_trvs")
 async def test_room_with_a_user_profile_for_a_foreign_model(
     hass, tmp_path, entry

@@ -70,6 +70,8 @@ if TYPE_CHECKING:
 
     from custom_components.easy_trv.profiles.engine import Profile
 
+CLIMATE_DOMAIN: Final = "climate"
+
 WINDOW_DETECTION_OPTIONS: Final = ("on", "off", "leave")
 # The values double as translation keys, which must not contain a dot: 0_4 = 0.4 K.
 HYSTERESIS_OPTIONS: Final = ("leave", "0_2", "0_4", "0_6", "0_8", "1_0")
@@ -131,7 +133,7 @@ def prefill_from_area(hass: HomeAssistant, area_id: str) -> dict[str, list[str]]
     trvs = [
         entry
         for entry in entries.values()
-        if entry.domain == "climate" and entry.platform == ZHA_DOMAIN
+        if entry.domain == CLIMATE_DOMAIN and entry.platform == ZHA_DOMAIN
     ]
     trv_devices = {entry.device_id for entry in trvs if entry.device_id is not None}
 
@@ -192,6 +194,10 @@ def validate_room(
 
     refs: list[DeviceRef] = []
     for entity_id in trvs:
+        # The entity picker only filters in the browser, so a posted entity can
+        # be any ZHA entity (a switch of a thermostat, for instance).
+        if entity_id.partition(".")[0] != CLIMATE_DOMAIN:
+            return {CONF_TRVS: _ERR_NOT_ZHA}
         try:
             refs.append(resolve_device(hass, entity_id))
         except NotZhaEntity:
@@ -221,7 +227,7 @@ def _entity_fields(profiles: Mapping[str, Profile]) -> dict[Any, Any]:
         vol.Required(CONF_TRVS): EntitySelector(
             EntitySelectorConfig(
                 multiple=True,
-                filter=[{"integration": ZHA_DOMAIN, "domain": "climate"}],
+                filter=[{"integration": ZHA_DOMAIN, "domain": CLIMATE_DOMAIN}],
             )
         ),
         vol.Optional(CONF_TEMP_SENSORS, default=[]): EntitySelector(
@@ -329,7 +335,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
             {
                 vol.Required(CONF_AREA): AreaSelector(
                     AreaSelectorConfig(
-                        entity=[{"integration": ZHA_DOMAIN, "domain": "climate"}]
+                        entity=[{"integration": ZHA_DOMAIN, "domain": CLIMATE_DOMAIN}]
                     )
                 )
             }
