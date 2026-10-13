@@ -204,14 +204,15 @@ class RoomLogic:
         return self._write_value(state, active, now)
 
     def _on_tick(self, now: datetime, state: RoomState) -> _Step:
-        """Handle sensor timeouts, then refresh the value if it is due."""
+        """Handle sensor timeouts, then resend what is due: failed writes, the value."""
         before_source = state.source
         before_sensor = state.active_sensor
         state, commands = self._reconcile_source(state, now)
         if state.source is not before_source:
             return state, commands
+        state, retries = self._retry_failed(state, now)
         state, refresh = self._refresh(state, now)
-        commands = [*commands, *refresh]
+        commands = [*commands, *retries, *refresh]
         if not refresh and state.active_sensor != before_sensor:
             # A lower-priority sensor took over; its value may differ.
             state, debounce = self._debounce_if_changed(state, now)
@@ -259,14 +260,14 @@ class RoomLogic:
             case Ok():
                 return self._on_ok(event, now, state)
             case Failed() | Mismatch():
-                return self._on_failure(event, outcome, state)
+                return self._on_failure(event, outcome, now, state)
             case Unsupported():
                 return self._on_unsupported(event, outcome, state)
             case Signal(name="failsafe") if isinstance(event.intent, SetSource):
                 # The read-back of the re-enable write itself: not a new
                 # fail-safe, otherwise a thermostat that stays in fail-safe
                 # would be re-enabled again and again.
-                return self._on_failure(event, outcome, state)
+                return self._on_failure(event, outcome, now, state)
             case Signal():
                 return self._on_signal(event, outcome, now, state)
             case _:
@@ -322,6 +323,7 @@ class RoomLogic:
         self,
         event: OperationResult,
         outcome: Failed | Mismatch | Signal,
+        now: datetime,
         state: RoomState,
     ) -> _Step:
         """Count the failed attempt, then retry with backoff or give up."""
@@ -345,7 +347,12 @@ class RoomLogic:
                 ScheduleRetry(trv, capability, delay)
             ]
         reported = self._reported(current)
-        updated = replace(updated, health=TrvHealth.ERROR, last_error=error)
+        updated = replace(
+            updated,
+            health=TrvHealth.ERROR,
+            last_error=error,
+            last_error_retry=now,
+        )
         if not reported:
             updated = replace(updated, error_capability=capability)
         if isinstance(event.intent, (SetWindowDetection, SetHysteresis)):
@@ -534,6 +541,54 @@ class RoomLogic:
         if active is None:
             return state, []
         return self._write_value(state, active, now)
+
+    def _retry_failed(self, state: RoomState, now: datetime) -> _Step:
+        """Send a capability again that a thermostat gave up on.
+
+        Only the room temperature is refreshed on its own; the source and the
+        settings are otherwise written when something changes. A thermostat in
+        error on one of them would stay there, so once per ``refresh`` the write
+        that raised the error is issued again with a fresh set of attempts. The
+        value write that follows in the same tick covers an error on the value.
+        """
+        intents = self._reissuable(state)
+        trvs = dict(state.trvs)
+        commands: list[Command] = []
+        for trv in self._writable(state):
+            current = trvs[trv]
+            capability = current.error_capability
+            intent = intents.get(capability) if capability is not None else None
+            if (
+                current.health is not TrvHealth.ERROR
+                or capability is None
+                or intent is None
+                or (
+                    current.last_error_retry is not None
+                    and now - current.last_error_retry < self._params.refresh
+                )
+            ):
+                continue
+            trvs[trv] = replace(
+                current,
+                attempts=_without(current.attempts, capability),
+                pending_retry=_without(current.pending_retry, capability),
+                last_error_retry=now,
+            )
+            commands.append(Execute(trv, intent))
+        return replace(state, trvs=trvs), commands
+
+    def _reissuable(self, state: RoomState) -> dict[str, Intent]:
+        """Map each capability the room writes besides the value to its intent."""
+        intents: list[Intent] = []
+        if state.source is Source.EXTERNAL:
+            intents.append(SetSource("external"))
+        elif state.source is Source.INTERNAL:
+            intents.append(SetSource("internal"))
+        if self._cfg.window_detection != "leave":
+            intents.append(SetWindowDetection(self._cfg.window_detection == "on"))
+        if self._cfg.hysteresis is not None:
+            intents.append(SetHysteresis(self._cfg.hysteresis))
+        return {self._capability_of(intent): intent for intent in intents}
 
     def _resync_trv(self, state: RoomState, now: datetime, trv: str) -> _Step:
         """Bring a returning thermostat in line with the room's current state."""

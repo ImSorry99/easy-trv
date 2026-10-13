@@ -167,6 +167,7 @@ class TrvState:
     pending_retry: Mapping[str, Intent] = field(default_factory=dict)
     last_error: str | None = None
     error_capability: str | None = None
+    last_error_retry: datetime | None = None
     failsafe_seen_at: datetime | None = None
     unsupported: frozenset[str] = frozenset()
     settings_applied: bool = False

@@ -246,6 +246,41 @@ async def test_one_unresolvable_room_leaves_the_other_rooms_running(
     assert hass.states.get("sensor.bedroom_status").state == "ok"
 
 
+@pytest.mark.parametrize(
+    ("overrides", "fragment"),
+    [
+        ({"hysteresis": "garbage"}, "garbage"),  # ValueError
+        ({"trvs": None}, "TypeError"),
+        ({"trvs": ...}, "KeyError"),  # the key is missing altogether
+    ],
+)
+async def test_a_room_with_corrupt_data_is_skipped_like_an_unresolvable_one(
+    hass, overrides, fragment
+) -> None:
+    bedroom = room_data("Bedroom", trvs=["climate.b"], temp_sensors=["sensor.t2"])
+    for key, value in overrides.items():
+        if value is ...:
+            del bedroom[key]
+        else:
+            bedroom[key] = value
+    entry = make_entry(
+        hass, [room_data("Living", trvs=["climate.a"]), bedroom], FAST_OPTIONS
+    )
+
+    await start(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    living, broken = subentry_of(entry, "Living"), subentry_of(entry, "Bedroom")
+    assert entry.runtime_data.rooms.keys() == {living.subentry_id}
+    assert hass.states.get("sensor.living_status").state == "ok"
+    assert hass.states.get("sensor.bedroom_status") is None
+    issue = room_issue(hass, broken.subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders["room"] == "Bedroom"
+    assert fragment in issue.translation_placeholders["error"]
+    assert room_issue(hass, living.subentry_id) is None
+
+
 async def test_a_room_that_works_again_loses_its_issue_on_reload(
     hass, fake_gateway
 ) -> None:

@@ -169,6 +169,13 @@ def _resolve_thermostats(
     return refs
 
 
+def _describe_room_error(err: Exception) -> str:
+    """Return the text of a room's setup problem for the log and the issue."""
+    if isinstance(err, ConfigEntryError):
+        return str(err)
+    return f"invalid room data: {type(err).__name__}: {err}"
+
+
 def _build_room(
     hass: HomeAssistant,
     subentry: ConfigSubentry,
@@ -216,11 +223,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
             controller, profile = _build_room(
                 hass, subentry, params, gateway, profiles.profiles
             )
-        except ConfigEntryError as err:
+        except (ConfigEntryError, ValueError, KeyError, TypeError) as err:
             # One room that cannot be set up must not take the others down.
-            _LOGGER.warning("Room %s could not be set up: %s", subentry.title, err)
+            # The stored data of a room can be corrupt (a missing key, a value
+            # of the wrong type): that is the same kind of room problem.
+            problem = _describe_room_error(err)
+            _LOGGER.warning(
+                "Room %s could not be set up: %s",
+                subentry.title,
+                problem,
+                exc_info=not isinstance(err, ConfigEntryError),
+            )
             issues.raise_room_invalid(
-                hass, subentry.subentry_id, subentry.title, str(err)
+                hass, subentry.subentry_id, subentry.title, problem
             )
             invalid.add(subentry.subentry_id)
             continue

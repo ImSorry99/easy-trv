@@ -609,6 +609,30 @@ async def test_unsupported_attribute_raises_a_firmware_issue_without_retrying(
     assert controller.status == RoomStatus.DEGRADED
 
 
+async def test_a_failed_setting_is_sent_again_and_the_issue_resolves_itself(
+    hass, freezer, make_controller, gateway
+) -> None:
+    gateway.read_override[(IEEE_A, HYSTERESIS)] = 0
+    controller = make_controller()
+    await controller.async_start()
+    await advance(hass, freezer, 25)
+    raised = issue(hass, "trv_unreachable_0011")
+    assert raised is not None
+    assert raised.translation_placeholders["attribute"] == "hysteresis"
+    assert health(controller)["climate.a"] == "error"
+
+    # The thermostat accepts the setting again; nothing but the refresh interval
+    # makes Easy TRV try it once more.
+    del gateway.read_override[(IEEE_A, HYSTERESIS)]
+    recovered = async_capture_events(hass, EVENT_RECOVERED)
+    await advance(hass, freezer, 1260, step=60)
+
+    assert issue(hass, "trv_unreachable_0011") is None
+    assert len(recovered) == 1
+    assert health(controller) == {"climate.a": "ok", "climate.b": "ok"}
+    assert controller.status == RoomStatus.OK
+
+
 @pytest.mark.parametrize("scenario", ["unavailable", "unknown"])
 async def test_unreachable_device_is_a_failed_outcome(
     hass, freezer, make_controller, gateway, scenario

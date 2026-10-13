@@ -108,7 +108,7 @@
   "issues": {
     "trv_unreachable": {
       "title": "Thermostat {trv} in {room} is not responding",
-      "description": "Easy TRV could not set \"{attribute}\" on {trv} in {room} after {attempts} attempts. Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{attribute}\" to the thermostat has been verified. Settings are sent again when the thermostat returns after being unavailable and when the integration is reloaded."
+      "description": "Easy TRV could not set \"{attribute}\" on {trv} in {room} after {attempts} attempts. Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{attribute}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
     },
     "trv_firmware": {
       "title": "Thermostat {trv} lacks a firmware feature",

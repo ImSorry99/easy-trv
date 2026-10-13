@@ -1101,6 +1101,155 @@ def test_a_late_failure_after_error_and_outage_is_not_reported_again() -> None:
     assert st.trvs["climate.a"].error_capability == "room_temperature"
 
 
+# --- A failed capability is sent again at the refresh interval --------------
+
+SEND_AGAIN = [
+    (SetSource("external"), "source"),
+    (SetWindowDetection(enabled=True), "window_detection"),
+    (HYSTERESIS, "hysteresis"),
+]
+
+
+def errored_on(intent: Intent, trv: str = "climate.a") -> RoomState:
+    """Return a started room whose ``trv`` failed ``intent`` three times."""
+    st, _ = started()
+    for _ in range(3):
+        st, _ = logic().handle(result(trv, intent, Failed("busy")), T0, st)
+    return st
+
+
+@pytest.mark.parametrize(("intent", "capability"), SEND_AGAIN)
+def test_a_failed_capability_is_sent_again_before_the_value_at_the_refresh_interval(
+    intent: Intent, capability: str
+) -> None:
+    st = errored_on(intent)
+    assert st.trvs["climate.a"].error_capability == capability
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=19), st)
+    assert executes(cmds) == []
+
+    st, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert executes(cmds) == [
+        ("climate.a", intent),
+        ("climate.a", SetRoomTemperature(21.3)),
+        ("climate.b", SetRoomTemperature(21.3)),
+    ]
+    trv = st.trvs["climate.a"]
+    assert capability not in trv.attempts
+    assert capability not in trv.pending_retry
+    assert trv.health == TrvHealth.ERROR
+    # The refresh interval is the floor, not every tick.
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=21), st)
+    assert executes(cmds) == []
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=40), st)
+    assert ("climate.a", intent) in executes(cmds)
+
+
+@pytest.mark.parametrize(("intent", "capability"), SEND_AGAIN)
+def test_the_sent_again_capability_gets_a_fresh_set_of_attempts(
+    intent: Intent, capability: str
+) -> None:
+    st = errored_on(intent)
+    st, _ = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    at = T0 + timedelta(minutes=20)
+    st, cmds = logic().handle(result("climate.a", intent, Failed("busy")), at, st)
+    # Retried with the backoff instead of giving up at once.
+    assert of_type(cmds, ScheduleRetry) == [ScheduleRetry("climate.a", capability, 5.0)]
+    assert not any(isinstance(c, (RaiseIssue, FireEvent)) for c in cmds)
+
+
+@pytest.mark.parametrize("intent", [intent for intent, _ in SEND_AGAIN])
+def test_the_sent_again_capability_ends_the_error_when_it_verifies(
+    intent: Intent,
+) -> None:
+    st = errored_on(intent)
+    st, _ = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    at = T0 + timedelta(minutes=20)
+    st, cmds = logic().handle(result("climate.a", intent, Ok()), at, st)
+    trv = st.trvs["climate.a"]
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert (trv.health, trv.error_capability, trv.last_error) == (
+        TrvHealth.OK,
+        None,
+        None,
+    )
+    assert cmds[-1].status == RoomStatus.OK
+
+
+def test_an_error_on_the_value_capability_sends_only_the_value_again() -> None:
+    st = errored("climate.a")
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert executes(cmds) == [
+        ("climate.a", SetRoomTemperature(21.3)),
+        ("climate.b", SetRoomTemperature(21.3)),
+    ]
+
+
+def test_an_unavailable_thermostat_is_not_sent_the_failed_capability() -> None:
+    st = errored_on(SetSource("external"))
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert executes(cmds) == [("climate.b", SetRoomTemperature(21.3))]
+
+
+def test_a_failed_source_write_is_sent_again_while_the_room_is_on_its_own_sensor() -> (
+    None
+):
+    st, _ = logic().handle(
+        Start((reading("sensor.t1", None), reading("sensor.t2", None)), BOTH_AVAILABLE),
+        T0,
+        RoomState.initial(CFG),
+    )
+    assert st.source == Source.INTERNAL
+    for _ in range(3):
+        st, _ = logic().handle(
+            result("climate.a", SetSource("internal"), Failed("busy")), T0, st
+        )
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    # No value to refresh in this state, but the failed write is still retried.
+    assert executes(cmds) == [("climate.a", SetSource("internal"))]
+
+
+def test_a_failed_setting_is_sent_again_in_a_room_without_sensors() -> None:
+    cfg = replace(CFG, temp_sensors=())
+    room = RoomLogic(cfg, GlobalParams.defaults(), capability_of=capability_of)
+    st, _ = room.handle(Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg))
+    for _ in range(3):
+        st, _ = room.handle(result("climate.a", HYSTERESIS, Failed("busy")), T0, st)
+    _, cmds = room.handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert executes(cmds) == [("climate.a", HYSTERESIS)]
+
+
+@pytest.mark.parametrize(
+    ("cfg", "capability"),
+    [
+        (replace(CFG, temp_sensors=()), "source"),  # source is not managed
+        (replace(CFG, window_detection="leave"), "window_detection"),
+        (replace(CFG, hysteresis=None), "hysteresis"),
+    ],
+)
+def test_nothing_is_sent_again_for_a_capability_the_room_does_not_manage(
+    cfg: RoomConfig, capability: str
+) -> None:
+    room = RoomLogic(cfg, GlobalParams.defaults(), capability_of=capability_of)
+    st, _ = room.handle(
+        Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
+    )
+    st = with_trv(
+        st,
+        "climate.a",
+        health=TrvHealth.ERROR,
+        last_error="busy",
+        error_capability=capability,
+    )
+    _, cmds = room.handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert [
+        i
+        for t, i in executes(cmds)
+        if t == "climate.a" and not isinstance(i, SetRoomTemperature)
+    ] == []
+
+
 # --- Failed and mismatched results ---------------------------------------
 
 
