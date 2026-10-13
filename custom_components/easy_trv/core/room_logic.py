@@ -198,7 +198,7 @@ class RoomLogic:
         active = self._active(state, now)
         if active is None:
             return state, []
-        return self._write_value(state, active)
+        return self._write_value(state, active, now)
 
     def _on_tick(self, now: datetime, state: RoomState) -> _Step:
         """Handle sensor timeouts, then refresh the value if it is due."""
@@ -447,7 +447,7 @@ class RoomLogic:
                 return replace(state, active_sensor=None), []
             return self._use_internal(state)
         if state.source is not Source.EXTERNAL:
-            return self._use_external(state, active)
+            return self._use_external(state, active, now)
         return replace(state, active_sensor=active.entity_id), []
 
     def _use_internal(self, state: RoomState) -> _Step:
@@ -457,22 +457,27 @@ class RoomLogic:
         ]
         return replace(state, source=Source.INTERNAL, active_sensor=None), commands
 
-    def _use_external(self, state: RoomState, active: _Active) -> _Step:
+    def _use_external(self, state: RoomState, active: _Active, now: datetime) -> _Step:
         """Switch to the external source and send the current value at once."""
         commands: list[Command] = [
             Execute(trv, SetSource("external")) for trv in self._writable(state)
         ]
         state = replace(state, source=Source.EXTERNAL, active_sensor=active.entity_id)
-        state, value_commands = self._write_value(state, active)
+        state, value_commands = self._write_value(state, active, now)
         return state, [*commands, *value_commands]
 
-    def _write_value(self, state: RoomState, active: _Active) -> _Step:
+    def _write_value(self, state: RoomState, active: _Active, now: datetime) -> _Step:
         """Send the rounded active value to every writable thermostat."""
         celsius = round_tenth(active.value)
         commands: list[Command] = [
             Execute(trv, SetRoomTemperature(celsius)) for trv in self._writable(state)
         ]
-        state = replace(state, last_written=celsius, debounce_pending=False)
+        state = replace(
+            state,
+            last_written=celsius,
+            last_value_issued=now,
+            debounce_pending=False,
+        )
         return state, commands
 
     def _debounce_if_changed(self, state: RoomState, now: datetime) -> _Step:
@@ -484,18 +489,27 @@ class RoomLogic:
         return replace(state, debounce_pending=True), commands
 
     def _refresh(self, state: RoomState, now: datetime) -> _Step:
-        """Resend the value when the last verified write is older than ``refresh``."""
-        last = state.last_value_write
+        """Resend the value once the newest value write is older than ``refresh``.
+
+        A write counts from when it was verified or, if it never was, from when
+        it was issued, so a thermostat whose writes keep failing is retried
+        once per interval instead of never (or on every tick).
+        """
+        stamps = [
+            stamp
+            for stamp in (state.last_value_write, state.last_value_issued)
+            if stamp is not None
+        ]
         if (
             state.source is not Source.EXTERNAL
-            or last is None
-            or now - last < self._params.refresh
+            or not stamps
+            or now - max(stamps) < self._params.refresh
         ):
             return state, []
         active = self._active(state, now)
         if active is None:
             return state, []
-        return self._write_value(state, active)
+        return self._write_value(state, active, now)
 
     def _resync_trv(self, state: RoomState, now: datetime, trv: str) -> _Step:
         """Bring a returning thermostat in line with the room's current state."""

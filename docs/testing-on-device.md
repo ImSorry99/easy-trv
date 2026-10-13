@@ -28,7 +28,7 @@ A manual checklist for the first run on real hardware: Oliver's four Sonoff TRVZ
    Wohnzimmer: climate.living_trv_1 external_temperature attr 0x600D raw=2140 -> ok
    ```
 
-   That is: room, thermostat entity, capability, attribute, the raw value written, and the result (`ok`, `mismatch expected [2140] got 2000`, `failed: <error>`, `signal failsafe`). An operation that is not sent at all (firmware too old, value out of range) is logged as `... hysteresis not sent -> unsupported ...`. Filter the log for `easy_trv` or `attr 0x`.
+   That is: room, thermostat entity, capability, attribute, the raw value written, and the result (`ok`, `mismatch expected [2140] got 2000`, `failed: <error>`, `signal failsafe`). An operation that is not sent at all is logged as `... hysteresis not sent -> unsupported ...` when the firmware is too old, and as `... not sent -> failed: ...` when the value is out of range. Filter the log for `easy_trv` or `attr 0x`.
 5. Expected: the integration appears with no rooms and no Repairs issue.
 
 ## 2. Add the rooms

@@ -29,7 +29,7 @@ custom_components/easy_trv/
 
 Layers and rules:
 
-- **Core** (`core/`) is pure Python. It receives events (`Start`, `Stop`, `SensorStateChanged`, `TrvStateChanged`, `Tick`, `DebounceElapsed`, `OperationResult`) with `now` as a parameter and returns commands (`Execute(intent, trv)`, `ScheduleTimer`, `SetStatus`, `RaiseIssue`, `ClearIssue`, `FireEvent`, `Log`). No timers, no awaits.
+- **Core** (`core/`) is pure Python. It receives events (`Start`, `SensorChanged`, `TrvAvailabilityChanged`, `Tick`, `DebounceElapsed`, `RetryDue`, `OperationResult`) with `now` as a parameter and returns commands (`Execute(trv, intent)`, `ScheduleDebounce`, `ScheduleRetry`, `SetStatus`, `RaiseIssue`, `ClearIssue`, `FireEvent`, `Log`). No timers, no awaits.
 - **Profiles** (`profiles/`) are declarative YAML (see `docs/concept/profiles.md`) loaded into `Profile` objects that turn an `Intent` for one thermostat into `Operation`s (`endpoint, cluster, attribute, raw_value, verify: VerifyRule, also_read`). A `VerifyRule` is `Equals(raw)` or `OneOf({…})` plus optional `signals: {raw: SignalName}` (e.g. `{2: "failsafe"}`). Capabilities carry their own `min_firmware`. Encoders and intents are a fixed code-side vocabulary; profiles only combine them. User profiles from `<config>/easy_trv/profiles/` are loaded with `hass.async_add_executor_job` (file I/O) and validated; failures raise Repairs `profile_invalid_<file>`.
 - **Adapter** (`adapters/`) executes operations: `resolve(climate_entity_id) -> DeviceRef(ieee, manufacturer, model, firmware)`, `is_available(ieee)`, `write(ieee, op)`, `read(ieee, endpoint, cluster, [attributes]) -> dict`. `ZhaLibraryGateway` uses `homeassistant.components.zha.helpers.get_zha_gateway` / `async_get_zha_device_proxy`, `Device.write_zigbee_attribute`, `Device.async_get_cluster(...).read_attributes(..., allow_cache=False)`. Any import or lookup failure → `ConfigEntryNotReady` + Repairs issue `zha_api_incompatible`. A `FakeGateway` serves the tests.
 - **Controller** is thin: translates HA state events, runs one `asyncio.Queue` worker per room (write → wait → read → compare → `OperationResult` back into core), schedules retries and the debounce timer with `async_call_later`, registers everything on `entry.async_on_unload`. On start it clears the `trv_unreachable_*` and `trv_firmware_*` issues of its thermostats, because its state is fresh; a condition that still holds is raised again by the first operations.
@@ -50,22 +50,22 @@ Layers and rules:
 
 ## 3. Room logic
 
-State: `source` (external | internal | none), `active_sensor`, `last_written` (°C), `last_value_write` (ts of last verified value write), `debounce_pending`, per-thermostat `TrvState(health ∈ {ok, unavailable, unsupported, error}, available, attempts: dict[capability, int], pending_retry, last_error, failsafe_seen_at, unsupported: frozenset[capability], settings_applied)`. `settings_applied` is per thermostat, not per room: a thermostat that returns after being unavailable gets its settings applied then, if it has not had them yet. The thermostat's `ieee` and firmware are part of its configuration (`TrvConfig`), not of its state.
+State: `source` (external | internal | none), `active_sensor`, `last_written` (°C), `last_value_write` (ts of the last verified value write), `last_value_issued` (ts of the last value write that was sent, verified or not), `debounce_pending`, per-thermostat `TrvState(health ∈ {ok, unavailable, unsupported, error}, available, attempts: dict[capability, int], pending_retry, last_error, failsafe_seen_at, unsupported: frozenset[capability], settings_applied)`. `settings_applied` is per thermostat, not per room: a thermostat that returns after being unavailable gets its settings applied then, if it has not had them yet. The thermostat's `ieee` and firmware are part of its configuration (`TrvConfig`), not of its state.
 
 A sensor is **usable** when: state not `unavailable`/`unknown`; parses as float; unit °C (°F converted; anything else unusable, warned once); 0.0 ≤ v ≤ 99.9; and, if `sensor_timeout_minutes > 0`, `now − last_reported ≤ timeout`. Active sensor = first usable in configured order.
 
 | Trigger | Condition | Intents (per writable thermostat) |
 |---|---|---|
-| Start | — | `ApplySettings` once per thermostat (skip capabilities below firmware → issue `trv_firmware`); then, if `temp_sensors` configured: usable → `SetSource(external)`, `SetRoomTemperature`; none usable → `SetSource(internal)`. No sensors configured → source untouched. |
+| Start | — | `SetWindowDetection` and `SetHysteresis` once per thermostat, as configured (skip capabilities below firmware → issue `trv_firmware`); then, if `temp_sensors` configured: usable → `SetSource(external)`, `SetRoomTemperature`; none usable → `SetSource(internal)`. No sensors configured → source untouched. |
 | Sensor change | usable sensor and (`last_written is None` or `|v − last_written| ≥ min_delta`) | arm debounce; on `DebounceElapsed` → `SetRoomTemperature(current)` |
-| Refresh (tick) | `source == external` and `now − last_value_write ≥ refresh_minutes` | `SetRoomTemperature(current)` (same value is fine) |
+| Refresh (tick) | `source == external` and the newer of `last_value_write` / `last_value_issued` is at least `refresh_minutes` old (a value write that never verified therefore still counts from when it was sent, so a failing thermostat is retried once per interval) | `SetRoomTemperature(current)` (same value is fine) |
 | Source lost | no usable sensor, `source == external` | `SetSource(internal)` once; status degraded |
 | Source regained | usable sensor, `source != external` | `SetSource(external)`, `SetRoomTemperature` |
 | Fail-safe signal | read-back of source reports signal `failsafe` while `source == external` | `SetSource(external)`, `SetRoomTemperature`; event `failsafe_detected`; `failsafe_seen_at = now` |
 | Thermostat unavailable | climate state `unavailable` | health `unavailable`; skip; status degraded; no issue |
 | Thermostat back | available again | resync: `SetSource(current)`, `SetRoomTemperature` if external |
 
-Writable = available and not `unsupported`. The HVAC mode of the thermostat is irrelevant to writing (requirement T6). Every verified value write sets `last_value_write` and clears `attempts[attribute]`.
+Writable = available and not `unsupported`. The HVAC mode of the thermostat is irrelevant to writing (requirement T6). Every value write that is sent sets `last_value_issued`; every verified one sets `last_value_write` and clears `attempts[attribute]`.
 
 ## 4. Operation pipeline
 
@@ -76,9 +76,9 @@ Per thermostat and operation, executed by the room's serial worker:
 3. `sleep(verify_delay_seconds)`.
 4. `read(ieee, op.endpoint, op.cluster, [op.attribute] + op.also_read)` within 20 s, cache bypassed. For the TRVZB value write `also_read = [0x600E]`.
 5. Apply `op.verify`: `ok`, `mismatch`, or a **signal** (e.g. `failsafe`) that is routed to the core as its own event rather than as a failure.
-6. Result → `OperationResult(trv, op, outcome ∈ {ok, mismatch, error(msg), timeout, unsupported, signal(name)})`.
+6. Result → `OperationResult(trv, intent, capability, outcome)` with `outcome ∈ {Ok, Mismatch, Failed(error), Unsupported, Signal(name)}`; a timeout is a `Failed`.
 
-Retry (core): `mismatch` / `error` / `timeout` → `attempts += 1`; `< max_attempts` → `ScheduleTimer(backoff[min(n−1, 2)])` then the same intent again (a newer intent for the same thermostat and attribute supersedes a pending retry); otherwise health `error`, `RaiseIssue(trv_unreachable)`, `FireEvent(write_failed)`. Attempts, backoff and health are per thermostat; the worker continues with the next queued operation regardless of outcome.
+Retry (core): `mismatch` / `error` / `timeout` → `attempts += 1`; `< max_attempts` → `ScheduleRetry(trv, capability, backoff[min(n−1, 2)])`, which comes back as `RetryDue` and sends the pending intent again (a newer intent for the same thermostat and capability supersedes a pending retry); otherwise health `error`, `RaiseIssue("unreachable")`, `FireEvent(write_failed)`. Attempts, backoff and health are per thermostat; the worker continues with the next queued operation regardless of outcome.
 
 ## 5. Errors and visibility
 

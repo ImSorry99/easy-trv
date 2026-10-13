@@ -181,6 +181,7 @@ class RoomState:
     active_sensor: str | None = None
     last_written: float | None = None
     last_value_write: datetime | None = None
+    last_value_issued: datetime | None = None
     debounce_pending: bool = False
 
     @classmethod

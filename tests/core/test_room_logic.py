@@ -399,6 +399,9 @@ def test_report_that_hands_the_value_back_to_the_priority_sensor_is_debounced() 
     # sensor.t1 stops reporting; sensor.t2 keeps the room alive.
     at = T0 + timedelta(minutes=100)
     st, _ = logic().handle(SensorChanged(reading("sensor.t2", 20.0, at=at)), at, st)
+    # The periodic refresh kept the value fresh all along; this tick is about
+    # the sensor timeout only.
+    st = verified_value_write(st, at=T0 + timedelta(minutes=125))
     at = T0 + timedelta(minutes=130)
     st, cmds = logic().handle(Tick(), at, st)
     assert st.active_sensor == "sensor.t2"
@@ -462,9 +465,47 @@ def test_refresh_sends_the_current_value_and_remembers_it() -> None:
     assert st.last_written == 22.0
 
 
-def test_refresh_needs_a_verified_write() -> None:
+def test_refresh_fires_after_an_unverified_write() -> None:
+    # The first value write never verified: the thermostat is in error and
+    # ``last_value_write`` stays unset. The refresh interval still retries it.
     st, _ = started()
+    st, _ = logic().handle(result("climate.a", SetSource("external"), Ok()), T0, st)
+    for _ in range(3):
+        st, _ = logic().handle(result("climate.a", TEMP, Failed("timeout")), T0, st)
     assert st.last_value_write is None
+    assert st.trvs["climate.a"].health == TrvHealth.ERROR
+
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=19), st)
+    assert executes(cmds) == []
+    st, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert ("climate.a", SetRoomTemperature(21.3)) in executes(cmds)
+    # The refresh interval is the floor: no retry on every tick.
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=21), st)
+    assert executes(cmds) == []
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=40), st)
+    assert ("climate.a", SetRoomTemperature(21.3)) in executes(cmds)
+
+
+def test_refresh_waits_for_the_interval_after_the_value_write_was_issued() -> None:
+    st, _ = started()
+    assert st.last_value_issued == T0
+    assert st.last_value_write is None
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=19), st)
+    assert executes(cmds) == []
+
+
+def test_refresh_counts_from_the_newer_of_issued_and_verified_write() -> None:
+    st, _ = started()
+    st = verified_value_write(st, at=T0 + timedelta(minutes=10))
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=29), st)
+    assert executes(cmds) == []
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=30), st)
+    assert executes(cmds) != []
+
+
+def test_refresh_never_starts_without_any_value_write() -> None:
+    st, _ = started()
+    st = replace(st, last_value_issued=None)
     _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=60), st)
     assert executes(cmds) == []
 
@@ -584,6 +625,9 @@ def test_tick_updates_active_sensor_when_priority_sensor_times_out() -> None:
     st, _ = started()
     at = T0 + timedelta(minutes=100)
     st, _ = logic().handle(SensorChanged(reading("sensor.t2", 20.0, at=at)), at, st)
+    # The periodic refresh kept the value fresh all along; this tick is about
+    # the sensor timeout only.
+    st = verified_value_write(st, at=T0 + timedelta(minutes=115))
     st, cmds = logic().handle(Tick(), T0 + timedelta(minutes=121), st)
     assert st.source == Source.EXTERNAL
     assert st.active_sensor == "sensor.t2"
