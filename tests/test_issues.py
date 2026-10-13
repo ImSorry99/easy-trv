@@ -14,6 +14,7 @@ def get(hass, issue_id):
 def test_issue_ids_drop_the_colons_of_the_ieee() -> None:
     assert issues.issue_id_unreachable(IEEE) == "trv_unreachable_00124b00aabb"
     assert issues.issue_id_firmware(IEEE) == "trv_firmware_00124b00aabb"
+    assert issues.issue_id_room_invalid("01ABC") == "room_invalid_01ABC"
 
 
 async def test_unreachable_issue_is_raised_and_cleared(hass) -> None:
@@ -127,3 +128,41 @@ async def test_clear_thermostat_issues_except_keeps_only_the_named_thermostats(
     issues.clear_thermostat_issues_except(hass, set())
     assert get(hass, "trv_unreachable_00124b00aabb") is None
     assert get(hass, "trv_firmware_00124b00aabb") is None
+
+
+async def test_room_invalid_issue_names_the_room_and_the_problem(hass) -> None:
+    issues.raise_room_invalid(hass, "sub1", "Bedroom", "climate.x is not a ZHA one")
+    raised = get(hass, "room_invalid_sub1")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_key == "room_invalid"
+    assert raised.translation_placeholders == {
+        "room": "Bedroom",
+        "error": "climate.x is not a ZHA one",
+    }
+    assert raised.is_fixable is False
+    assert raised.is_persistent is False
+
+
+async def test_clear_room_issues_except_keeps_only_the_named_rooms(hass) -> None:
+    issues.raise_room_invalid(hass, "keep", "Still broken", "x")
+    issues.raise_room_invalid(hass, "fixed", "Was broken", "y")
+    issues.raise_unreachable(hass, IEEE, {})
+    ir.async_create_issue(
+        hass,
+        "other_domain",
+        "room_invalid_fixed",
+        is_fixable=False,
+        severity=IssueSeverity.WARNING,
+        translation_key="x",
+    )
+
+    issues.clear_room_issues_except(hass, {"keep"})
+
+    assert get(hass, "room_invalid_keep") is not None
+    assert get(hass, "room_invalid_fixed") is None
+    # Other issues of the domain and issues of other domains are not touched.
+    assert get(hass, "trv_unreachable_00124b00aabb") is not None
+    assert ir.async_get(hass).async_get_issue("other_domain", "room_invalid_fixed")
+    issues.clear_room_issues_except(hass, set())
+    assert get(hass, "room_invalid_keep") is None

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 _UNREACHABLE_PREFIX = "trv_unreachable_"
 _FIRMWARE_PREFIX = "trv_firmware_"
 _PROFILE_INVALID_PREFIX = "profile_invalid_"
+_ROOM_INVALID_PREFIX = "room_invalid_"
 
 
 def issue_id_unreachable(ieee: str) -> str:
@@ -25,6 +26,11 @@ def issue_id_unreachable(ieee: str) -> str:
 def issue_id_firmware(ieee: str) -> str:
     """Return the id of the "firmware lacks a capability" issue."""
     return f"{_FIRMWARE_PREFIX}{ieee.replace(':', '')}"
+
+
+def issue_id_room_invalid(subentry_id: str) -> str:
+    """Return the id of the "room could not be set up" issue."""
+    return f"{_ROOM_INVALID_PREFIX}{subentry_id}"
 
 
 def _issue_id_profile_invalid(file: str) -> str:
@@ -146,6 +152,35 @@ def clear_thermostat_issues_except(hass: HomeAssistant, keep_ieees: set[str]) ->
         if (
             domain == DOMAIN
             and issue_id.startswith((_UNREACHABLE_PREFIX, _FIRMWARE_PREFIX))
+            and issue_id not in wanted
+        ):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+
+def raise_room_invalid(
+    hass: HomeAssistant, subentry_id: str, room: str, error: str
+) -> None:
+    """Report a room that could not be set up and is skipped."""
+    _create(
+        hass,
+        issue_id_room_invalid(subentry_id),
+        ir.IssueSeverity.WARNING,
+        "room_invalid",
+        {"room": room, "error": error},
+    )
+
+
+def clear_room_issues_except(hass: HomeAssistant, keep_subentry_ids: set[str]) -> None:
+    """Remove every room issue whose subentry id is not in ``keep_subentry_ids``.
+
+    ``keep_subentry_ids`` holds the rooms that are still invalid, so rooms that
+    set up fine now and rooms that were deleted lose their issue.
+    """
+    wanted = {issue_id_room_invalid(subentry_id) for subentry_id in keep_subentry_ids}
+    for domain, issue_id in list(ir.async_get(hass).issues):
+        if (
+            domain == DOMAIN
+            and issue_id.startswith(_ROOM_INVALID_PREFIX)
             and issue_id not in wanted
         ):
             ir.async_delete_issue(hass, DOMAIN, issue_id)

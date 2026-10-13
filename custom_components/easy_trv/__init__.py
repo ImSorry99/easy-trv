@@ -156,7 +156,7 @@ def _resolve_thermostats(
 
     Raises:
         ConfigEntryError: If an entity is not a ZHA thermostat. That is a
-            permanent configuration problem, so setup is not retried.
+            permanent configuration problem of the room, which is skipped.
 
     """
     refs: dict[str, DeviceRef] = {}
@@ -208,17 +208,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     params = GlobalParams.from_options(entry.options)
     rooms: dict[str, RoomController] = {}
     summaries: dict[str, str] = {}
+    invalid: set[str] = set()
     for subentry in entry.subentries.values():
         if subentry.subentry_type != SUBENTRY_ROOM:
             continue
-        controller, profile = _build_room(
-            hass, subentry, params, gateway, profiles.profiles
-        )
+        try:
+            controller, profile = _build_room(
+                hass, subentry, params, gateway, profiles.profiles
+            )
+        except ConfigEntryError as err:
+            # One room that cannot be set up must not take the others down.
+            _LOGGER.warning("Room %s could not be set up: %s", subentry.title, err)
+            issues.raise_room_invalid(
+                hass, subentry.subentry_id, subentry.title, str(err)
+            )
+            invalid.add(subentry.subentry_id)
+            continue
         rooms[subentry.subentry_id] = controller
         summaries[subentry.subentry_id] = (
             f"{subentry.title} ({len(subentry.data[CONF_TRVS])} thermostat(s), "
             f"profile {profile.id})"
         )
+    issues.clear_room_issues_except(hass, invalid)
     issues.clear_thermostat_issues_except(
         hass, {ieee for controller in rooms.values() for ieee in controller.ieees}
     )

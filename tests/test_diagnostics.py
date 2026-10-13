@@ -1,14 +1,18 @@
 import json
+from unittest.mock import patch
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers.json import ExtendedJSONEncoder
 from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
 
+from custom_components.easy_trv.adapters.zha_gateway import ZhaUnavailable
 from custom_components.easy_trv.diagnostics import async_get_config_entry_diagnostics
 from tests.helpers_entry import (
     FAST_OPTIONS,
+    GATEWAY_FACTORY,
     IEEE_A,
     make_entry,
     patched_gateway,
@@ -78,13 +82,11 @@ async def test_diagnostics_lists_profile_errors(hass, tmp_path, entry) -> None:
     json.dumps(diag, cls=ExtendedJSONEncoder)
 
 
-async def test_diagnostics_of_an_entry_that_failed_to_set_up(
-    hass, fake_gateway
-) -> None:
-    fake_gateway.add_device("climate.x", "00:33", model="TRV-ZBT")
-    hass.states.async_set("climate.x", "heat")
-    failed = make_entry(hass, [room_data(trvs=["climate.x"])], OPTIONS)
-    assert not await hass.config_entries.async_setup(failed.entry_id)
+async def test_diagnostics_of_an_entry_that_failed_to_set_up(hass) -> None:
+    failed = make_entry(hass, [room_data()], OPTIONS)
+    with patch(GATEWAY_FACTORY, side_effect=ZhaUnavailable("no zha")):
+        assert not await hass.config_entries.async_setup(failed.entry_id)
+    assert failed.state is ConfigEntryState.SETUP_RETRY
 
     diag = await async_get_config_entry_diagnostics(hass, failed)
 

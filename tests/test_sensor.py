@@ -144,6 +144,7 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
         "trv_firmware",
         "zha_api_incompatible",
         "profile_invalid",
+        "room_invalid",
     }
     icon = icons["entity"]["sensor"]["room_status"]
     assert icon["default"] == "mdi:radiator"

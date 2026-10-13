@@ -38,6 +38,14 @@ def zha_issue(hass):
     return ir.async_get(hass).async_get_issue(DOMAIN, "zha_api_incompatible")
 
 
+def room_issue(hass, subentry_id: str):
+    return ir.async_get(hass).async_get_issue(DOMAIN, f"room_invalid_{subentry_id}")
+
+
+def subentry_of(entry, title: str):
+    return next(s for s in entry.subentries.values() if s.title == title)
+
+
 def value_writes(gateway) -> list[int]:
     """Return the room temperatures written so far (raw centi-degrees)."""
     return [w[4] for w in gateway.writes if w[3] == VALUE]
@@ -144,19 +152,30 @@ async def test_profile_auto_selects_builtin_and_rejects_unmatched(
     hass.states.async_set("climate.x", "heat")
     foreign = make_entry(hass, [room_data(trvs=["climate.x"])], FAST_OPTIONS)
 
-    assert not await hass.config_entries.async_setup(foreign.entry_id)
-    assert foreign.state is ConfigEntryState.SETUP_ERROR
-    assert "climate.x (SONOFF TRV-ZBT)" in foreign.reason
+    await start(hass, foreign)
+
+    # The entry loads; the room that no profile fits is reported and skipped.
+    assert foreign.state is ConfigEntryState.LOADED
+    assert foreign.runtime_data.rooms == {}
+    issue = room_issue(hass, subentry_of(foreign, "Living").subentry_id)
+    assert issue is not None
+    assert "climate.x (SONOFF TRV-ZBT)" in issue.translation_placeholders["error"]
     assert hass.states.get("sensor.living_status") is None
 
 
-async def test_non_zha_thermostat_is_a_setup_error(hass) -> None:
+async def test_non_zha_thermostat_invalidates_only_its_room(hass) -> None:
     hass.states.async_set("climate.mqtt", "heat")
     entry = make_entry(hass, [room_data(trvs=["climate.a", "climate.mqtt"])])
 
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-    assert entry.state is ConfigEntryState.SETUP_ERROR
-    assert "climate.mqtt is not a ZHA thermostat" in entry.reason
+    await start(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    issue = room_issue(hass, subentry_of(entry, "Living").subentry_id)
+    assert issue is not None
+    assert (
+        "climate.mqtt is not a ZHA thermostat"
+        in (issue.translation_placeholders["error"])
+    )
 
 
 async def test_explicit_profile_is_used(hass) -> None:
@@ -166,12 +185,91 @@ async def test_explicit_profile_is_used(hass) -> None:
     assert hass.states.get("sensor.living_status").state == "ok"
 
 
-async def test_unknown_explicit_profile_is_a_setup_error(hass) -> None:
+async def test_unknown_explicit_profile_invalidates_only_its_room(hass) -> None:
     entry = make_entry(hass, [room_data(profile="no_such_profile")])
 
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-    assert entry.state is ConfigEntryState.SETUP_ERROR
-    assert "no_such_profile" in entry.reason
+    await start(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    issue = room_issue(hass, subentry_of(entry, "Living").subentry_id)
+    assert issue is not None
+    assert "no_such_profile" in issue.translation_placeholders["error"]
+
+
+# --- A room that cannot be set up -------------------------------------------
+
+
+async def test_one_unresolvable_room_leaves_the_other_rooms_running(
+    hass, fake_gateway, caplog
+) -> None:
+    entry = make_entry(
+        hass,
+        [
+            room_data("Living"),
+            room_data("Bedroom", trvs=["climate.ghost"], temp_sensors=["sensor.t2"]),
+        ],
+        FAST_OPTIONS,
+    )
+
+    await start(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    living, bedroom = subentry_of(entry, "Living"), subentry_of(entry, "Bedroom")
+    assert entry.runtime_data.rooms.keys() == {living.subentry_id}
+    assert hass.states.get("sensor.living_status").state == "ok"
+    assert hass.states.get("sensor.bedroom_status") is None
+    assert room_issue(hass, living.subentry_id) is None
+    issue = room_issue(hass, bedroom.subentry_id)
+    assert issue is not None
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.is_fixable is False
+    assert issue.translation_key == "room_invalid"
+    assert issue.translation_placeholders == {
+        "room": "Bedroom",
+        "error": "climate.ghost is not a ZHA thermostat",
+    }
+    assert "Room Bedroom could not be set up" in caplog.text
+
+    # Fixing the room and reloading removes the issue and brings the room up.
+    fake_gateway.add_device("climate.c", "00:33")
+    hass.states.async_set("climate.c", "heat")
+    hass.config_entries.async_update_subentry(
+        entry,
+        bedroom,
+        data=room_data("Bedroom", trvs=["climate.c"], temp_sensors=["sensor.t2"]),
+    )
+    await settle(hass)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert room_issue(hass, bedroom.subentry_id) is None
+    assert entry.runtime_data.rooms.keys() == {living.subentry_id, bedroom.subentry_id}
+    assert hass.states.get("sensor.bedroom_status").state == "ok"
+
+
+async def test_a_room_that_works_again_loses_its_issue_on_reload(
+    hass, fake_gateway
+) -> None:
+    entry = make_entry(hass, [room_data(trvs=["climate.a", "climate.mqtt"])])
+    await start(hass, entry)
+    living = subentry_of(entry, "Living")
+    assert room_issue(hass, living.subentry_id) is not None
+
+    # The thermostat shows up in ZHA after the first attempt.
+    fake_gateway.add_device("climate.mqtt", "00:44")
+    hass.states.async_set("climate.mqtt", "heat")
+    await hass.config_entries.async_reload(entry.entry_id)
+    await settle(hass)
+
+    assert room_issue(hass, living.subentry_id) is None
+    assert entry.runtime_data.rooms.keys() == {living.subentry_id}
+
+
+async def test_setup_removes_room_issues_of_deleted_rooms(hass, entry) -> None:
+    issues.raise_room_invalid(hass, "deleted_subentry", "Old room", "gone")
+
+    await start(hass, entry)
+
+    assert room_issue(hass, "deleted_subentry") is None
 
 
 async def test_user_profile_covers_a_foreign_thermostat(
