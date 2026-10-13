@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -149,6 +149,7 @@ class TrvState:
     last_error: str | None = None
     failsafe_seen_at: datetime | None = None
     unsupported: frozenset[str] = frozenset()
+    settings_applied: bool = False
 
 
 @dataclass(frozen=True)
@@ -162,7 +163,6 @@ class RoomState:
     last_written: float | None = None
     last_value_write: datetime | None = None
     debounce_pending: bool = False
-    settings_applied: bool = False
 
     @classmethod
     def initial(cls, cfg: RoomConfig) -> RoomState:
@@ -276,6 +276,12 @@ Event = (
 )
 
 # --- Commands ------------------------------------------------------------
+
+# Bus event names; they mirror ``const.EVENT_*``, which core cannot import
+# because ``const`` needs Home Assistant.
+EVENT_WRITE_FAILED: Final = "easy_trv_write_failed"
+EVENT_RECOVERED: Final = "easy_trv_recovered"
+EVENT_FAILSAFE: Final = "easy_trv_failsafe_detected"
 
 IssueKind = Literal["unreachable", "firmware"]
 

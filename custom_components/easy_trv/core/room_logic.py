@@ -1,4 +1,4 @@
-"""Room logic: sensor selection, source switching and temperature writes.
+"""Room logic: sensor selection, source switching, writes and their outcomes.
 
 ``RoomLogic.handle`` is a pure state machine. It takes an event, the current
 time and the current state and returns the next state together with the
@@ -7,19 +7,32 @@ Assistant imports, so it can be tested without a running instance.
 """
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, assert_never
 
 from custom_components.easy_trv.core.model import (
+    EVENT_FAILSAFE,
+    EVENT_RECOVERED,
+    EVENT_WRITE_FAILED,
+    ClearIssue,
     Command,
     DebounceElapsed,
     Event,
     Execute,
+    Failed,
+    FireEvent,
     GlobalParams,
     Intent,
+    Log,
+    Mismatch,
+    Ok,
+    OperationResult,
+    RaiseIssue,
+    RetryDue,
     RoomConfig,
     RoomState,
     RoomStatus,
     ScheduleDebounce,
+    ScheduleRetry,
     SensorChanged,
     SensorReading,
     SetHysteresis,
@@ -27,16 +40,19 @@ from custom_components.easy_trv.core.model import (
     SetSource,
     SetStatus,
     SetWindowDetection,
+    Signal,
     Source,
     Start,
     Tick,
+    TrvAvailabilityChanged,
     TrvHealth,
     TrvState,
+    Unsupported,
 )
 from custom_components.easy_trv.core.values import is_in_range, round_tenth
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from datetime import datetime
 
 _MIN_TEMPERATURE = 0.0
@@ -45,6 +61,11 @@ _MAX_TEMPERATURE = 99.9
 _DELTA_TOLERANCE = 1e-9
 
 type _Step = tuple[RoomState, list[Command]]
+
+
+def _without[V](mapping: Mapping[str, V], key: str) -> dict[str, V]:
+    """Return a copy of ``mapping`` that no longer contains ``key``."""
+    return {k: v for k, v in mapping.items() if k != key}
 
 
 @dataclass(frozen=True)
@@ -68,6 +89,7 @@ class RoomLogic:
         self._cfg = cfg
         self._params = params
         self._capability_of = capability_of
+        self._ieee = {trv.entity_id: trv.ieee for trv in cfg.trvs}
 
     def usable(self, reading: SensorReading, now: datetime) -> bool:
         """Return whether a reading is in range and, if required, fresh."""
@@ -105,9 +127,15 @@ class RoomLogic:
                 state, commands = self._on_debounce_elapsed(now, state)
             case Tick():
                 state, commands = self._on_tick(now, state)
+            case TrvAvailabilityChanged():
+                state, commands = self._on_availability(event, now, state)
+            case RetryDue():
+                state, commands = self._on_retry_due(event, state)
+            case OperationResult():
+                state, commands = self._on_result(event, now, state)
             case _:
-                msg = "handled in Task 6"
-                raise NotImplementedError(msg)
+                assert_never(event)
+        state = self._supersede_pending(state, commands)
         return state, [*commands, self._status(state, now)]
 
     # --- Event handlers --------------------------------------------------
@@ -124,7 +152,7 @@ class RoomLogic:
             )
         readings = {**state.readings, **{r.entity_id: r for r in event.sensors}}
         state = replace(state, readings=readings, trvs=trvs)
-        state, commands = self._apply_settings(state)
+        state, commands = self._apply_settings(state, self._writable(state))
         state, source_commands = self._reconcile_source(state, now)
         return state, [*commands, *source_commands]
 
@@ -143,6 +171,8 @@ class RoomLogic:
 
     def _on_debounce_elapsed(self, now: datetime, state: RoomState) -> _Step:
         """Write the current value once the readings have settled."""
+        if not state.debounce_pending:
+            return state, []
         state = replace(state, debounce_pending=False)
         active = self._active(state, now)
         if active is None:
@@ -164,20 +194,204 @@ class RoomLogic:
             commands = [*commands, *debounce]
         return state, commands
 
+    def _on_availability(
+        self, event: TrvAvailabilityChanged, now: datetime, state: RoomState
+    ) -> _Step:
+        """Track a thermostat going away or coming back; resync it when it returns."""
+        trv = event.entity_id
+        current = state.trvs[trv]
+        if current.available == event.available:
+            return state, []
+        if not event.available:
+            gone = replace(current, available=False, health=TrvHealth.UNAVAILABLE)
+            return self._with_trv(state, trv, gone), []
+        back = replace(current, available=True)
+        back = replace(back, health=self._baseline(back))
+        return self._resync_trv(self._with_trv(state, trv, back), now, trv)
+
+    def _on_retry_due(self, event: RetryDue, state: RoomState) -> _Step:
+        """Resend the newest intent that is still waiting for its retry."""
+        trv, capability = event.trv, event.capability
+        current = state.trvs[trv]
+        intent = current.pending_retry.get(capability)
+        if intent is None:
+            return state, []
+        updated = replace(
+            current, pending_retry=_without(current.pending_retry, capability)
+        )
+        if trv in self._writable(state):
+            return self._with_trv(state, trv, updated), [Execute(trv, intent)]
+        if isinstance(intent, (SetWindowDetection, SetHysteresis)):
+            # Dropped while the thermostat is away: re-apply on its return.
+            updated = replace(updated, settings_applied=False)
+        return self._with_trv(state, trv, updated), []
+
+    def _on_result(
+        self, event: OperationResult, now: datetime, state: RoomState
+    ) -> _Step:
+        """Route the outcome of a finished operation."""
+        outcome = event.outcome
+        match outcome:
+            case Ok():
+                return self._on_ok(event, now, state)
+            case Failed() | Mismatch():
+                return self._on_failure(event, outcome, state)
+            case Unsupported():
+                return self._on_unsupported(event, outcome, state)
+            case Signal():
+                return self._on_signal(event, outcome, now, state)
+            case _:
+                assert_never(outcome)
+
+    def _on_ok(self, event: OperationResult, now: datetime, state: RoomState) -> _Step:
+        """Forget earlier trouble with the capability and record a verified value."""
+        trv, capability = event.trv, event.capability
+        current = state.trvs[trv]
+        updated = replace(
+            current,
+            attempts=_without(current.attempts, capability),
+            pending_retry=_without(current.pending_retry, capability),
+            unsupported=current.unsupported - {capability},
+        )
+        commands: list[Command] = []
+        if capability in current.unsupported:
+            commands.append(ClearIssue("firmware", trv))
+        # ``last_error`` marks an unreachable issue that is still raised, which
+        # also covers a thermostat that went away while in error.
+        if current.health is TrvHealth.ERROR or current.last_error is not None:
+            updated = replace(updated, last_error=None)
+            commands += [
+                ClearIssue("unreachable", trv),
+                FireEvent(EVENT_RECOVERED, self._event_data(trv)),
+                Log("info", f"{self._cfg.name}: {trv} accepts writes again"),
+            ]
+        if updated.health in (TrvHealth.ERROR, TrvHealth.UNSUPPORTED):
+            updated = replace(updated, health=self._baseline(updated))
+        state = self._with_trv(state, trv, updated)
+        if isinstance(event.intent, SetRoomTemperature):
+            state = replace(
+                state, last_value_write=now, last_written=event.intent.celsius
+            )
+        return state, commands
+
+    def _on_failure(
+        self, event: OperationResult, outcome: Failed | Mismatch, state: RoomState
+    ) -> _Step:
+        """Count the failed attempt, then retry with backoff or give up."""
+        trv, capability = event.trv, event.capability
+        current = state.trvs[trv]
+        error = self._error_text(outcome)
+        attempts = current.attempts.get(capability, 0) + 1
+        updated = replace(
+            current,
+            attempts={**current.attempts, capability: attempts},
+            pending_retry=_without(current.pending_retry, capability),
+        )
+        if attempts < self._params.max_attempts:
+            updated = replace(
+                updated,
+                pending_retry={**updated.pending_retry, capability: event.intent},
+            )
+            backoff = self._params.backoff
+            delay = backoff[min(attempts - 1, len(backoff) - 1)]
+            return self._with_trv(state, trv, updated), [
+                ScheduleRetry(trv, capability, delay)
+            ]
+        updated = replace(updated, health=TrvHealth.ERROR, last_error=error)
+        state = self._with_trv(state, trv, updated)
+        if current.health is TrvHealth.ERROR:
+            return state, []
+        data = {"attribute": capability, "attempts": attempts, "error": error}
+        return state, [
+            RaiseIssue(
+                "unreachable",
+                trv,
+                {
+                    "room": self._cfg.name,
+                    "trv": trv,
+                    "attribute": capability,
+                    "attempts": str(attempts),
+                    "error": error,
+                },
+            ),
+            FireEvent(EVENT_WRITE_FAILED, {**self._event_data(trv), **data}),
+            Log(
+                "warning",
+                f"{self._cfg.name}: {trv} did not accept {capability} "
+                f"after {attempts} attempts: {error}",
+            ),
+        ]
+
+    def _on_unsupported(
+        self, event: OperationResult, outcome: Unsupported, state: RoomState
+    ) -> _Step:
+        """Flag the capability as missing in the firmware; it is never retried."""
+        trv, capability = event.trv, event.capability
+        current = state.trvs[trv]
+        updated = replace(
+            current,
+            unsupported=current.unsupported | {capability},
+            pending_retry=_without(current.pending_retry, capability),
+        )
+        if current.health is not TrvHealth.ERROR:
+            updated = replace(updated, health=self._baseline(updated))
+        issue = RaiseIssue(
+            "firmware",
+            trv,
+            {
+                "trv": trv,
+                "capability": outcome.capability,
+                "required": outcome.required,
+                "installed": outcome.installed,
+            },
+        )
+        return self._with_trv(state, trv, updated), [issue]
+
+    def _on_signal(
+        self,
+        event: OperationResult,
+        outcome: Signal,
+        now: datetime,
+        state: RoomState,
+    ) -> _Step:
+        """React to the thermostat falling back to its own sensor (fail-safe)."""
+        trv = event.trv
+        if outcome.name != "failsafe":
+            return state, [Log("debug", f"{trv}: ignoring signal {outcome.name!r}")]
+        if state.source is not Source.EXTERNAL:
+            note = f"{trv}: ignoring fail-safe, source is {state.source.value}"
+            return state, [Log("debug", note)]
+        state = self._with_trv(
+            state, trv, replace(state.trvs[trv], failsafe_seen_at=now)
+        )
+        commands: list[Command] = [
+            FireEvent(EVENT_FAILSAFE, self._event_data(trv)),
+            Log("info", f"{self._cfg.name}: {trv} fell back to its own sensor"),
+        ]
+        active = self._active(state, now)
+        if active is not None:
+            commands += [
+                Execute(trv, SetSource("external")),
+                Execute(trv, SetRoomTemperature(round_tenth(active.value))),
+            ]
+        return state, commands
+
     # --- Paths -----------------------------------------------------------
 
-    def _apply_settings(self, state: RoomState) -> _Step:
-        """Emit the configured window-detection and hysteresis settings once."""
-        if state.settings_applied:
-            return state, []
+    def _apply_settings(self, state: RoomState, trvs: list[str]) -> _Step:
+        """Emit the configured settings to thermostats that have not had them yet."""
+        updated = dict(state.trvs)
         commands: list[Command] = []
-        for trv in self._writable(state):
+        for trv in trvs:
+            if updated[trv].settings_applied:
+                continue
             if self._cfg.window_detection != "leave":
                 enabled = self._cfg.window_detection == "on"
                 commands.append(Execute(trv, SetWindowDetection(enabled)))
             if self._cfg.hysteresis is not None:
                 commands.append(Execute(trv, SetHysteresis(self._cfg.hysteresis)))
-        return replace(state, settings_applied=True), commands
+            updated[trv] = replace(updated[trv], settings_applied=True)
+        return replace(state, trvs=updated), commands
 
     def _reconcile_source(self, state: RoomState, now: datetime) -> _Step:
         """Switch the thermostats between the external and internal source.
@@ -218,7 +432,8 @@ class RoomLogic:
         commands: list[Command] = [
             Execute(trv, SetRoomTemperature(celsius)) for trv in self._writable(state)
         ]
-        return replace(state, last_written=celsius), commands
+        state = replace(state, last_written=celsius, debounce_pending=False)
+        return state, commands
 
     def _debounce_if_changed(self, state: RoomState, now: datetime) -> _Step:
         """Arm (or re-arm) the debounce when the value moved by ``min_delta``."""
@@ -242,7 +457,68 @@ class RoomLogic:
             return state, []
         return self._write_value(state, active)
 
+    def _resync_trv(self, state: RoomState, now: datetime, trv: str) -> _Step:
+        """Bring a returning thermostat in line with the room's current state."""
+        if trv not in self._writable(state):
+            return state, []
+        state, commands = self._apply_settings(state, [trv])
+        if state.source is Source.EXTERNAL:
+            commands.append(Execute(trv, SetSource("external")))
+            active = self._active(state, now)
+            if active is not None:
+                celsius = round_tenth(active.value)
+                commands.append(Execute(trv, SetRoomTemperature(celsius)))
+        elif state.source is Source.INTERNAL:
+            commands.append(Execute(trv, SetSource("internal")))
+        return state, commands
+
     # --- Helpers ---------------------------------------------------------
+
+    def _supersede_pending(
+        self, state: RoomState, commands: list[Command]
+    ) -> RoomState:
+        """Let a newer write replace the intent a pending retry would resend."""
+        for command in commands:
+            if not isinstance(command, Execute):
+                continue
+            capability = self._capability_of(command.intent)
+            current = state.trvs[command.trv]
+            if capability in current.pending_retry:
+                pending = {**current.pending_retry, capability: command.intent}
+                state = self._with_trv(
+                    state, command.trv, replace(current, pending_retry=pending)
+                )
+        return state
+
+    @staticmethod
+    def _with_trv(state: RoomState, trv: str, trv_state: TrvState) -> RoomState:
+        """Return ``state`` with the state of one thermostat replaced."""
+        return replace(state, trvs={**state.trvs, trv: trv_state})
+
+    @staticmethod
+    def _baseline(trv_state: TrvState) -> TrvHealth:
+        """Return the health of a thermostat that has no error of its own."""
+        if not trv_state.available:
+            return TrvHealth.UNAVAILABLE
+        if trv_state.unsupported:
+            return TrvHealth.UNSUPPORTED
+        return TrvHealth.OK
+
+    @staticmethod
+    def _error_text(outcome: Failed | Mismatch) -> str:
+        """Describe a failed or mismatched write for issues and the status."""
+        if isinstance(outcome, Failed):
+            return outcome.error
+        return f"mismatch: expected {sorted(outcome.expected)} got {outcome.actual}"
+
+    def _event_data(self, trv: str) -> dict[str, Any]:
+        """Return the identifying payload shared by all bus events."""
+        return {
+            "room": self._cfg.name,
+            "room_id": self._cfg.room_id,
+            "trv_entity_id": trv,
+            "ieee": self._ieee[trv],
+        }
 
     def _active(self, state: RoomState, now: datetime) -> _Active | None:
         """Return the active sensor with a concrete value, if any."""
