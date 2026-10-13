@@ -19,7 +19,7 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
         "climate.a": gateway.add_device("climate.a", IEEE_A, firmware=(1, 3, 0)),
         "climate.b": gateway.add_device("climate.b", IEEE_B, firmware=None),
     }
-    data = room_data(trvs=["climate.b", "climate.a"], hysteresis="0.6")
+    data = room_data(trvs=["climate.b", "climate.a"], hysteresis="0_6")
 
     config = room_config_from_subentry("sub1", "Living", data, refs)
 
@@ -34,6 +34,29 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
         window_detection="on",
         hysteresis=0.6,
     )
+
+
+@pytest.mark.parametrize(
+    ("stored", "kelvin"),
+    [
+        ("0_2", 0.2),
+        ("0_4", 0.4),
+        ("0_6", 0.6),
+        ("0_8", 0.8),
+        ("1_0", 1.0),
+        # Dotted form, accepted in case it was stored earlier.
+        ("0.4", 0.4),
+        ("1.0", 1.0),
+    ],
+)
+def test_room_config_hysteresis_key_maps_to_kelvin(stored, kelvin) -> None:
+    gateway = FakeGateway()
+    refs = {"climate.a": gateway.add_device("climate.a", IEEE_A)}
+    data = room_data(trvs=["climate.a"], hysteresis=stored)
+
+    config = room_config_from_subentry("sub1", "Living", data, refs)
+
+    assert config.hysteresis == kelvin
 
 
 def test_room_config_hysteresis_leave_means_untouched() -> None:

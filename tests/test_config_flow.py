@@ -300,7 +300,7 @@ async def test_room_from_area_prefills_and_creates(hass, entry, area_with_trvs) 
             "humidity_sensors": [],
             "profile": "auto",
             "window_detection": "on",
-            "hysteresis": "0.4",
+            "hysteresis": "0_4",
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -311,7 +311,7 @@ async def test_room_from_area_prefills_and_creates(hass, entry, area_with_trvs) 
     assert sub.title == "Living"
     assert sub.unique_id == "living"
     assert sub.data["trvs"] == ["climate.a", "climate.b"]
-    assert sub.data["hysteresis"] == "0.4"
+    assert sub.data["hysteresis"] == "0_4"
     assert dict(sub.data) == {
         "name": "Living",
         "area_id": area_with_trvs.id,
@@ -320,7 +320,7 @@ async def test_room_from_area_prefills_and_creates(hass, entry, area_with_trvs) 
         "humidity_sensors": [],
         "profile": "auto",
         "window_detection": "on",
-        "hysteresis": "0.4",
+        "hysteresis": "0_4",
     }
 
 
@@ -388,11 +388,11 @@ async def test_entities_form_fields_and_defaults(hass, entry) -> None:
     )
     assert option_values(selectors["hysteresis"]) == [
         "leave",
-        "0.2",
-        "0.4",
-        "0.6",
-        "0.8",
-        "1.0",
+        "0_2",
+        "0_4",
+        "0_6",
+        "0_8",
+        "1_0",
     ]
     assert selectors["hysteresis"].config["translation_key"] == "hysteresis"
     assert selectors["profile"].config["mode"] == "dropdown"
@@ -689,7 +689,7 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
         "humidity_sensors": [],
         "profile": "auto",
         "window_detection": "on",
-        "hysteresis": "0.4",
+        "hysteresis": "0_4",
     }
 
     result = await room_flows(hass).async_configure(
@@ -701,7 +701,7 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
             "humidity_sensors": [],
             "profile": "auto",
             "window_detection": "on",
-            "hysteresis": "0.4",
+            "hysteresis": "0_4",
         },
     )
     assert result["type"] is FlowResultType.ABORT

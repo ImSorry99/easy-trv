@@ -10,6 +10,8 @@ STRINGS = INTEGRATION / "strings.json"
 EN = INTEGRATION / "translations" / "en.json"
 DE = INTEGRATION / "translations" / "de.json"
 PLACEHOLDER = re.compile(r"\{[^{}]*\}")
+# hassfest's rule for the keys of selector options, entity states and issues.
+TRANSLATION_KEY = re.compile(r"^(?!.+[_-]{2})(?![_-])[a-z0-9-_]+(?<![_-])$")
 
 ROOM_ERRORS = {
     "no_trv",
@@ -103,11 +105,11 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     }
     assert set(data["selector"]["hysteresis"]["options"]) == {
         "leave",
-        "0.2",
-        "0.4",
-        "0.6",
-        "0.8",
-        "1.0",
+        "0_2",
+        "0_4",
+        "0_6",
+        "0_8",
+        "1_0",
     }
     # Existing sections of the earlier tasks stay in place.
     assert set(data["entity"]["sensor"]["room_status"]["state"]) == {
@@ -121,6 +123,26 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "zha_api_incompatible",
         "profile_invalid",
     }
+
+
+@pytest.mark.parametrize("path", [STRINGS, EN, DE])
+def test_translation_keys_pass_the_hassfest_rule(path: Path) -> None:
+    data = load(path)
+    keys = list(data["issues"])
+    for selector in data["selector"].values():
+        keys.extend(selector["options"])
+    for platform in data["entity"].values():
+        for entity in platform.values():
+            keys.extend(entity.get("state", {}))
+    assert {"leave", "0_2", "1_0", "ok", "trv_unreachable"} <= set(keys)
+    assert [key for key in keys if not TRANSLATION_KEY.match(key)] == []
+
+
+def test_hassfest_rule_rejects_dotted_keys() -> None:
+    assert TRANSLATION_KEY.match("0_4")
+    assert not TRANSLATION_KEY.match("0.4")
+    assert not TRANSLATION_KEY.match("_leave")
+    assert not TRANSLATION_KEY.match("a__b")
 
 
 def test_german_translation_is_actually_german() -> None:

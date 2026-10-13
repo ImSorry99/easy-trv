@@ -47,6 +47,18 @@ GATEWAY_FACTORY: Callable[[HomeAssistant], TrvGateway] = ZhaLibraryGateway
 _HYSTERESIS_LEAVE = "leave"
 
 
+def _hysteresis_kelvin(stored: str) -> float | None:
+    """Return the stored hysteresis choice in kelvin (``None``: leave as is).
+
+    The choice is a translation-safe key (``0_4``), not a number. The dotted
+    form (``0.4``) is accepted as well. Python's own ``float("0_4")`` would
+    read this as 4.0, so the separator is replaced explicitly.
+    """
+    if stored == _HYSTERESIS_LEAVE:
+        return None
+    return float(str(stored).replace("_", "."))
+
+
 @dataclass
 class EasyTrvRuntimeData:
     """Objects that live as long as a config entry is loaded."""
@@ -68,7 +80,8 @@ def room_config_from_subentry(
     """Build the :class:`RoomConfig` of a ``room`` subentry.
 
     ``device_refs`` must hold every thermostat listed in ``data``. A hysteresis
-    of ``"leave"`` means the thermostat's own setting stays untouched (``None``).
+    of ``"leave"`` means the thermostat's own setting stays untouched (``None``);
+    ``"0_4"`` (or the older ``"0.4"``) means 0.4 K.
     """
     hysteresis = data.get(CONF_HYSTERESIS, _HYSTERESIS_LEAVE)
     return RoomConfig(
@@ -84,7 +97,7 @@ def room_config_from_subentry(
         ),
         temp_sensors=tuple(data.get(CONF_TEMP_SENSORS, ())),
         window_detection=data.get(CONF_WINDOW_DETECTION, "on"),
-        hysteresis=None if hysteresis == _HYSTERESIS_LEAVE else float(hysteresis),
+        hysteresis=_hysteresis_kelvin(hysteresis),
     )
 
 

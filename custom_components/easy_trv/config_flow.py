@@ -71,7 +71,8 @@ if TYPE_CHECKING:
     from custom_components.easy_trv.profiles.engine import Profile
 
 WINDOW_DETECTION_OPTIONS: Final = ("on", "off", "leave")
-HYSTERESIS_OPTIONS: Final = ("leave", "0.2", "0.4", "0.6", "0.8", "1.0")
+# The values double as translation keys, which must not contain a dot: 0_4 = 0.4 K.
+HYSTERESIS_OPTIONS: Final = ("leave", "0_2", "0_4", "0_6", "0_8", "1_0")
 
 _STEP_USER: Final = "user"
 _STEP_FROM_AREA: Final = "from_area"

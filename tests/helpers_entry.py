@@ -52,7 +52,7 @@ def room_data(name: str = "Living", **overrides: Any) -> dict[str, Any]:
         CONF_HUMIDITY_SENSORS: [],
         CONF_PROFILE: "auto",
         CONF_WINDOW_DETECTION: "on",
-        CONF_HYSTERESIS: "0.4",
+        CONF_HYSTERESIS: "0_4",
     }
     data.update(overrides)
     return data
