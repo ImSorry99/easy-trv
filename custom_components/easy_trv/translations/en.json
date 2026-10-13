@@ -1,4 +1,99 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Easy TRV"
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Easy TRV is already set up. Only a single instance is allowed."
+    }
+  },
+  "config_subentries": {
+    "room": {
+      "title": "Room",
+      "entry_type": "Room",
+      "initiate_flow": {
+        "user": "Add room",
+        "reconfigure": "Edit room"
+      },
+      "step": {
+        "user": {
+          "title": "Add room",
+          "description": "Create the room from an area to take over its thermostats and sensors, or enter a name yourself.",
+          "menu_options": {
+            "from_area": "From area",
+            "custom": "Custom room"
+          }
+        },
+        "from_area": {
+          "title": "Room from area",
+          "description": "The room takes the name of the area. Its thermostats and sensors are suggested on the next page.",
+          "data": {
+            "area_id": "Area"
+          }
+        },
+        "custom": {
+          "title": "Custom room",
+          "data": {
+            "name": "Room name"
+          }
+        },
+        "entities": {
+          "title": "Room devices",
+          "data": {
+            "trvs": "Thermostats (ZHA)",
+            "temp_sensors": "Temperature sensors",
+            "humidity_sensors": "Humidity sensors",
+            "profile": "Profile",
+            "window_detection": "Window detection",
+            "hysteresis": "Hysteresis"
+          },
+          "data_description": {
+            "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
+            "temp_sensors": "Order = priority; the first usable sensor is used.",
+            "humidity_sensors": "Stored for later use; not evaluated yet.",
+            "profile": "Auto picks the first profile that matches all thermostats of the room.",
+            "window_detection": "Switch the open-window detection of the thermostats on or off, or leave it as it is.",
+            "hysteresis": "Temperature hysteresis of the thermostats in kelvin, or leave it as it is."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit room",
+          "data": {
+            "name": "Room name",
+            "trvs": "Thermostats (ZHA)",
+            "temp_sensors": "Temperature sensors",
+            "humidity_sensors": "Humidity sensors",
+            "profile": "Profile",
+            "window_detection": "Window detection",
+            "hysteresis": "Hysteresis"
+          },
+          "data_description": {
+            "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
+            "temp_sensors": "Order = priority; the first usable sensor is used.",
+            "humidity_sensors": "Stored for later use; not evaluated yet.",
+            "profile": "Auto picks the first profile that matches all thermostats of the room.",
+            "window_detection": "Switch the open-window detection of the thermostats on or off, or leave it as it is.",
+            "hysteresis": "Temperature hysteresis of the thermostats in kelvin, or leave it as it is."
+          }
+        }
+      },
+      "error": {
+        "no_trv": "Select at least one thermostat.",
+        "not_zha": "At least one of the selected entities is not a ZHA thermostat.",
+        "no_profile": "No profile matches all selected thermostats. Add a profile for the model or split the room.",
+        "profile_mismatch": "The selected profile does not match all selected thermostats.",
+        "trv_in_other_room": "At least one of the selected thermostats already belongs to another room.",
+        "name_exists": "A room with this name already exists.",
+        "name_required": "Enter a name for the room."
+      },
+      "abort": {
+        "reconfigure_successful": "Re-configuration was successful",
+        "already_configured": "A room with this name already exists."
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "room_status": {
@@ -27,6 +122,50 @@
     "profile_invalid": {
       "title": "Thermostat profile {file} is invalid",
       "description": "The profile file {file} in the easy_trv/profiles folder of your configuration directory was skipped: {error}\n\nFix or remove the file and reload the Easy TRV integration. This issue disappears when the file loads cleanly."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Easy TRV settings",
+        "description": "These settings apply to all rooms.",
+        "data": {
+          "refresh_minutes": "Refresh interval (minutes)",
+          "verify_delay_seconds": "Read-back delay (seconds)",
+          "max_attempts": "Attempts",
+          "min_delta_kelvin": "Minimum change (K)",
+          "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)"
+        },
+        "data_description": {
+          "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 5 to 90 minutes.",
+          "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds.",
+          "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10.",
+          "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.1 to 1.0 K.",
+          "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 720 minutes."
+        }
+      }
+    },
+    "error": {
+      "timeout_range": "Enter 0 (off) or a value between 10 and 720 minutes."
+    }
+  },
+  "selector": {
+    "window_detection": {
+      "options": {
+        "on": "On",
+        "off": "Off",
+        "leave": "Leave unchanged"
+      }
+    },
+    "hysteresis": {
+      "options": {
+        "leave": "Leave unchanged",
+        "0.2": "0.2 K",
+        "0.4": "0.4 K",
+        "0.6": "0.6 K",
+        "0.8": "0.8 K",
+        "1.0": "1.0 K"
+      }
     }
   }
 }

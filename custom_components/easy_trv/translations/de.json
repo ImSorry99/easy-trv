@@ -1,0 +1,171 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Easy TRV einrichten"
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Easy TRV ist bereits eingerichtet. Es ist nur eine Instanz erlaubt."
+    }
+  },
+  "config_subentries": {
+    "room": {
+      "title": "Raum",
+      "entry_type": "Raum",
+      "initiate_flow": {
+        "user": "Raum hinzufügen",
+        "reconfigure": "Raum bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "Raum hinzufügen",
+          "description": "Lege den Raum aus einem Bereich an, um dessen Thermostate und Sensoren zu übernehmen, oder gib selbst einen Namen ein.",
+          "menu_options": {
+            "from_area": "Aus Bereich",
+            "custom": "Eigener Raum"
+          }
+        },
+        "from_area": {
+          "title": "Raum aus Bereich",
+          "description": "Der Raum übernimmt den Namen des Bereichs. Seine Thermostate und Sensoren werden auf der nächsten Seite vorgeschlagen.",
+          "data": {
+            "area_id": "Bereich"
+          }
+        },
+        "custom": {
+          "title": "Eigener Raum",
+          "data": {
+            "name": "Raumname"
+          }
+        },
+        "entities": {
+          "title": "Geräte des Raums",
+          "data": {
+            "trvs": "Thermostate (ZHA)",
+            "temp_sensors": "Temperatursensoren",
+            "humidity_sensors": "Feuchtesensoren",
+            "profile": "Profil",
+            "window_detection": "Fenstererkennung",
+            "hysteresis": "Hysterese"
+          },
+          "data_description": {
+            "trvs": "Die ZHA-Thermostate, die diesen Raum heizen. Ein Thermostat kann nur zu einem Raum gehören.",
+            "temp_sensors": "Reihenfolge = Priorität; der erste brauchbare Sensor wird verwendet.",
+            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet.",
+            "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt.",
+            "window_detection": "Die Fenster-offen-Erkennung der Thermostate ein- oder ausschalten oder unverändert lassen.",
+            "hysteresis": "Temperatur-Hysterese der Thermostate in Kelvin oder unverändert lassen."
+          }
+        },
+        "reconfigure": {
+          "title": "Raum bearbeiten",
+          "data": {
+            "name": "Raumname",
+            "trvs": "Thermostate (ZHA)",
+            "temp_sensors": "Temperatursensoren",
+            "humidity_sensors": "Feuchtesensoren",
+            "profile": "Profil",
+            "window_detection": "Fenstererkennung",
+            "hysteresis": "Hysterese"
+          },
+          "data_description": {
+            "trvs": "Die ZHA-Thermostate, die diesen Raum heizen. Ein Thermostat kann nur zu einem Raum gehören.",
+            "temp_sensors": "Reihenfolge = Priorität; der erste brauchbare Sensor wird verwendet.",
+            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet.",
+            "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt.",
+            "window_detection": "Die Fenster-offen-Erkennung der Thermostate ein- oder ausschalten oder unverändert lassen.",
+            "hysteresis": "Temperatur-Hysterese der Thermostate in Kelvin oder unverändert lassen."
+          }
+        }
+      },
+      "error": {
+        "no_trv": "Wähle mindestens ein Thermostat aus.",
+        "not_zha": "Mindestens eine der gewählten Entitäten ist kein ZHA-Thermostat.",
+        "no_profile": "Kein Profil passt zu allen gewählten Thermostaten. Lege ein Profil für das Modell an oder teile den Raum auf.",
+        "profile_mismatch": "Das gewählte Profil passt nicht zu allen gewählten Thermostaten.",
+        "trv_in_other_room": "Mindestens eines der gewählten Thermostate gehört bereits zu einem anderen Raum.",
+        "name_exists": "Ein Raum mit diesem Namen existiert bereits.",
+        "name_required": "Gib einen Namen für den Raum ein."
+      },
+      "abort": {
+        "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
+        "already_configured": "Ein Raum mit diesem Namen existiert bereits."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "room_status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "degraded": "Eingeschränkt",
+          "error": "Fehler"
+        }
+      }
+    }
+  },
+  "issues": {
+    "trv_unreachable": {
+      "title": "Thermostat {trv} in {room} antwortet nicht",
+      "description": "Easy TRV konnte „{attribute}“ an {trv} in {room} auch nach {attempts} Versuchen nicht setzen. Letzter Fehler: {error}\n\nPrüfe die Batterie des Thermostats und sein Zigbee-Signal (Entfernung zum nächsten Router oder Koordinator). Antwortet es weiterhin nicht, koppele es neu mit ZHA.\n\nDas Problem löst sich von selbst, sobald ein Schreibvorgang auf das Thermostat bestätigt wurde."
+    },
+    "trv_firmware": {
+      "title": "Dem Thermostat {trv} fehlt eine Firmware-Funktion",
+      "description": "Easy TRV kann „{capability}“ an {trv} nicht nutzen. Erforderliche Firmware: {required}. Installierte Firmware: {installed}.\n\nEasy TRV überspringt diese Einstellung für dieses Thermostat und steuert es ansonsten weiter. Aktualisiere die Firmware des Thermostats (zum Beispiel über das OTA-Update von ZHA), um sie zu aktivieren."
+    },
+    "zha_api_incompatible": {
+      "title": "Easy TRV kann die Zigbee-Integration nicht nutzen",
+      "description": "Easy TRV konnte nicht mit der installierten ZHA-Integration kommunizieren: {error}\n\nWurde ZHA gerade (neu) geladen, versucht Easy TRV es von selbst erneut und dieses Problem verschwindet, sobald es klappt. Schlägt es nach einem Home-Assistant-Update dauerhaft fehl, suche nach einer neueren Easy-TRV-Version."
+    },
+    "profile_invalid": {
+      "title": "Thermostat-Profil {file} ist ungültig",
+      "description": "Die Profildatei {file} im Ordner easy_trv/profiles deines Konfigurationsverzeichnisses wurde übersprungen: {error}\n\nKorrigiere oder entferne die Datei und lade die Easy-TRV-Integration neu. Das Problem verschwindet, sobald die Datei fehlerfrei geladen wird."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Easy-TRV-Einstellungen",
+        "description": "Diese Einstellungen gelten für alle Räume.",
+        "data": {
+          "refresh_minutes": "Auffrischung (Minuten)",
+          "verify_delay_seconds": "Rücklese-Verzögerung (Sekunden)",
+          "max_attempts": "Versuche",
+          "min_delta_kelvin": "Mindeständerung (K)",
+          "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)"
+        },
+        "data_description": {
+          "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 5 bis 90 Minuten.",
+          "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden.",
+          "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10.",
+          "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,1 bis 1,0 K.",
+          "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 720 Minuten."
+        }
+      }
+    },
+    "error": {
+      "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 720 Minuten ein."
+    }
+  },
+  "selector": {
+    "window_detection": {
+      "options": {
+        "on": "An",
+        "off": "Aus",
+        "leave": "Unverändert lassen"
+      }
+    },
+    "hysteresis": {
+      "options": {
+        "leave": "Unverändert lassen",
+        "0.2": "0,2 K",
+        "0.4": "0,4 K",
+        "0.6": "0,6 K",
+        "0.8": "0,8 K",
+        "1.0": "1,0 K"
+      }
+    }
+  }
+}

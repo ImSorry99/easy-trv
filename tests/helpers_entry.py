@@ -1,19 +1,16 @@
 """Shared helpers for the config-entry setup tests (not a conftest on purpose)."""
 
 import asyncio
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from datetime import timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-from homeassistant import loader
-from homeassistant.config_entries import ConfigFlow, ConfigSubentryData
+from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
-    mock_config_flow,
 )
 
 from custom_components.easy_trv.const import (
@@ -31,13 +28,11 @@ from tests.fake_gateway import FakeGateway
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from homeassistant.core import HomeAssistant
 
 GATEWAY_FACTORY = "custom_components.easy_trv.GATEWAY_FACTORY"
-CONFIG_FLOW_FILE = (
-    Path(__file__).parent.parent / "custom_components" / "easy_trv" / "config_flow.py"
-)
 CELSIUS = {"unit_of_measurement": "°C"}
 IEEE_A = "00:11"
 IEEE_B = "00:22"
@@ -100,37 +95,11 @@ def make_gateway(hass: HomeAssistant) -> FakeGateway:
     return gateway
 
 
-class _StandInFlow(ConfigFlow):
-    """Registered in place of the real config flow, which does not exist yet."""
-
-    VERSION = 1
-
-
-@contextmanager
-def _stand_in_config_flow(hass: HomeAssistant) -> Iterator[None]:
-    """Let config entries of the integration set up although it has no flow.
-
-    Home Assistant imports the ``config_flow`` platform of an integration and
-    looks up its flow handler before it sets up one of the integration's
-    entries. Both are replaced by stand-ins.
-    """
-    hass.data[loader.DATA_COMPONENTS][f"{DOMAIN}.config_flow"] = Mock()
-    with mock_config_flow(DOMAIN, _StandInFlow):
-        yield
-
-
 @contextmanager
 def patched_gateway(hass: HomeAssistant) -> Iterator[FakeGateway]:
-    """Make the integration use a pre-filled :class:`FakeGateway`.
-
-    As long as ``config_flow.py`` is missing, a stand-in flow is registered
-    as well so that entries can be set up at all.
-    """
+    """Make the integration use a pre-filled :class:`FakeGateway`."""
     gateway = make_gateway(hass)
-    with ExitStack() as stack:
-        if not CONFIG_FLOW_FILE.exists():
-            stack.enter_context(_stand_in_config_flow(hass))
-        stack.enter_context(patch(GATEWAY_FACTORY, lambda _hass: gateway))
+    with patch(GATEWAY_FACTORY, lambda _hass: gateway):
         yield gateway
 
 
