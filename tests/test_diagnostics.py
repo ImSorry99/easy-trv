@@ -31,6 +31,7 @@ def entry(hass):
     return make_entry(hass, [room_data()], OPTIONS)
 
 
+@pytest.mark.usefixtures("local_binding")
 async def test_diagnostics_contains_rooms(hass, hass_client, entry) -> None:
     await start(hass, entry)
 
