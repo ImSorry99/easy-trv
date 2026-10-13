@@ -35,3 +35,41 @@ def test_duplicate_intent_rejected() -> None:
     data["capabilities"]["copy"] = dict(data["capabilities"]["external_temperature"])
     with pytest.raises(vol.Invalid, match="duplicate intent"):
         schema.validate_profile_dict(data)
+
+
+def _mutated(where: str, key: str, value: object) -> dict[str, Any]:
+    """The built-in profile with one field of ``where`` replaced."""
+    data = _load_builtin()
+    target = {
+        "root": data,
+        "capability": data["capabilities"]["external_temperature"],
+        "write": data["capabilities"]["external_temperature"]["write"],
+    }[where]
+    target[key] = value
+    return data
+
+
+@pytest.mark.parametrize(
+    ("where", "key", "value", "message"),
+    [
+        ("root", "schema", 2, "unsupported schema version"),
+        ("root", "schema", True, "unsupported schema version"),
+        ("write", "endpoint", "1", "expected an integer"),
+        ("write", "endpoint", True, "expected an integer"),
+        ("write", "endpoint", 241, "between 0 and 240"),
+        ("write", "range", [0], "range must be a list"),
+        ("write", "range", "0-99", "range must be a list"),
+        ("write", "range", [5, 1], "low must not exceed high"),
+        ("write", "range", [0, "x"], "expected a number"),
+        ("write", "range", [0, True], "expected a number"),
+        ("write", "range", [0, float("inf")], "expected a finite number"),
+        ("capability", "verify", "equals", "verify must be a mapping"),
+        ("capability", "verify", {"rule": "one_of"}, "needs at least one list"),
+        ("capability", "verify", {"rule": "nope"}, "rule must be one of"),
+    ],
+)
+def test_invalid_documents_are_rejected_with_a_reason(
+    where: str, key: str, value: object, message: str
+) -> None:
+    with pytest.raises(vol.Invalid, match=message):
+        schema.validate_profile_dict(_mutated(where, key, value))
