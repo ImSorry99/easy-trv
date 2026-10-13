@@ -172,7 +172,9 @@ class RoomLogic:
 
         A report that only carries a newer ``last_reported`` refreshes the
         stored reading and nothing else, so a steady stream of reports cannot
-        keep pushing the debounce back.
+        keep pushing the debounce back. The same goes for a sensor that is not
+        the active one: its value is not what gets written, so however chatty
+        it is, it must not re-arm the debounce of the active sensor.
         """
         reading = event.reading
         previous = state.readings.get(reading.entity_id)
@@ -185,7 +187,8 @@ class RoomLogic:
         # A sensor taking over without a source switch (for example the
         # priority sensor reporting again) has a value that may differ.
         handed_over = state.active_sensor != before_sensor
-        if not (handed_over or _value_changed(previous, reading)):
+        is_active = reading.entity_id == state.active_sensor
+        if not (handed_over or (is_active and _value_changed(previous, reading))):
             return state, commands
         state, debounce = self._debounce_if_changed(state, now)
         return state, [*commands, *debounce]

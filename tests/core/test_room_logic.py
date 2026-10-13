@@ -436,6 +436,37 @@ def test_debounce_write_uses_the_priority_sensor_not_the_last_changed_one() -> N
     ]
 
 
+def test_a_chatty_secondary_sensor_does_not_starve_the_active_sensors_write() -> None:
+    st, _ = started()
+    st, cmds = logic().handle(SensorChanged(reading("sensor.t1", 21.8)), T0, st)
+    armed = debounces(cmds)
+    assert armed == [ScheduleDebounce(5.0)]
+    # sensor.t2 is not the active sensor, but reports a new value every second.
+    for second in range(1, 16):
+        at = T0 + timedelta(seconds=second)
+        chatty = reading("sensor.t2", 20.0 + second / 10, at=at)
+        st, cmds = logic().handle(SensorChanged(chatty), at, st)
+        armed += debounces(cmds)
+    assert armed == [ScheduleDebounce(5.0)]
+    assert st.debounce_pending
+    st, cmds = logic().handle(DebounceElapsed(), T0 + timedelta(seconds=15), st)
+    assert executes(cmds) == [
+        ("climate.a", SetRoomTemperature(21.8)),
+        ("climate.b", SetRoomTemperature(21.8)),
+    ]
+
+
+def test_a_secondary_sensor_alone_never_arms_the_debounce() -> None:
+    st, _ = started()
+    # The active value (21.3) is off the last written one, so only the sensor
+    # that reported decides whether the debounce is armed.
+    st = replace(st, last_written=20.0)
+    st, cmds = logic().handle(SensorChanged(reading("sensor.t2", 25.0)), T0, st)
+    assert debounces(cmds) == []
+    assert not st.debounce_pending
+    assert st.readings["sensor.t2"].value == 25.0
+
+
 # --- Refresh -------------------------------------------------------------
 
 
