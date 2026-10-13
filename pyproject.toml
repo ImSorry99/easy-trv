@@ -20,6 +20,7 @@ addopts = "-p no:cacheprovider --cov=custom_components.easy_trv --cov-report=ter
 
 [tool.mypy]
 strict = true
+explicit_package_bases = true
 files = [
     "custom_components/easy_trv/core",
     "custom_components/easy_trv/profiles",
