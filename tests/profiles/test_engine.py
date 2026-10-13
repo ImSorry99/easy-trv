@@ -138,9 +138,21 @@ def test_one_of_without_key_for_value_raises() -> None:
         profile.plan(SetWindowDetection(enabled=False), None)
 
 
-def test_non_finite_value_is_rejected(trvzb: engine.Profile) -> None:
-    with pytest.raises(ValueError, match="finite"):
-        trvzb.plan(SetRoomTemperature(float("nan")), None)
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_value_is_out_of_range(trvzb: engine.Profile, bad: float) -> None:
+    with pytest.raises(engine.ValueOutOfRange):
+        trvzb.plan(SetRoomTemperature(bad), None)
+    with pytest.raises(engine.ValueOutOfRange):
+        trvzb.plan(SetHysteresis(bad), (1, 3, 0))
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_value_is_out_of_range_without_declared_range(bad: float) -> None:
+    data = _builtin_dict()
+    del data["capabilities"]["external_temperature"]["write"]["range"]
+    profile = engine.Profile.from_dict(data)
+    with pytest.raises(engine.ValueOutOfRange):
+        profile.plan(SetRoomTemperature(bad), None)
 
 
 def test_map_encoder_without_entry_for_value_raises() -> None:
@@ -164,3 +176,14 @@ def test_capability_unsupported_message(trvzb: engine.Profile) -> None:
     with pytest.raises(engine.CapabilityUnsupported) as absent:
         engine.Profile.from_dict(data).plan(SetWindowDetection(enabled=True), None)
     assert "set_window_detection" in str(absent.value)
+
+
+def test_numeric_encoder_on_non_numeric_value_is_a_plain_value_error() -> None:
+    data = _builtin_dict()
+    window = data["capabilities"]["window_detection_flag"]
+    window["write"]["encode"] = "temperature_centi"
+    window["write"]["range"] = [0.0, 1.0]
+    profile = engine.Profile.from_dict(data)
+    with pytest.raises(ValueError, match="window_detection_flag") as exc:
+        profile.plan(SetWindowDetection(enabled=True), None)
+    assert not isinstance(exc.value, engine.ValueOutOfRange)

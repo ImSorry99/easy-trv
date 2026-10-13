@@ -127,15 +127,27 @@ def _value_key(value: _Value) -> str:
 
 
 def _numeric(spec: CapabilitySpec, value: _Value) -> float:
-    """Return ``value`` as a finite number or raise ``ValueError``."""
-    if isinstance(value, bool | str) or not math.isfinite(value):
-        msg = f"capability {spec.name!r} needs a finite number, got {value!r}"
-        raise ValueError(msg)
+    """Return ``value`` as a finite number.
+
+    Raises:
+        ValueError: If the value is not a number at all (a profile problem).
+        ValueOutOfRange: If the value is NaN or infinite (a bad reading).
+
+    """
+    if isinstance(value, bool | str):
+        msg = f"capability {spec.name!r} needs a number, got {value!r}"
+        raise ValueError(msg)  # noqa: TRY004 - the contract is ValueError
+    if not math.isfinite(value):
+        msg = f"capability {spec.name!r}: {value} is not a finite number"
+        raise ValueOutOfRange(msg)
     return value
 
 
 def _check_range(spec: CapabilitySpec, value: _Value) -> None:
-    """Raise ``ValueOutOfRange`` if the numeric value violates the range."""
+    """Raise ``ValueOutOfRange`` if the numeric value violates the range.
+
+    Non-finite numbers never lie within a range, so they are out of range too.
+    """
     if spec.value_range is None:
         return
     number = _numeric(spec, value)
