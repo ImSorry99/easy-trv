@@ -7,9 +7,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from zha.application.gateway import Gateway
 from zha.zigbee.device import Device
 from zigpy.types import EUI64
+from zigpy.zcl.foundation import Status, WriteAttributesStatusRecord
 
 from custom_components.easy_trv.adapters import zha_gateway
-from custom_components.easy_trv.adapters.zha_gateway import DeviceRef
+from custom_components.easy_trv.adapters.zha_gateway import DeviceRef, GatewayError
 from tests.fake_gateway import FakeGateway
 
 IEEE = "00:12:4b:00:aa:bb:cc:dd"
@@ -167,15 +168,45 @@ async def test_library_gateway_unavailable_when_import_breaks(hass) -> None:
         zha_gateway.ZhaLibraryGateway(hass)
 
 
-async def test_library_gateway_looks_up_gateway_once(hass) -> None:
+async def test_library_gateway_probes_once_then_looks_up_per_call(hass) -> None:
     gw_obj = _gateway_with(None)
     with patch(PATCH_TARGET, return_value=gw_obj) as get_gateway:
         gw = zha_gateway.ZhaLibraryGateway(hass)
+        get_gateway.assert_called_once_with(hass)
         with pytest.raises(zha_gateway.GatewayError):
             gw.is_available(IEEE)
         with pytest.raises(zha_gateway.GatewayError):
             gw.is_available(IEEE)
-    get_gateway.assert_called_once_with(hass)
+    assert get_gateway.call_count == 3
+
+
+async def test_library_gateway_follows_a_replaced_zha_gateway(hass) -> None:
+    """After a ZHA reload the old Gateway is shut down; use the new one."""
+    device_b, _ = _device_with_cluster(({0x600D: 7}, {}))
+    gateway_a = _gateway_with(MagicMock())
+    gateway_b = _gateway_with(device_b)
+    with patch(PATCH_TARGET, return_value=gateway_a) as get_gateway:
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        get_gateway.return_value = gateway_b  # ZHA entry reloaded
+        await gw.write(IEEE, 1, 0xFC11, 0x600D, 7)
+        assert await gw.read(IEEE, 1, 0xFC11, [0x600D]) == {0x600D: 7}
+        assert gw.is_available(IEEE) is not None
+    gateway_a.get_device.assert_not_called()
+    assert gateway_b.get_device.call_count == 3
+    device_b.write_zigbee_attribute.assert_awaited_once_with(1, 0xFC11, 0x600D, 7)
+
+
+async def test_library_gateway_lookup_failure_after_construction_raises(hass) -> None:
+    """ZHA being mid-reload (no gateway object) is a GatewayError, not a crash."""
+    with patch(PATCH_TARGET, return_value=_gateway_with(MagicMock())) as get_gateway:
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        get_gateway.side_effect = ValueError("No gateway object exists")
+        with pytest.raises(zha_gateway.GatewayError, match="No gateway object"):
+            await gw.write(IEEE, 1, 0xFC11, 0x600D, 7)
+        with pytest.raises(zha_gateway.GatewayError, match="No gateway object"):
+            await gw.read(IEEE, 1, 0xFC11, [0x600D])
+        with pytest.raises(zha_gateway.GatewayError, match="No gateway object"):
+            gw.is_available(IEEE)
 
 
 async def test_library_gateway_write_and_read_wrap_zha(hass) -> None:
@@ -273,6 +304,72 @@ async def test_library_gateway_write_wraps_errors(hass, error: Exception) -> Non
             await gw.write(IEEE, 1, 0xFC11, 0x600D, 2140)
     assert excinfo.value.__cause__ is error
     assert str(excinfo.value)
+
+
+def _record(status: Status, attrid: int | None = None) -> WriteAttributesStatusRecord:
+    if attrid is None:
+        return WriteAttributesStatusRecord(status=status)
+    return WriteAttributesStatusRecord(status=status, attrid=attrid)
+
+
+@pytest.mark.parametrize(
+    ("response", "status_name"),
+    [
+        # zigpy 2.x: one list holding one record per written attribute
+        ([[_record(Status.READ_ONLY, 0x600D)]], "READ_ONLY"),
+        # older zigpy: a WriteAttributesResponse (list) holding only the failures
+        ([[_record(Status.NOT_AUTHORIZED, 0x600D)]], "NOT_AUTHORIZED"),
+        # flat list of records
+        ([_record(Status.INVALID_VALUE, 0x600D)], "INVALID_VALUE"),
+        # a success record next to a failed one
+        (
+            [
+                [
+                    _record(Status.SUCCESS, 0x1234),
+                    _record(Status.UNSUPPORTED_ATTRIBUTE, 0x600D),
+                ]
+            ],
+            "UNSUPPORTED_ATTRIBUTE",
+        ),
+        # quirks may hand back bare statuses
+        ([Status.FAILURE], "FAILURE"),
+        (Status.INVALID_VALUE, "INVALID_VALUE"),
+    ],
+)
+async def test_library_gateway_write_rejected_status_raises(
+    hass, response, status_name
+) -> None:
+    device, _ = _device_with_cluster(({}, {}))
+    device.write_zigbee_attribute = AsyncMock(return_value=response)
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(zha_gateway.GatewayError, match="write rejected") as excinfo:
+            await gw.write(IEEE, 1, 0xFC11, 0x600D, 2140)
+    assert "0x600D" in str(excinfo.value)
+    assert status_name in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        [],
+        [[]],
+        # global success: a single SUCCESS record without an attribute id
+        [[_record(Status.SUCCESS)]],
+        [[_record(Status.SUCCESS, 0x600D)]],
+        [_record(Status.SUCCESS)],
+        [Status.SUCCESS],
+        Status.SUCCESS,
+    ],
+)
+async def test_library_gateway_write_accepts_success_responses(hass, response) -> None:
+    device, _ = _device_with_cluster(({}, {}))
+    device.write_zigbee_attribute = AsyncMock(return_value=response)
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        await gw.write(IEEE, 1, 0xFC11, 0x600D, 2140)
+    device.write_zigbee_attribute.assert_awaited_once_with(1, 0xFC11, 0x600D, 2140)
 
 
 async def test_library_gateway_unknown_device_raises(hass) -> None:
@@ -391,3 +488,18 @@ async def test_fake_gateway_contract() -> None:
     # an attribute that was never written cannot be read
     with pytest.raises(zha_gateway.GatewayError, match="0x600E"):
         await fake.read(IEEE, 1, 0xFC11, [0x600E])
+
+    # unknown devices fail like the real adapter, leaving no trace
+    unknown = "00:12:4b:00:00:00:00:99"
+    message = f"device {unknown} is not known to ZHA"
+    writes_before, reads_before = list(fake.writes), list(fake.reads)
+    store_before = dict(fake.store)
+    with pytest.raises(GatewayError, match=message):
+        fake.is_available(unknown)
+    with pytest.raises(GatewayError, match=message):
+        await fake.write(unknown, 1, 0xFC11, 0x600D, 2140)
+    with pytest.raises(GatewayError, match=message):
+        await fake.read(unknown, 1, 0xFC11, [0x600D])
+    assert fake.writes == writes_before
+    assert fake.reads == reads_before
+    assert fake.store == store_before

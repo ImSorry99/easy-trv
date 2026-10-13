@@ -127,9 +127,14 @@ class ZhaLibraryGateway:
                 helpers as zha_helpers,
             )
             from zigpy.types import EUI64  # noqa: PLC0415
+            from zigpy.zcl import foundation  # noqa: PLC0415
 
+            self._zha_helpers = zha_helpers
             self._eui64 = EUI64
-            self._gateway = zha_helpers.get_zha_gateway(hass)
+            self._foundation = foundation
+            # Probe once so an unusable ZHA fails early. The gateway object is
+            # looked up again on every call (see ``_device``).
+            zha_helpers.get_zha_gateway(hass)
         # Internal API: any failure (ImportError, KeyError, ValueError, ...)
         # means ZHA is unusable, so the catch is deliberately broad.
         except Exception as err:
@@ -141,7 +146,11 @@ class ZhaLibraryGateway:
 
     def _device(self, ieee: str) -> Device:
         try:
-            device = self._gateway.get_device(self._eui64.convert(ieee))
+            # Looked up per call: a ZHA config-entry reload replaces the Gateway
+            # object and shuts the old one down, so a cached one would fail
+            # every call until Easy TRV is reloaded.
+            gateway = self._zha_helpers.get_zha_gateway(self._hass)
+            device = gateway.get_device(self._eui64.convert(ieee))
         # Internal API, deliberately broad.
         except Exception as err:
             raise GatewayError(_describe(err)) from err
@@ -159,17 +168,53 @@ class ZhaLibraryGateway:
         except Exception as err:
             raise GatewayError(_describe(err)) from err
 
+    def _first_rejection(self, response: object) -> object | None:
+        """Return the first non-SUCCESS status in a write response, if any.
+
+        Understands the shapes zigpy and quirks produce: a (nested) list of
+        ``WriteAttributesStatusRecord`` and bare ``Status`` values. ``None``, an
+        empty response and a lone SUCCESS record (``attrid=None`` means every
+        attribute succeeded) all count as success.
+        """
+        if isinstance(response, list | tuple):
+            for item in response:
+                if (rejected := self._first_rejection(item)) is not None:
+                    return rejected
+            return None
+        if isinstance(response, self._foundation.WriteAttributesStatusRecord):
+            response = response.status
+        if (
+            isinstance(response, self._foundation.Status)
+            and response != self._foundation.Status.SUCCESS
+        ):
+            return response
+        return None
+
     async def write(
         self, ieee: str, endpoint: int, cluster: int, attribute: int, value: int
     ) -> None:
-        """Write one attribute (never with a manufacturer code)."""
+        """Write one attribute (never with a manufacturer code).
+
+        Raises:
+            GatewayError: If ZHA fails to send the write or the device answers
+                with a status other than SUCCESS.
+
+        """
         device = self._device(ieee)
         try:
-            await device.write_zigbee_attribute(endpoint, cluster, attribute, value)
+            response = await device.write_zigbee_attribute(
+                endpoint, cluster, attribute, value
+            )
         # Internal API (ZHAException, ValueError, TimeoutError, ...), deliberately
         # broad. The controller applies its own timeout.
         except Exception as err:
             raise GatewayError(_describe(err)) from err
+        # zigpy reports a device-side rejection (READ_ONLY, INVALID_VALUE, ...)
+        # as status records in the response instead of raising.
+        rejected = self._first_rejection(response)
+        if rejected is not None:
+            msg = f"write rejected for 0x{attribute:04X}: {rejected}"
+            raise GatewayError(msg)
 
     async def read(
         self, ieee: str, endpoint: int, cluster: int, attributes: Sequence[int]

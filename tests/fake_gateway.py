@@ -21,7 +21,9 @@ class FakeGateway:
     attribute)``. ``writes`` and ``reads`` record every call. ``fail_write``
     and ``fail_read`` (keyed by ``(ieee, attribute)``) raise a
     :class:`GatewayError` once and are then cleared; ``read_override`` returns
-    the given value instead of the stored one.
+    the given value instead of the stored one. Like the real adapter, every
+    method raises :class:`GatewayError` for an IEEE that no registered device
+    owns.
     """
 
     def __init__(self) -> None:
@@ -63,14 +65,22 @@ class FakeGateway:
         except KeyError:
             raise NotZhaEntity(climate_entity_id) from None
 
+    def _require_known(self, ieee: str) -> None:
+        """Raise like the real adapter for an IEEE ZHA does not know."""
+        if all(ref.ieee != ieee for ref in self.devices.values()):
+            msg = f"device {ieee} is not known to ZHA"
+            raise GatewayError(msg)
+
     def is_available(self, ieee: str) -> bool:
         """Return the scripted availability (default: available)."""
+        self._require_known(ieee)
         return self.availability.get(ieee, True)
 
     async def write(
         self, ieee: str, endpoint: int, cluster: int, attribute: int, value: int
     ) -> None:
         """Record and store a write unless a failure is scripted."""
+        self._require_known(ieee)
         self.writes.append((ieee, endpoint, cluster, attribute, value))
         message = self.fail_write.pop((ieee, attribute), None)
         if message is not None:
@@ -81,6 +91,7 @@ class FakeGateway:
         self, ieee: str, endpoint: int, cluster: int, attributes: Sequence[int]
     ) -> Mapping[int, int]:
         """Return overrides or stored values; unknown attributes fail."""
+        self._require_known(ieee)
         self.reads.append((ieee, endpoint, cluster, tuple(attributes)))
         result: dict[int, int] = {}
         for attr in attributes:
