@@ -427,10 +427,28 @@ def test_refresh_skips_unavailable_trv() -> None:
     assert executes(cmds) == [("climate.b", SetRoomTemperature(21.3))]
 
 
-def test_refresh_skips_unsupported_trv() -> None:
+def test_refresh_still_drives_a_trv_with_an_unsupported_capability() -> None:
     st, _ = started()
     st = with_trv(
-        verified_value_write(st, at=T0), "climate.b", health=TrvHealth.UNSUPPORTED
+        verified_value_write(st, at=T0),
+        "climate.b",
+        health=TrvHealth.UNSUPPORTED,
+        unsupported=frozenset({"hysteresis"}),
+    )
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert executes(cmds) == [
+        ("climate.a", SetRoomTemperature(21.3)),
+        ("climate.b", SetRoomTemperature(21.3)),
+    ]
+
+
+def test_refresh_skips_a_trv_that_lacks_the_capability_being_written() -> None:
+    st, _ = started()
+    st = with_trv(
+        verified_value_write(st, at=T0),
+        "climate.b",
+        health=TrvHealth.UNSUPPORTED,
+        unsupported=frozenset({"room_temperature"}),
     )
     _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
     assert executes(cmds) == [("climate.a", SetRoomTemperature(21.3))]
@@ -969,12 +987,21 @@ def test_unsupported_drops_the_pending_retry_of_that_capability() -> None:
     assert executes(cmds) == []
 
 
-def test_unsupported_trv_receives_no_further_writes() -> None:
+def test_a_flagged_trv_keeps_receiving_the_other_capabilities() -> None:
     st, _ = started()
     st, _ = logic().handle(result("climate.a", SetHysteresis(0.4), UNSUPPORTED), T0, st)
     st = verified_value_write(st, T0)
     _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=20), st)
-    assert executes(cmds) == [("climate.b", SetRoomTemperature(21.3))]
+    assert executes(cmds) == [
+        ("climate.a", SetRoomTemperature(21.3)),
+        ("climate.b", SetRoomTemperature(21.3)),
+    ]
+    st, _ = logic().handle(SensorChanged(reading("sensor.t1", 22.0)), T0, st)
+    _, cmds = logic().handle(DebounceElapsed(), T0, st)
+    assert executes(cmds) == [
+        ("climate.a", SetRoomTemperature(22.0)),
+        ("climate.b", SetRoomTemperature(22.0)),
+    ]
 
 
 def test_ok_for_a_flagged_capability_clears_the_firmware_issue() -> None:
@@ -1162,7 +1189,7 @@ def test_regaining_availability_restores_health_and_status() -> None:
     assert cmds[-1].status == RoomStatus.OK
 
 
-def test_regaining_availability_keeps_unsupported_trv_blocked() -> None:
+def test_regaining_availability_resyncs_a_trv_with_an_unsupported_capability() -> None:
     st, _ = started()
     st, _ = logic().handle(result("climate.a", SetHysteresis(0.4), UNSUPPORTED), T0, st)
     st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
@@ -1170,7 +1197,10 @@ def test_regaining_availability_keeps_unsupported_trv_blocked() -> None:
         TrvAvailabilityChanged("climate.a", available=True), T0, st
     )
     assert st.trvs["climate.a"].health == TrvHealth.UNSUPPORTED
-    assert executes(cmds) == []
+    assert executes(cmds) == [
+        ("climate.a", SetSource("external")),
+        ("climate.a", SetRoomTemperature(21.3)),
+    ]
     assert cmds[-1].status == RoomStatus.DEGRADED
 
 
@@ -1266,6 +1296,171 @@ def test_recovery_after_an_outage_still_clears_the_unreachable_issue() -> None:
     assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
     assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
     assert st.trvs["climate.a"].last_error is None
+
+
+# --- Unsupported capabilities never stop a thermostat ---------------------
+
+
+def flagged_start(*, a_available: bool = True) -> tuple[RoomState, list[Command]]:
+    """Start a room whose climate.a is already known to lack hysteresis."""
+    initial = with_trv(
+        RoomState.initial(CFG),
+        "climate.a",
+        health=TrvHealth.UNSUPPORTED,
+        unsupported=frozenset({"hysteresis"}),
+    )
+    return logic().handle(
+        Start(
+            (reading("sensor.t1", 21.3), reading("sensor.t2", 20.0)),
+            {"climate.a": a_available, "climate.b": True},
+        ),
+        T0,
+        initial,
+    )
+
+
+def test_start_drives_a_flagged_trv_but_skips_the_flagged_capability() -> None:
+    st, cmds = flagged_start()
+    assert [i for t, i in executes(cmds) if t == "climate.a"] == [
+        SetWindowDetection(enabled=True),
+        SetSource("external"),
+        SetRoomTemperature(21.3),
+    ]
+    assert [i for t, i in executes(cmds) if t == "climate.b"] == [
+        SetWindowDetection(enabled=True),
+        SetHysteresis(0.4),
+        SetSource("external"),
+        SetRoomTemperature(21.3),
+    ]
+    assert st.trvs["climate.a"].health == TrvHealth.UNSUPPORTED
+    assert st.trvs["climate.a"].settings_applied
+    assert cmds[-1].status == RoomStatus.DEGRADED
+
+
+def test_regain_resyncs_a_flagged_trv_without_the_flagged_capability() -> None:
+    st, _ = flagged_start(a_available=False)
+    assert not st.trvs["climate.a"].settings_applied
+    st, cmds = logic().handle(
+        TrvAvailabilityChanged("climate.a", available=True), T0, st
+    )
+    assert executes(cmds) == [
+        ("climate.a", SetWindowDetection(enabled=True)),
+        ("climate.a", SetSource("external")),
+        ("climate.a", SetRoomTemperature(21.3)),
+    ]
+    assert st.trvs["climate.a"].settings_applied
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    _, cmds = logic().handle(
+        TrvAvailabilityChanged("climate.a", available=True), T0, st
+    )
+    assert executes(cmds) == [
+        ("climate.a", SetSource("external")),
+        ("climate.a", SetRoomTemperature(21.3)),
+    ]
+
+
+def test_source_switching_still_reaches_a_flagged_trv() -> None:
+    st, _ = flagged_start()
+    st, cmds = logic().handle(Tick(), T0 + timedelta(minutes=121), st)
+    assert executes(cmds) == [
+        ("climate.a", SetSource("internal")),
+        ("climate.b", SetSource("internal")),
+    ]
+    later = T0 + timedelta(minutes=121)
+    _, cmds = logic().handle(
+        SensorChanged(reading("sensor.t1", 21.0, at=later)), later, st
+    )
+    assert executes(cmds) == [
+        ("climate.a", SetSource("external")),
+        ("climate.b", SetSource("external")),
+        ("climate.a", SetRoomTemperature(21.0)),
+        ("climate.b", SetRoomTemperature(21.0)),
+    ]
+
+
+def test_a_flagged_source_capability_is_skipped_on_every_path() -> None:
+    st, _ = started()
+    st = with_trv(
+        st,
+        "climate.a",
+        health=TrvHealth.UNSUPPORTED,
+        unsupported=frozenset({"source"}),
+    )
+    st, cmds = logic().handle(Tick(), T0 + timedelta(minutes=121), st)
+    assert executes(cmds) == [("climate.b", SetSource("internal"))]
+    st, cmds = logic().handle(
+        result("climate.a", TEMP, Signal("failsafe")),
+        T0,
+        replace(st, source=Source.EXTERNAL),
+    )
+    assert executes(cmds) == [("climate.a", SetRoomTemperature(21.3))]
+
+
+# --- Fail-safe on the re-enable write itself -----------------------------
+
+
+def test_failsafe_on_the_source_write_is_a_failed_attempt_not_a_reenable() -> None:
+    st, _ = started()
+    st, cmds = logic().handle(
+        result("climate.a", SetSource("external"), Signal("failsafe")), T0, st
+    )
+    assert of_type(cmds, ScheduleRetry) == [ScheduleRetry("climate.a", "source", 5.0)]
+    assert executes(cmds) == []
+    assert not of_type(cmds, FireEvent)
+    trv = st.trvs["climate.a"]
+    assert trv.attempts == {"source": 1}
+    assert trv.pending_retry == {"source": SetSource("external")}
+    assert trv.failsafe_seen_at is None
+    st, cmds = logic().handle(RetryDue("climate.a", "source"), T0, st)
+    assert executes(cmds) == [("climate.a", SetSource("external"))]
+
+
+def test_a_persistent_failsafe_ends_in_the_unreachable_issue() -> None:
+    st, _ = started()
+    st, cmds = logic().handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_FAILSAFE]
+    reenable = SetSource("external")
+    delays: list[float] = []
+    for _ in range(2):
+        st, cmds = logic().handle(
+            result("climate.a", reenable, Signal("failsafe")), T0, st
+        )
+        delays += [c.seconds for c in of_type(cmds, ScheduleRetry)]
+        assert executes(cmds) == []
+        assert not of_type(cmds, (FireEvent, RaiseIssue))
+        st, cmds = logic().handle(RetryDue("climate.a", "source"), T0, st)
+        assert executes(cmds) == [("climate.a", reenable)]
+    st, cmds = logic().handle(result("climate.a", reenable, Signal("failsafe")), T0, st)
+    assert delays == [5.0, 15.0]
+    assert executes(cmds) == []
+    assert of_type(cmds, ScheduleRetry) == []
+    assert of_type(cmds, RaiseIssue) == [
+        RaiseIssue(
+            "unreachable",
+            "climate.a",
+            {
+                "room": "Living",
+                "trv": "climate.a",
+                "attribute": "source",
+                "attempts": "3",
+                "error": "signal: failsafe",
+            },
+        )
+    ]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_WRITE_FAILED]
+    assert st.trvs["climate.a"].health == TrvHealth.ERROR
+    assert cmds[-1].status == RoomStatus.ERROR
+
+
+def test_failsafe_on_a_settings_write_is_ignored() -> None:
+    st, _ = started()
+    before = st
+    st, cmds = logic().handle(
+        result("climate.a", SetHysteresis(0.4), Signal("failsafe")), T0, st
+    )
+    assert [c.level for c in of_type(cmds, Log)] == ["debug"]
+    assert executes(cmds) == []
+    assert st == before
 
 
 # --- Per-thermostat settings ---------------------------------------------

@@ -135,6 +135,7 @@ class RoomLogic:
                 state, commands = self._on_result(event, now, state)
             case _:
                 assert_never(event)
+        commands = self._drop_unsupported(state, commands)
         state = self._supersede_pending(state, commands)
         return state, [*commands, self._status(state, now)]
 
@@ -144,12 +145,11 @@ class RoomLogic:
         """Seed readings and availability, apply settings, pick the source."""
         trvs = {}
         for trv in self._cfg.trvs:
-            available = event.trv_available.get(trv.entity_id, True)
-            trvs[trv.entity_id] = replace(
-                state.trvs.get(trv.entity_id, TrvState()),
-                available=available,
-                health=TrvHealth.OK if available else TrvHealth.UNAVAILABLE,
+            known = state.trvs.get(trv.entity_id, TrvState())
+            known = replace(
+                known, available=event.trv_available.get(trv.entity_id, True)
             )
+            trvs[trv.entity_id] = replace(known, health=self._baseline(known))
         readings = {**state.readings, **{r.entity_id: r for r in event.sensors}}
         state = replace(state, readings=readings, trvs=trvs)
         state, commands = self._apply_settings(state, self._writable(state))
@@ -238,6 +238,11 @@ class RoomLogic:
                 return self._on_failure(event, outcome, state)
             case Unsupported():
                 return self._on_unsupported(event, outcome, state)
+            case Signal(name="failsafe") if isinstance(event.intent, SetSource):
+                # The read-back of the re-enable write itself: not a new
+                # fail-safe, otherwise a thermostat that stays in fail-safe
+                # would be re-enabled again and again.
+                return self._on_failure(event, outcome, state)
             case Signal():
                 return self._on_signal(event, outcome, now, state)
             case _:
@@ -275,7 +280,10 @@ class RoomLogic:
         return state, commands
 
     def _on_failure(
-        self, event: OperationResult, outcome: Failed | Mismatch, state: RoomState
+        self,
+        event: OperationResult,
+        outcome: Failed | Mismatch | Signal,
+        state: RoomState,
     ) -> _Step:
         """Count the failed attempt, then retry with backoff or give up."""
         trv, capability = event.trv, event.capability
@@ -356,8 +364,11 @@ class RoomLogic:
     ) -> _Step:
         """React to the thermostat falling back to its own sensor (fail-safe)."""
         trv = event.trv
-        if outcome.name != "failsafe":
-            return state, [Log("debug", f"{trv}: ignoring signal {outcome.name!r}")]
+        if outcome.name != "failsafe" or not isinstance(
+            event.intent, SetRoomTemperature
+        ):
+            note = f"{trv}: ignoring signal {outcome.name!r} on {event.capability}"
+            return state, [Log("debug", note)]
         if state.source is not Source.EXTERNAL:
             note = f"{trv}: ignoring fail-safe, source is {state.source.value}"
             return state, [Log("debug", note)]
@@ -459,8 +470,6 @@ class RoomLogic:
 
     def _resync_trv(self, state: RoomState, now: datetime, trv: str) -> _Step:
         """Bring a returning thermostat in line with the room's current state."""
-        if trv not in self._writable(state):
-            return state, []
         state, commands = self._apply_settings(state, [trv])
         if state.source is Source.EXTERNAL:
             commands.append(Execute(trv, SetSource("external")))
@@ -473,6 +482,18 @@ class RoomLogic:
         return state, commands
 
     # --- Helpers ---------------------------------------------------------
+
+    def _drop_unsupported(
+        self, state: RoomState, commands: list[Command]
+    ) -> list[Command]:
+        """Skip writes of capabilities the thermostat's firmware lacks."""
+        return [
+            command
+            for command in commands
+            if not isinstance(command, Execute)
+            or self._capability_of(command.intent)
+            not in state.trvs[command.trv].unsupported
+        ]
 
     def _supersede_pending(
         self, state: RoomState, commands: list[Command]
@@ -505,10 +526,12 @@ class RoomLogic:
         return TrvHealth.OK
 
     @staticmethod
-    def _error_text(outcome: Failed | Mismatch) -> str:
-        """Describe a failed or mismatched write for issues and the status."""
+    def _error_text(outcome: Failed | Mismatch | Signal) -> str:
+        """Describe a failed write for issues and the status."""
         if isinstance(outcome, Failed):
             return outcome.error
+        if isinstance(outcome, Signal):
+            return f"signal: {outcome.name}"
         return f"mismatch: expected {sorted(outcome.expected)} got {outcome.actual}"
 
     def _event_data(self, trv: str) -> dict[str, Any]:
@@ -536,12 +559,11 @@ class RoomLogic:
 
     def _writable(self, state: RoomState) -> list[str]:
         """Return the thermostats that can currently receive commands."""
-        writable: list[str] = []
-        for trv in self._cfg.trvs:
-            trv_state = state.trvs[trv.entity_id]
-            if trv_state.available and trv_state.health is not TrvHealth.UNSUPPORTED:
-                writable.append(trv.entity_id)
-        return writable
+        return [
+            trv.entity_id
+            for trv in self._cfg.trvs
+            if state.trvs[trv.entity_id].available
+        ]
 
     def _status(self, state: RoomState, now: datetime) -> SetStatus:
         """Derive the room status and its attributes from the state."""
