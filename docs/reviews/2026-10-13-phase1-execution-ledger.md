@@ -1,0 +1,170 @@
+# Phase 1 execution ledger (rulings and deferred findings)
+
+Binding decisions taken during the subagent-driven execution of `docs/plans/2026-10-12-phase1-implementation.md` (2026-10-12/13). Every `Ruling:` line is a decision the controller took on the owner's behalf; every `minor (deferred)` / `parked` line is a reviewer finding set aside for a later pass. Task reviews: Opus; final whole-branch review: Fable; implementers: Sonnet.
+
+```
+# SDD ledger — plan: docs/plans/2026-10-12-phase1-implementation.md
+Spec: REQUIREMENTS.md (binding), docs/specs/2026-10-12-easy-trv-design.md, docs/concept/profiles.md, docs/profiles/sonoff-trvzb-native.md
+Execution: subagent-driven (implementers: sonnet, per-task reviewers: opus, final review: fable). Branch feat/phase1 in place (Oliver, 2026-10-12). No Co-Authored-By lines in commits.
+
+## Pre-flight (shared interfaces)
+- T2 values → T4 engine (to_centi), T5 model (Version), T7 adapter (parse_zha_sw_version): names consistent.
+- T4 core/model.py intents → T5 adds enums/state/events/commands to the same file: consistent, T5 must not rename intents.
+- T4 Profile.capability_for(intent) → T8 passes it as RoomLogic.capability_of; T5/T6 tests use their own lambda. Ruling: RoomLogic keys temperature bookkeeping (last_written, last_value_write) on isinstance(intent, SetRoomTemperature), never on the capability string. Cost if wrong: refresh never fires.
+- T3 loader needs T4 Profile.from_dict. Ruling: reorder — Task 3 delivers schema + builtin YAML only; loader (+ its tests and fixtures) moves into Task 4. Cost if wrong: none, same code, different commit.
+- T7 FakeGateway contract (devices, availability, store, writes, reads, fail_write, read_override) → T8/T9 tests: consistent.
+- T8 RoomController(hass, config, params, profile, gateway, device_refs) + issues.py → T9 __init__: consistent.
+- T9 writes strings.json/en.json (entity, issues) → T10 adds config/options/config_subentries/selector keys: T10 must merge into the existing file, not replace it.
+
+## Tasks
+- Task 1: dispatched (implementer sonnet, BASE fa409d9)
+- Task 1: Ruling: requires-python ">=3.14.2" instead of ">=3.14" — homeassistant 2026.10.1 requires it; cost if wrong: none (stricter floor).
+- Task 1: Ruling: pytest `pythonpath = ["."]` added — custom_components must be importable; cost if wrong: none.
+- Task 1: Ruling: ruff per-file-ignores add INP001 for tests, drop removed ANN101/ANN102, keep D212 — tooling only; cost if wrong: lint noise.
+- Task 1: note: uv cache not writable in sandbox → implementers use UV_CACHE_DIR=.uv-cache (gitignored from Task 2 on).
+- Task 1: review (opus) → Needs fixes. Important: (1) manifest "config_flow": true without config_flow.py breaks hassfest at this commit; (2) ANN401 missing from ruff ignore.
+- Task 1: Ruling: "config_flow": true came from the controller's dispatch, not the brief — remove it now, Task 10 adds it together with config_flow.py. Cost if wrong: one manifest line.
+- Task 1: minor (deferred): CI uses `uv sync` instead of `uv sync --locked` (lockfile drift not enforced).
+- Task 1: minor (deferred): autouse enable_custom_integrations boots hass for every test, including core/profile tests that need no HA.
+- Task 1: minor (deferred): D212 and D213 both ignored (plan-mandated), D212 comment copied from blueprint is inaccurate.
+- Task 1: fix round 1/5 (2 addressed, 0 open — config_flow key removed, ANN401 ignored; commits 26eec6e..a9dbdac)
+- Task 1: complete (commits fa409d9..a9dbdac, review clean)
+- Task 2: dispatched (implementer sonnet, BASE a9dbdac)
+- Task 2: implementer DONE_WITH_CONCERNS (commit 2a4e391); first opus review failed on session rate limit (2026-10-12 late), re-dispatched 2026-10-13.
+- Task 2: review (opus) → Approved.
+- Task 2: minor (deferred): parse_zha_sw_version accepts hex without 0x prefix ("5124" → (5,1,36)); make the prefix mandatory and return None for raw values > 0xFFFF.
+- Task 2: minor (deferred): `# noqa: PT011` in tests/core/test_values.py avoidable via match=.
+- Task 2: minor (deferred): no tests for from_centi, non-finite guard, bare "F" unit, "0X" prefix, round_tenth.
+- Task 2: minor (deferred): to_centi/round_tenth raise InvalidOperation for inf/huge and have no clamp; callers must range-check first (document or guard).
+- Task 2: complete (commits a9dbdac..2a4e391, review clean)
+- Task 3: dispatched (implementer sonnet, BASE 2a4e391) — scope per pre-flight ruling: schema + builtin YAML + schema tests only; loader moves to Task 4.
+- Task 3: first implementer died (API connection refused), tree clean, re-dispatched 2026-10-13.
+- Task 3: Ruling: intent names are set_room_temperature/set_source/set_window_detection/set_hysteresis (plan, Task 4 interface); docs/concept/profiles.md YAML lines using apply_settings.* are corrected in a separate docs commit within Task 3. Cost if wrong: two YAML lines and one doc section.
+- Task 3: review (opus) → Approved.
+- Task 3: minor (deferred): schema `_number` can raise OverflowError (not vol.Invalid) on huge ints; catch and re-raise as vol.Invalid.
+- Task 3: minor (deferred): empty `map: {}` and `capabilities: {}` validate; add vol.Length(min=1).
+- Task 3: minor (deferred): duplicate-intent vol.Invalid has no path.
+- Task 3: minor (deferred): strictness decisions (bool rejection, \Z, range ordering, extra keys, empty one_of, bounds, schema 2) have no committed tests (schema.py 75 % covered).
+- Task 3: minor (deferred): test path relies on repo-root cwd (plan-mandated).
+- Task 3: complete (commits 2a4e391..a74ed42, review clean)
+- Task 4: dispatched (implementer sonnet, BASE a74ed42) — includes Task 3 Steps 5–6 (loader) per pre-flight ruling.
+- Task 4: Ruling: mypy explicit_package_bases = true added (needed once modules import each other via custom_components.easy_trv.*); cost if wrong: none.
+- Task 4: Ruling: loader.py may import const (and thus HA at runtime); engine.py and core/ stay HA-free. Cost if wrong: none.
+- Task 4: review (opus) → Needs fixes. Important: non-finite values with a declared range raise plain ValueError instead of ValueOutOfRange (engine._check_range).
+- Task 4: Ruling (carried to Task 8): the controller's _run_operation maps CapabilityUnsupported → Unsupported and ANY ValueError (incl. ValueOutOfRange, encoder/intent mismatch) → Failed, so a bad profile or value never escapes as an exception. Cost if wrong: an unexpected ValueError surfaces as a retryable failure instead of a crash — acceptable.
+- Task 4: minor (deferred): encoder/intent compatibility only checked at plan time (user profile can load but fail every plan).
+- Task 4: minor (deferred): frozen dataclasses with MappingProxyType fields are unhashable.
+- Task 4: minor (deferred): duplicate built-in ids overwrite silently.
+- Task 4: minor (deferred): loader does not catch RecursionError/MemoryError from pathological YAML.
+- Task 4: minor (deferred): invalid-fixture loader test does not assert why each file failed.
+- Task 4: minor (deferred): hysteresis uses banker's rounding (plan-mandated), harmless on the 0.1 grid.
+- Task 4: minor (deferred): loader tests depend on repo-root cwd (plan-mandated).
+- Task 4: note: `map` encoder keys use str(value).lower(), consistent with one_of keys (undisclosed but sound deviation; document in profile format notes).
+- Task 4: fix round 1/5 (1 addressed, 0 open — non-finite → ValueOutOfRange; commits 5bea203..16c6f33)
+- Task 4: complete (commits a74ed42..16c6f33, review clean)
+- Task 5: dispatched (implementer sonnet, BASE 16c6f33)
+- Task 5: Ruling: `last_written` is the value last *issued* (set when the write command is emitted), `last_value_write` is the timestamp of the last *verified* value write (set on Ok in Task 6); refresh fires only when last_value_write is not None. Test helper verified_value_write() sets last_value_write via dataclasses.replace. Cost if wrong: refresh timing off by one cycle.
+- Task 5: first implementer died at rate limit after writing tests/core/test_room_logic.py and the model.py additions (uncommitted, room_logic.py missing); fresh implementer resumes from that tree (RED first).
+- Task 5: Ruling: min_delta compares the RAW active sensor value against last_written (the rounded value last issued), with a 1e-9 tolerance; issued values are round_tenth(value). The dispatch's "compare rounded values" contradicted the brief's verbatim test (21.3→21.35 must not arm). Cost if wrong: one extra or one missing write per 0.05 K edge.
+- Task 5: Ruling (carried to Task 6): settings_applied becomes per-TRV (field on TrvState); on TrvAvailabilityChanged(True) the resync emits the settings intents for that TRV if not yet applied, then SetSource(current) and SetRoomTemperature if external. Cost if wrong: a TRV that was offline at start keeps its old window/hysteresis settings.
+- Task 5: Ruling: last_value_write is set on Ok results in Task 6 (as planned); nothing sets it in Task 5.
+- Task 5: review (opus) → Approved.
+- Task 5: minor (deferred): test_state_is_never_mutated uses shallow replace(); use copy.deepcopy.
+- Task 5: minor (deferred): _on_debounce_elapsed does not refresh state.active_sensor and has no EXTERNAL guard.
+- Task 5: minor (deferred): last_written/source updated even when no TRV is writable.
+- Task 5: minor (deferred): _on_start resets TRV health unconditionally (fine if Start happens once per lifetime).
+- Task 5: minor (deferred): GlobalParams.defaults() duplicates const DEFAULT_* without a tying test; failsafe boundary (== refresh) untested; avoidable type: ignore in a test.
+- Task 5: Ruling (carried to Task 6): debounce_pending is cleared whenever a value write is emitted (regain, refresh, debounce) and a DebounceElapsed with debounce_pending False is ignored — avoids duplicate writes. Cost if wrong: one redundant write.
+- Task 5: Ruling (carried to Task 6): availability resync decides by TRV state (health/availability), never by room-level last_written/source alone.
+- Task 5: complete (commits 16c6f33..e9b400e, review clean)
+- Task 6: dispatched (implementer sonnet, BASE e9b400e)
+- Task 6: implementer DONE_WITH_CONCERNS (commit c42dbb9). Accepted gap-closures: ClearIssue on Ok when last_error set; duplicate availability events no-op; RetryDue for non-writable TRV drops the intent (settings → re-apply on regain); Unsupported/exhaustion drop pending retry. Model: settings_applied moved to TrvState (spec §3 / plan line 326 to be updated in Task 11 docs).
+- Task 6: Ruling (pre-review fix): UNSUPPORTED must not block a TRV — writable = available; an Execute is skipped only when capability_of(intent) ∈ trv.unsupported. Otherwise a TRV on FW 1.2.1 (no hysteresis) would never receive the external temperature (requirement F2 gates the profile minimum, not single capabilities). Cost if wrong: repeated Unsupported outcomes for one capability (idempotent issue).
+- Task 6: Ruling (pre-review fix): a Signal("failsafe") that is the outcome of a SetSource operation (the re-enable itself) is treated like Mismatch (attempt counting, backoff, eventual unreachable issue) instead of re-emitting the re-enable; only signals seen on value writes trigger the re-enable path. Cost if wrong: a stuck TRV surfaces as "unreachable" instead of looping silently.
+- Task 6: minor (deferred): room_logic.py is 583 lines; consider splitting result handling from reconciliation.
+- Task 6: pre-review fixes done (commit 25ae25c); note: unsupported flags are sticky until reload (firmware update needs a reload) — acceptable, document in README (Task 11).
+- Task 6: review (opus) → Needs fixes. Important: fail-safe re-enable unbounded with the shipped profile (value write's also_read 0x600E re-triggers Signal("failsafe") on the re-enable's own value write; source-unsupported TRV loops without any counter).
+- Task 6: Ruling (amends Ruling B): on Signal("failsafe") from a SetRoomTemperature result, set failsafe_seen_at; emit the event/log and the re-enable (SetSource(external) + SetRoomTemperature) ONLY if the TRV is writable (available), the `source` capability is not unsupported, the source capability has no attempts and no pending retry, and the TRV is not in ERROR. Otherwise record failsafe_seen_at only (debug log). Cost if wrong: one missed re-enable until the next refresh (≤ 20 min).
+- Task 6: Ruling: when a SetRoomTemperature write fails, the pending retry stores SetRoomTemperature(state.last_written) (the newest issued value), not event.intent — a late failure of an older write never resends a stale temperature. Cost if wrong: none observable.
+- Task 6: minor (deferred): _on_failure decides "already reported" by health only; use health is ERROR or last_error is not None (ERROR → unavailable → late Failed re-raises issue).
+- Task 6: minor (deferred): recovery on any capability's Ok leaves other capabilities' exhausted attempts (immediate re-escalation on next failure).
+- Task 6: minor (deferred): event names defined in both core/model.py and const.py without a tying test (Task 9: const re-exports from core.model).
+- Task 6: minor (deferred): room_logic.py ~605 lines; extract outcome handling into its own module.
+- Task 6: minor (deferred): `event: object` + type: ignore in one test; docs drift (plan line 326, spec §3) on settings_applied → Task 11.
+- Task 6: note for Task 7/8: the controller must pass profile.capability_for as capability_of AND use the same function to set OperationResult.capability.
+- Task 6: minor (deferred): an Ok result overwrites last_written with the (possibly older) intent value; Ok should not move last_written backwards. Serial worker per room keeps results ordered, so the effect is transient.
+- Task 6: fix round 1/5 (2 addressed, 0 open — bounded failsafe re-enable; retry newest value; commits 25ae25c..3a32acb)
+- Task 6: minor (deferred): failsafe re-enable / resync value writes do not update last_written, so a failed one retries a slightly older value (< min_delta); failsafe_seen_at not recorded while source != EXTERNAL (no observable effect).
+- Task 6: complete (commits e9b400e..3a32acb, review clean)
+- Task 7: dispatched (implementer sonnet, BASE 3a32acb)
+- Task 7: Ruling: the dev dependency group gets the `zha` library at the version pinned by the installed HA (components/zha/manifest.json), so the adapter's imports work in tests; cost if wrong: a bigger dev venv.
+- Task 7: Ruling: dev group additionally pins aiousbwatcher, zha-quirks, ha-silabs-firmware-client, universal-silabs-flasher at the HA-manifest versions (needed to import homeassistant.components.zha in tests); runtime deps unchanged. Cost if wrong: none.
+- Task 7: note for Task 8: is_available raises GatewayError for an unknown IEEE → call inside the except GatewayError scope.
+- Task 7: review (opus) → Needs fixes. Important: (1) write ignores zigpy write-response status records (rejected writes look successful); (2) FakeGateway does not raise GatewayError for unknown IEEEs like the real adapter.
+- Task 7: Ruling (re-graded from Minor to Important by effect): the gateway object must be looked up on every call (`zha_helpers.get_zha_gateway(hass)` inside `_device`), not cached at construction — after a ZHA config-entry reload a cached Gateway is shut down and every write would fail until Easy TRV is reloaded. The constructor still probes once to raise ZhaUnavailable early. Cost if wrong: one dict lookup per operation.
+- Task 7: minor (deferred): pin test does not cover read_attributes kwargs or get_zha_gateway; mocks are spec-less MagicMocks; "read failed … None" wording; no static Protocol conformance check (tests not in mypy files).
+- Task 7: fix round 1/5 (3 addressed, 0 open — write status records rejected, fake raises for unknown IEEE, gateway looked up per call; commits 3114c74..48ce61f)
+- Task 7: complete (commits 3a32acb..48ce61f, review clean)
+- Task 8: dispatched (implementer sonnet, BASE 48ce61f)
+- Task 8: Ruling: sensor readings are refreshed on state *reports* too (async_track_state_report_event) so a sensor that reports an unchanged value keeps last_reported fresh and never times out wrongly; fallback if the helper is missing: refresh readings from hass.states on every Tick and dispatch SensorChanged for changed readings. Cost if wrong: a stable room could be marked stale after 2 h.
+- Task 8: Ruling: verify delay uses asyncio.sleep (a loop TimerHandle) so HA's async_fire_time_changed drives it in tests; signals take precedence over accept checks when both apply.
+- Task 8: implementer DONE_WITH_CONCERNS (commit 4c08ed7); state reports via async_track_state_report_event (native).
+- Task 8: Ruling (pre-review fix): Unsupported.required/installed are dotted version strings ("1.3.0", or "unknown" for None); an unexpected exception in _run_operation yields OperationResult(Failed("unexpected: …")) so the core's retry/issue path handles it; controller Log handling does not re-prefix the room name (core messages already carry it). Cost if wrong: cosmetic / one extra retry.
+- Task 8: note for Task 9: clear_profile_issues(keep) takes file stems → pass Path(error.file).stem.
+- Task 8: pre-review fixes done (commit 3d42ad7). minor (deferred): core debug messages starting with a TRV id carry no room prefix now.
+- Task 8: review (opus) → Needs fixes. Important: unchanged state reports (SensorChanged with same value) re-arm the debounce indefinitely → value write held until refresh.
+- Task 8: Ruling: in core _on_sensor_changed, (re-)arm the debounce only when the active reading's value differs from the previously stored reading of that sensor (first reading counts as changed) AND |v − last_written| ≥ min_delta; a report with an unchanged value only refreshes last_reported. Cost if wrong: a write delayed by one debounce window.
+- Task 8: minor (deferred): _fmt_version duplicates engine._version_text; _SUPPORTED_UNITS duplicates values.py unit sets; Unsupported path derives capability via capability_for(intent) or exc.capability; a raising status listener stops later listeners / escapes async_start; settle() uses a fixed iteration count; retry timing (+5 s) not pinned in the delay test.
+- Task 8: fix round 1/5 (1 addressed, 0 open — debounce re-armed only on real value change; hand-over arms it once; commits 3d42ad7..ce821d5)
+- Task 8: minor (deferred): a noisy non-active sensor can still push the debounce back (each re-arm follows a genuine change of that sensor); repeated None reports count as changed.
+- Task 8: complete (commits 48ce61f..ce821d5, review clean)
+- Task 9: dispatched (implementer sonnet, BASE ce821d5)
+- Task 9: Ruling: const.py re-exports EVENT_* from core.model (single definition); a TRV that cannot be resolved to a ZHA device at setup raises ConfigEntryError (permanent config problem, logged with the entity id). Cost if wrong: a reload after re-pairing fixes it.
+- Task 9: implementer DONE_WITH_CONCERNS (commit d9b0b21). Accepted: stand-in config flow in tests until Task 10; async_get_device_by_identifier; auto profile = load order; diagnostics on failed entry return empty collections.
+- Task 9: Ruling (pre-review fix): the hass_client diagnostics test gets a fixture that skips with a clear reason when binding 127.0.0.1:0 raises PermissionError (sandboxed dev machines); CI runs it. Cost if wrong: one test silently skipped where it could run.
+- Task 9: minor (deferred): IEEE addresses appear unredacted in diagnostics (document in README); zha_api_incompatible may flash at boot while ZHA is still loading (consider raising only after the first retry).
+- Task 9: review (opus) → Approved.
+- Task 9: minor (deferred): a room whose async_start raises still reports ok; option keys duplicated between core/model.from_options literals and const.CONF_* (Task 10 adds a tying test); _resolve_thermostats catches GatewayError broadly (ZhaUnavailable → permanent error); _start_rooms not tied to the entry (safe only while async_start has no awaits); unload stops controllers before unloading platforms (HA convention is the reverse; plan-mandated); local_binding skip could hide the HTTP test in CI; firmware-below-minimum-not-a-setup-error untested; room_data() omits area_id.
+- Task 9: complete (commits ce821d5..ba5fe69, review clean)
+- Task 10: dispatched (implementer sonnet, BASE ba5fe69)
+- Task 10: Ruling: the options flow writes const.CONF_* keys and a test asserts GlobalParams.from_options reads exactly those keys; the stand-in config flow in tests/helpers_entry.py is removed once config_flow.py exists; manifest gains "config_flow": true in this task.
+- Task 10: implementer DONE_WITH_CONCERNS (commit 746ea4b). Accepted: extra strings (name_exists, name_required, already_configured, timeout_range, descriptions); reconfigure updates unique_id; "Auto" literal label; device_class or original_device_class in prefill.
+- Task 10: Ruling (pre-review fix, verified against hassfest translations.py RE_TRANSLATION_KEY = ^(?!.+[_-]{2})(?![_-])[a-z0-9-_]+(?<![_-])$): hysteresis select values/translation keys are `leave`, `0_2`, `0_4`, `0_6`, `0_8`, `1_0`; room_config_from_subentry maps `leave` → None, else float(key.replace("_", ".")); docs updated in Task 11. Cost if wrong: none (runtime unchanged).
+- Task 10: note: HA 2026.10 ships `probatio` behind the voluptuous shim; config_flow.py stays outside mypy files (6 arg-type errors if added) → deferred minor.
+- Task 10: pre-review fix done (commit bdba909): hysteresis keys 0_2..1_0; docs updated in Task 11.
+- Task 10: review (opus) → Approved.
+- Task 10: Ruling (verified in hassfest translations.py): `config_subentries.room.title` is accepted for custom integrations only with a removed-title warning → Task 11 drops the key from strings/en/de. Cost if wrong: none.
+- Task 10: Ruling (carried to Task 11, cheap correctness fix): validate_room rejects a ZHA entity whose domain is not `climate` with `not_zha` before calling resolve_device.
+- Task 10: minor (deferred): prefill suggests TRVs already used by another room; area step forgets the area on name_exists; validate_room has an extra `profiles` parameter vs the brief; German max_attempts description says "wiederholt"; hysteresis key encode/decode split across config_flow and __init__ (shared constant in const.py would be cleaner); dead strings single_instance_allowed/reconfigure_successful/config.step.user.title (plan-mandated); test asserting removed private symbols; unique_id == DOMAIN not asserted; AreaSelector filter not asserted.
+- Task 10: complete (commits ba5fe69..bdba909, review clean)
+- Task 11: dispatched (implementer sonnet, BASE bdba909) — Step 6 (push to GitHub) excluded: outward-facing, Oliver decides.
+- Task 11: implementer DONE_WITH_CONCERNS (commits bde4edd, e2f2f31, 16162a7). Accepted: F1/F2 fail-safe checks instead of the brief's (refresh 90 never triggers the 2 h hold); brands todo; no LICENSE yet; map keys: strings match as written, non-strings via str(value).lower(); extra schema rejection tests.
+- Task 11: Ruling (pre-review fix): RoomController.async_start clears the room's trv_unreachable and trv_firmware issues for its TRVs before the Start dispatch (fresh state → issues are re-raised if still true), so a reload after re-pairing or a firmware update clears stale issues; spec sentence for trv_firmware updated ("deleted on the next reload or when the capability verifies"). Cost if wrong: an issue flashes off and on across a reload.
+- Task 11: pre-review fix done (commit a04f56b): stale TRV issues cleared on room start.
+- Task 11: review (opus) → Needs fixes. Important: on-device checklist expects per-write debug logs the code never emits and a wrong 0x600D expectation (ignores 0.1 K rounding).
+- Task 11: Ruling: the controller logs one debug line per executed operation (room, trv, capability, attribute hex, raw value, outcome) — this is the spec's "decision log"; the checklist is corrected (2140 for 21.35 °C; S2 is an F1 run without the half-hourly reads).
+- Task 11: Ruling (re-graded Minor→Important by effect): async_setup_entry deletes trv_unreachable_*/trv_firmware_* issues whose ieee belongs to no configured room (removed TRV / deleted room), mirroring clear_profile_issues; README states that issues are re-raised after a reload if the problem persists.
+- Task 11: Ruling (re-graded Minor→Important: misleading docs): README must not claim real-hardware testing before the checklist has been run ("targeted firmware 1.3.0/1.4.4, hardware run pending").
+- Task 11: minor (deferred): spec §1 event/command names drift (Stop, SensorStateChanged, TrvStateChanged, ScheduleTimer, Execute arg order), §3 omits readings, trv_firmware "when the capability later verifies" unreachable in-session; domain check only in the flow (resolve_device could check); quality_scale reconfiguration-flow should be exempt, appropriate-polling comment wrong; "Thermostat gone" step lacks a write trigger.
+- Task 11: fix round 1/5 (3 addressed, 0 open — per-operation debug log, orphan-issue sweep, checklist/README corrections; commits a04f56b..3dd81fc)
+- Task 11: minor (deferred): checklist line 31 says value-out-of-range logs "unsupported", code logs "failed: …"; controller.py coverage 95.25 % (thin margin).
+- Task 11: complete (commits bdba909..3dd81fc, review clean)
+- Final review: dispatched (fable) over merge-base main..HEAD.
+- Final review (fable) → With fixes. Important: (1) refresh never starts when the first value write never verified; (2) chatty secondary sensor re-arms the debounce; (3) exhausted settings write silently forgotten (any Ok clears the issue; settings_applied stays True); (4) one unresolvable TRV fails the whole entry; (5) UNSUPPORTED_ATTRIBUTE reported as trv_unreachable instead of trv_firmware. Must-fix minors: spec §1 names, checklist line 31.
+- Final: Ruling (reverses Task 5): refresh is due when max(last_value_write, last_value_issued) is older than refresh_minutes; last_value_issued is set whenever a value write is emitted. Cost if wrong: one refresh per interval for an exhausted TRV (intended).
+- Final: Ruling (reverses Task 9 scope): a room whose TRV cannot be resolved (or whose profile cannot be selected) is skipped with Repairs issue room_invalid_<subentry_id> (WARNING, placeholders room/error); the entry still loads the other rooms; ZhaUnavailable stays ConfigEntryNotReady. Cost if wrong: a broken room is silent except for the issue.
+- Final: Ruling: debounce arms only on a value change of the ACTIVE sensor or a hand-over; exhausting a settings capability sets settings_applied=False; the unreachable issue is cleared only when the capability that exhausted verifies (or re-raised naming the still-failing capability); "already reported" = health ERROR or last_error set.
+- Final: Ruling: adapter raises UnsupportedAttribute(GatewayError) for an UNSUPPORTED_ATTRIBUTE status on write or on the primary read attribute; controller maps it to Unsupported(capability, "unknown", installed) → trv_firmware issue.
+- Final: Ruling (declined-to-judge items stand): single-sensor rooms toggle the source on flaps (T3/T4); every reload rewrites settings+source+value (spec Start row); 20-min write+read battery cost (B1/T2); ZHA external-sensor switch toggled off by the user not detected (T5 covers value 2 only; minor suggestion `signals: {0: source_off}` deferred); IEEE in diagnostics (documented); entity-id renames not followed (stored ids like HA helpers); no migrate_entry (VERSION 1); brands/LICENSE owner decisions; HA-facing modules outside strict mypy (spec). Plan Review Focus item 5 wording left as is (plan is historical); narrowed in the ledger: a 2 read back on the source write itself counts as a failed attempt.
+- Final: minor (deferred): failsafe 3/2 alternation re-enable unbounded for a pathological device; room whose async_start raised shows ok; ZHA external-sensor switch off undetected; user profiles can only write attributes the quirk defines (document); de.json max_attempts "wiederholt"; controller duplicates unit set/version formatter; CI uv sync without --locked.
+- Final: fix wave dispatched (implementer sonnet, FIX_BASE 3dd81fc).
+- Final: fix wave done (commits 459f6fc, 5a868e5, 2011531, 3d5a2f0, 25d6503; 416 passed, 1 skipped). Implementer changed trv_unreachable issue text (no longer "any verified write resolves it") and adjusted 5 tests — accepted.
+- Final: Ruling (closes the fix wave's own side effect): on refresh, every writable TRV in ERROR whose error_capability is not the value capability gets that capability's intent re-issued with its attempts reset (source from state.source; settings from config) before the value write, so "retried at least every refresh_minutes" holds for all capabilities. Cost if wrong: one extra write per refresh for an erroring TRV.
+- Final: Ruling: per-room build also catches ValueError/KeyError/TypeError from corrupt subentry data → room_invalid issue, entry keeps loading.
+- Final: fix wave closed (commit 9046b08; 436 passed, 1 skipped). Scoped re-review dispatched (opus) over 3dd81fc..HEAD.
+- Final: scoped re-review (opus) → all 6 findings addressed, no new Critical/Important breakage.
+- Final: parked — last_error_retry is stamped on every exhaustion, so a permanently failing value write starves the failed-capability retry — Ruling: real but not load-bearing; the TRV is genuinely unreachable in that case and the issue stands (naming the wrong capability); one-line fix (stamp only when capability == error_capability) recommended before the hardware run. Cost if wrong: a stale capability name in the issue text.
+- Final: parked — with refresh 5 min and max_attempts 10 a re-issued chain overlaps the next refresh and never exhausts (45 s cadence, ~78 writes/h) — Ruling: only with non-default options; one-line fix (skip re-issue while attempts > 0 or a retry is pending) recommended. Cost if wrong: extra Zigbee writes for a failing TRV under aggressive settings.
+- Final: parked — Unsupported outcome for the capability in error_capability never ends the error (needs Failed×3 then UNSUPPORTED_ATTRIBUTE on the same capability) — Ruling: unlikely sequence; deferred.
+- Final: minor (deferred): concept/profile docs still mention ApplySettings; room-level last_value_write lets one TRV's verified write delay the others' refresh (pre-existing); skipped rooms absent from diagnostics.
+```
