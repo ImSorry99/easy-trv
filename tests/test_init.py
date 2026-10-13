@@ -10,6 +10,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
+from custom_components.easy_trv import issues
 from custom_components.easy_trv.adapters.zha_gateway import ZhaUnavailable
 from custom_components.easy_trv.const import DOMAIN, SUBENTRY_ROOM
 from custom_components.easy_trv.controller import RoomController
@@ -336,6 +337,32 @@ async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
     assert entry.state is ConfigEntryState.LOADED
     assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is None
     assert hass.states.get("sensor.living_status").state == "ok"
+
+
+async def test_setup_removes_issues_of_thermostats_in_no_room(hass, entry) -> None:
+    placeholders = {"room": "Old", "trv": "climate.old", "attribute": "x"}
+    for ieee in ("00:99", "00:11"):
+        issues.raise_unreachable(hass, ieee, placeholders)
+        issues.raise_firmware(hass, ieee, placeholders)
+    registry = ir.async_get(hass)
+
+    # Rooms start only once Home Assistant has started, so the cleanup that
+    # setup itself does is visible on its own.
+    hass.set_state(CoreState.starting)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await settle(hass)
+
+    for kind in ("trv_unreachable", "trv_firmware"):
+        # Not a thermostat of any configured room: removed.
+        assert registry.async_get_issue(DOMAIN, f"{kind}_0099") is None
+        # A configured thermostat: left to its room, which clears it at start.
+        assert registry.async_get_issue(DOMAIN, f"{kind}_0011") is not None
+
+    hass.set_state(CoreState.running)
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+    await settle(hass)
+    for kind in ("trv_unreachable", "trv_firmware"):
+        assert registry.async_get_issue(DOMAIN, f"{kind}_0011") is None
 
 
 async def test_unload_stops_the_controllers(hass, freezer, entry, fake_gateway) -> None:

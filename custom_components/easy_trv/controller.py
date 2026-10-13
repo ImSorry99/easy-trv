@@ -130,6 +130,23 @@ def _judge(op: Operation, values: Mapping[int, int]) -> Outcome:
     return Mismatch(op.accept, actual)
 
 
+def _outcome_text(outcome: Outcome) -> str:
+    """Describe an outcome in a few words for the debug log."""
+    match outcome:
+        case Ok():
+            return "ok"
+        case Mismatch(expected=expected, actual=actual):
+            return f"mismatch expected {sorted(expected)} got {actual}"
+        case Failed(error=error):
+            return f"failed: {error}"
+        case Unsupported(capability=capability, required=required, installed=installed):
+            return f"unsupported {capability} needs {required}, installed {installed}"
+        case Signal(name=name):
+            return f"signal {name}"
+        case _:
+            assert_never(outcome)
+
+
 def _scalar(value: Any) -> Any:
     """Convert enums and time values; leave everything else as it is."""
     if isinstance(value, Enum):
@@ -196,6 +213,11 @@ class RoomController:
         self._stopped = False
 
     # --- Public surface --------------------------------------------------
+
+    @property
+    def ieees(self) -> frozenset[str]:
+        """Return the IEEE addresses of the room's thermostats."""
+        return frozenset(trv.ieee for trv in self._config.trvs)
 
     @property
     def status(self) -> RoomStatus:
@@ -484,15 +506,36 @@ class RoomController:
             op = self._profile.plan(intent, self._firmware[trv])
         except CapabilityUnsupported as exc:
             capability = self._profile.capability_for(intent) or exc.capability
-            outcome = Unsupported(
+            outcome: Outcome = Unsupported(
                 exc.capability, _fmt_version(exc.required), _fmt_version(exc.installed)
             )
+            self._log_not_sent(trv, capability, outcome)
             return OperationResult(trv, intent, capability, outcome)
         except ValueError as exc:
             capability = self._capability_of(intent)
-            return OperationResult(trv, intent, capability, Failed(str(exc)))
-        return OperationResult(
-            trv, intent, op.capability, await self._write_and_verify(trv, op)
+            outcome = Failed(str(exc))
+            self._log_not_sent(trv, capability, outcome)
+            return OperationResult(trv, intent, capability, outcome)
+        outcome = await self._write_and_verify(trv, op)
+        _LOGGER.debug(
+            "%s: %s %s attr 0x%04X raw=%s -> %s",
+            self._config.name,
+            trv,
+            op.capability,
+            op.attribute,
+            op.raw_value,
+            _outcome_text(outcome),
+        )
+        return OperationResult(trv, intent, op.capability, outcome)
+
+    def _log_not_sent(self, trv: str, capability: str, outcome: Outcome) -> None:
+        """Log an intent that could not be turned into an operation."""
+        _LOGGER.debug(
+            "%s: %s %s not sent -> %s",
+            self._config.name,
+            trv,
+            capability,
+            _outcome_text(outcome),
         )
 
     async def _write_and_verify(self, trv: str, op: Operation) -> Outcome:

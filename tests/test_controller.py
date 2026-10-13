@@ -394,6 +394,81 @@ async def test_start_clears_stale_thermostat_issues(hass, controller, gateway) -
     assert issue(hass, "trv_firmware_0099") is not None
 
 
+OPERATION_LOGGER = "custom_components.easy_trv.controller"
+
+
+def operation_lines(caplog) -> list[str]:
+    """Return the debug lines the controller wrote about executed operations."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == OPERATION_LOGGER
+        and record.levelno == logging.DEBUG
+        and (" attr 0x" in record.getMessage() or " not sent " in record.getMessage())
+    ]
+
+
+async def test_every_executed_operation_is_logged_at_debug(
+    hass, controller, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=OPERATION_LOGGER)
+    await controller.async_start()
+    await settle(hass)
+    assert operation_lines(caplog) == [
+        "Living: climate.a window_detection_flag attr 0x6000 raw=1 -> ok",
+        "Living: climate.a hysteresis attr 0x6011 raw=-40 -> ok",
+        "Living: climate.b window_detection_flag attr 0x6000 raw=1 -> ok",
+        "Living: climate.b hysteresis attr 0x6011 raw=-40 -> ok",
+        "Living: climate.a source_select attr 0x600E raw=1 -> ok",
+        "Living: climate.b source_select attr 0x600E raw=1 -> ok",
+        "Living: climate.a external_temperature attr 0x600D raw=2130 -> ok",
+        "Living: climate.b external_temperature attr 0x600D raw=2130 -> ok",
+    ]
+
+
+async def test_operation_log_names_a_mismatch_and_a_failure(
+    hass, controller, gateway, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=OPERATION_LOGGER)
+    gateway.read_override[(IEEE_A, VALUE)] = 2000
+    gateway.fail_write[(IEEE_B, VALUE)] = "radio busy"
+    await controller.async_start()
+    await settle(hass)
+    lines = operation_lines(caplog)
+    assert (
+        "Living: climate.a external_temperature attr 0x600D raw=2130 "
+        "-> mismatch expected [2130] got 2000"
+    ) in lines
+    assert (
+        "Living: climate.b external_temperature attr 0x600D raw=2130 "
+        "-> failed: radio busy"
+    ) in lines
+
+
+async def test_operation_log_names_a_signal(hass, controller, gateway, caplog) -> None:
+    caplog.set_level(logging.DEBUG, logger=OPERATION_LOGGER)
+    gateway.read_override[(IEEE_A, SOURCE)] = 2
+    await controller.async_start()
+    await settle(hass)
+    assert "Living: climate.a source_select attr 0x600E raw=1 -> signal failsafe" in (
+        operation_lines(caplog)
+    )
+
+
+async def test_operation_log_names_what_was_not_sent(
+    hass, make_controller, config, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=OPERATION_LOGGER)
+    old_a = replace(config.trvs[0], firmware=(1, 2, 1))
+    controller = make_controller(cfg=replace(config, trvs=(old_a, config.trvs[1])))
+    await controller.async_start()
+    await settle(hass)
+    assert (
+        "Living: climate.a hysteresis not sent -> "
+        "unsupported hysteresis needs 1.3.0, installed 1.2.1"
+    ) in operation_lines(caplog)
+
+
 def with_source_signals(profile, signals):
     """Return the profile with other signals on the ``source_select`` readback."""
     source = profile.capabilities["source_select"]

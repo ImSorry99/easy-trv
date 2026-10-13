@@ -219,6 +219,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
             f"{subentry.title} ({len(subentry.data[CONF_TRVS])} thermostat(s), "
             f"profile {profile.id})"
         )
+    issues.clear_thermostat_issues_except(
+        hass, {ieee for controller in rooms.values() for ieee in controller.ieees}
+    )
     entry.runtime_data = EasyTrvRuntimeData(gateway, profiles, rooms)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

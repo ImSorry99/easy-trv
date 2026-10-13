@@ -129,3 +129,23 @@ def clear_profile_issues(hass: HomeAssistant, keep: set[str]) -> None:
             and issue_id not in wanted
         ):
             ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+
+def clear_thermostat_issues_except(hass: HomeAssistant, keep_ieees: set[str]) -> None:
+    """Remove the thermostat issues of every thermostat not in ``keep_ieees``.
+
+    Covers ``trv_unreachable_*`` and ``trv_firmware_*``. ``keep_ieees`` holds
+    the IEEE addresses of the thermostats of all configured rooms, so the issues
+    of a thermostat that was removed from its room (or whose room was deleted)
+    do not outlive it.
+    """
+    wanted = {issue_id_unreachable(ieee) for ieee in keep_ieees} | {
+        issue_id_firmware(ieee) for ieee in keep_ieees
+    }
+    for domain, issue_id in list(ir.async_get(hass).issues):
+        if (
+            domain == DOMAIN
+            and issue_id.startswith((_UNREACHABLE_PREFIX, _FIRMWARE_PREFIX))
+            and issue_id not in wanted
+        ):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)

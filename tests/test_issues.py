@@ -92,3 +92,38 @@ async def test_clear_profile_issues_keeps_only_the_named_stems(hass) -> None:
     assert ir.async_get(hass).async_get_issue("other_domain", "profile_invalid_fixed")
     issues.clear_profile_issues(hass, set())
     assert get(hass, "profile_invalid_keep") is None
+
+
+async def test_clear_thermostat_issues_except_keeps_only_the_named_thermostats(
+    hass,
+) -> None:
+    other = "00:12:4b:00:cc:dd"
+    for ieee in (IEEE, other):
+        issues.raise_unreachable(hass, ieee, {})
+        issues.raise_firmware(hass, ieee, {})
+    issues.raise_profile_invalid(hass, "my_trv.yaml", "bad")
+    issues.raise_zha_api(hass, "broken")
+    ir.async_create_issue(
+        hass,
+        "other_domain",
+        "trv_unreachable_00124b00ccdd",
+        is_fixable=False,
+        severity=IssueSeverity.ERROR,
+        translation_key="x",
+    )
+
+    issues.clear_thermostat_issues_except(hass, {IEEE})
+
+    assert get(hass, "trv_unreachable_00124b00aabb") is not None
+    assert get(hass, "trv_firmware_00124b00aabb") is not None
+    assert get(hass, "trv_unreachable_00124b00ccdd") is None
+    assert get(hass, "trv_firmware_00124b00ccdd") is None
+    # Other issues of the domain and issues of other domains are not touched.
+    assert get(hass, "profile_invalid_my_trv") is not None
+    assert get(hass, "zha_api_incompatible") is not None
+    assert ir.async_get(hass).async_get_issue(
+        "other_domain", "trv_unreachable_00124b00ccdd"
+    )
+    issues.clear_thermostat_issues_except(hass, set())
+    assert get(hass, "trv_unreachable_00124b00aabb") is None
+    assert get(hass, "trv_firmware_00124b00aabb") is None
