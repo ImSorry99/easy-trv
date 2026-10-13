@@ -21,6 +21,7 @@ custom_components/easy_trv/
     builtin/sonoff_trvzb_native.yaml
   adapters/
     zha_gateway.py       TrvGateway protocol + ZhaLibraryGateway (only module importing zha/zigpy/ZHA helpers)
+  issues.py              Repairs helpers: create / clear the issues of §5
   sensor.py              RoomStatusSensor
   diagnostics.py
   strings.json, translations/{en,de}.json, icons.json, manifest.json, quality_scale.yaml
@@ -40,16 +41,16 @@ Layers and rules:
 - **Entry**: one, `single_config_entry: true`, title "Easy TRV", created without a form.
 - **Room subentry** (`subentry_type = "room"`), two steps:
   1. `kind`: *From area* (AreaSelector filtered to areas with ZHA climate entities) or *Custom room* (name). From area: the room name is the area name and step 2 is prefilled with the area's entities (entity area, or device area when the entity has none). The `area_id` is stored; reconfigure re-prefills from it.
-  2. `entities`: `trvs` (EntitySelector, multiple, filter `{integration: zha, domain: climate}`; ≥ 1; each must resolve to a ZHA device matched by a profile, errors `not_zha` / `no_profile`; not already in another room, error `trv_in_other_room`), `temp_sensors` (EntitySelector, multiple, `reorder=True`, filter `{domain: sensor, device_class: temperature}`; thermostat-own temperature entities are excluded from the prefill), `humidity_sensors` (same, `device_class: humidity`; stored only), `profile` (select: `auto` or any loaded profile id matching the chosen thermostats; errors `no_profile`, `profile_mismatch`), `window_detection` (select `on` / `off` / `leave`, default `on`), `hysteresis` (select `leave` / `0.2` … `1.0`, default `leave`).
+  2. `entities`: `trvs` (EntitySelector, multiple, filter `{integration: zha, domain: climate}`; ≥ 1; each must be a `climate` entity that resolves to a ZHA device, else `not_zha` — the selector filter only applies in the browser, so the flow checks the domain itself; a thermostat that no profile matches gives `no_profile`; not already in another room, error `trv_in_other_room`), `temp_sensors` (EntitySelector, multiple, `reorder=True`, filter `{domain: sensor, device_class: temperature}`; thermostat-own temperature entities are excluded from the prefill), `humidity_sensors` (same, `device_class: humidity`; stored only), `profile` (select: `auto` or any loaded profile id; errors `no_profile` for `auto`, `profile_mismatch` for an id that does not match all chosen thermostats), `window_detection` (select `on` / `off` / `leave`, default `on`), `hysteresis` (select `leave|0_2|0_4|0_6|0_8|1_0`, default `leave`). The option values double as translation keys, which hassfest does not allow to contain a dot, so `0_4` means 0.4 K. The key is stored as is and decoded to kelvin when the room is set up (`leave` → the thermostat's own value stays); the older dotted form (`0.4`) is still accepted when reading.
   - Create: `async_create_entry(title, data, unique_id=casefold(name))`. Reconfigure: `async_update_and_abort` (the entry's update listener reloads; the reload variant raises when listeners exist).
 - **Options** (entry): `refresh_minutes` 20 (5–90), `verify_delay_seconds` 10 (2–60), `max_attempts` 3 (1–10), `min_delta_kelvin` 0.1 (0.1–1.0), `sensor_timeout_minutes` 120 (0 = off, 10–720).
 - Internal constants: debounce 5 s (coalesce bursts of sensor reports), operation timeout 20 s, backoff `[5, 15, 45]` s, tick 60 s, first sync after `EVENT_HOMEASSISTANT_STARTED`.
 - One update listener → `async_schedule_reload` on any options or subentry change.
-- `strings.json` = `translations/en.json`; `translations/de.json` translated. Covers config, options, `config_subentries.room` (steps, errors, aborts, `initiate_flow.user` "Add room"), `issues.*`, `entity.sensor.room_status`.
+- `strings.json` = `translations/en.json`; `translations/de.json` translated. Covers config, options, `config_subentries.room` (`entry_type`, steps, errors, aborts, `initiate_flow.user` "Add room"; no `title`, which hassfest accepts for custom integrations only with a warning), `selector.*`, `issues.*`, `entity.sensor.room_status`.
 
 ## 3. Room logic
 
-State: `source` (external | internal | none), `active_sensor`, `last_written` (°C), `last_value_write` (ts of last verified value write), `pending_change`, per-thermostat `TrvState(ieee, profile_id, firmware, available, health ∈ {ok, unavailable, unsupported, error}, attempts: dict[attribute, int], last_error, failsafe_seen_at)`, `settings_applied`.
+State: `source` (external | internal | none), `active_sensor`, `last_written` (°C), `last_value_write` (ts of last verified value write), `debounce_pending`, per-thermostat `TrvState(health ∈ {ok, unavailable, unsupported, error}, available, attempts: dict[capability, int], pending_retry, last_error, failsafe_seen_at, unsupported: frozenset[capability], settings_applied)`. `settings_applied` is per thermostat, not per room: a thermostat that returns after being unavailable gets its settings applied then, if it has not had them yet. The thermostat's `ieee` and firmware are part of its configuration (`TrvConfig`), not of its state.
 
 A sensor is **usable** when: state not `unavailable`/`unknown`; parses as float; unit °C (°F converted; anything else unusable, warned once); 0.0 ≤ v ≤ 99.9; and, if `sensor_timeout_minutes > 0`, `now − last_reported ≤ timeout`. Active sensor = first usable in configured order.
 
@@ -83,8 +84,8 @@ Retry (core): `mismatch` / `error` / `timeout` → `attempts += 1`; `< max_attem
 
 | Channel | When | Details |
 |---|---|---|
-| Repairs `trv_unreachable_<ieee>` | `max_attempts` exhausted | `severity=ERROR`, not fixable, placeholders `room`, `trv`, `attribute`, `attempts`, `error`, actionable text (battery, range, re-pair). Deleted on the next verified operation for that thermostat; then event `recovered`. |
-| Repairs `trv_firmware_<ieee>` | capability/profile minimum not met or `UNSUPPORTED_ATTRIBUTE` | `severity=WARNING`, placeholders `trv`, `capability`, `required`, `installed`. Deleted when the capability later verifies. |
+| Repairs `trv_unreachable_<ieee>` (colons removed) | `max_attempts` exhausted | `severity=ERROR`, not fixable, placeholders `room`, `trv`, `attribute`, `attempts`, `error`, actionable text (battery, range, re-pair). Deleted on the next verified operation for that thermostat; then event `recovered`. |
+| Repairs `trv_firmware_<ieee>` (colons removed) | capability/profile minimum not met or `UNSUPPORTED_ATTRIBUTE` | `severity=WARNING`, placeholders `trv`, `capability`, `required`, `installed`. Deleted when the capability later verifies. |
 | Repairs `zha_api_incompatible` | adapter cannot be constructed | `severity=ERROR`; setup raises `ConfigEntryNotReady`. |
 | Repairs `profile_invalid_<file>` | a user profile fails schema validation | `severity=WARNING`, placeholders `file`, `error`; the file is ignored until fixed. Deleted when it validates on the next load. |
 | Events | `easy_trv_write_failed`, `easy_trv_recovered`, `easy_trv_failsafe_detected` | payload `room`, `room_id`, `trv_entity_id`, `ieee`, plus `attribute`, `attempts`, `error` for failures |
@@ -104,6 +105,8 @@ No `persistent_notification`, no entity per error, no entities besides the statu
 | device | `docs/testing-on-device.md` | manual checklist on Oliver's four thermostats, spikes S1–S4 |
 
 Tooling: start from `ludeeus/integration_blueprint` (trimmed), `pyproject.toml` + `uv`, Ruff, mypy strict for `core/`, `profiles/`, `adapters/`, GitHub Actions (hassfest, HACS action, lint, tests), `hacs.json` with `homeassistant: "2026.8.0"`, `manifest.json` with `dependencies: ["zha"]`, `integration_type: hub`, `iot_class: local_push`, `single_config_entry: true`. Target ≥ 95 % coverage on `core/`, `profiles/`, `controller.py`.
+
+Typing scope: mypy's strict `files` are `core/`, `profiles/` and `adapters/`. The Home Assistant-facing layer (`__init__.py`, `config_flow.py`, `controller.py`, `issues.py`, `sensor.py`, `diagnostics.py`) is outside that list; Ruff (`select = ALL`) and the tests cover it. The `homeassistant` import ban for `core/` and `profiles/engine.py` is checked separately by `! grep -rl "homeassistant" custom_components/easy_trv/core custom_components/easy_trv/profiles/engine.py`.
 
 ## 7. Decisions
 

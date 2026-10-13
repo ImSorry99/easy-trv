@@ -58,6 +58,11 @@ capabilities:
 
 The vocabulary is small on purpose: a fixed set of intents (`set_room_temperature`, `set_source`, `set_window_detection`, `set_hysteresis`), a fixed set of encoders (`temperature_centi`, `kelvin_centi_negative`, `bool`, `map`, `const`), two verify rules (`equals`, `one_of`) and named signals. New vocabulary is added in code when a new device needs it; profiles only combine it.
 
+Two details that matter when writing a profile:
+
+- The keys of a `map` encoder (and of a `one_of` verify rule) are matched against the intent value rendered as text: a string as it is (`external`), any other value as `str(value).lower()`. For a boolean intent the keys are therefore `true` and `false`; quote them in YAML (`"true": 1`), otherwise YAML reads them as booleans and the schema rejects the file. A `one_of` rule must list exactly the keys of the `map` encoder.
+- A user profile's `id` must be unique: an id that a shipped profile (or an earlier user file) already uses is rejected with a `profile_invalid` Repairs issue, and the file is skipped. Pick a new id when copying a shipped profile.
+
 ## Selection
 
 Per room: `auto` (the shipped profile that matches the room's thermostats) or an explicit profile id from all shipped and user profiles that match. A thermostat matched by no profile is rejected in the room form (`no_profile`); a thermostat not matched by an explicitly chosen profile too (`profile_mismatch`). Per-thermostat selection is a later step.

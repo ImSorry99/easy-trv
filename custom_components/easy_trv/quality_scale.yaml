@@ -1,0 +1,88 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: Easy TRV registers no service actions.
+  appropriate-polling:
+    status: exempt
+    comment: |
+      Nothing is polled. Inputs are Home Assistant state events; a local 60 s
+      timer only evaluates timeouts, refreshes and retries.
+  brands:
+    status: todo
+    comment: |
+      No branding assets are shipped yet. This is a custom integration and the
+      HACS brands check is skipped in CI.
+  common-modules:
+    status: exempt
+    comment: |
+      There is no data coordinator and only one entity type, so there is no
+      shared coordinator or base entity to extract.
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency:
+    status: exempt
+    comment: |
+      No third-party requirements; the only dependency is Home Assistant's own
+      ZHA integration.
+  docs-actions:
+    status: exempt
+    comment: Easy TRV registers no service actions.
+  docs-conditions:
+    status: exempt
+    comment: Easy TRV has no conditions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-triggers:
+    status: exempt
+    comment: Easy TRV has no triggers. It fires bus events, which the README lists.
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure:
+    status: exempt
+    comment: |
+      The entry itself needs no connection. The room form checks that every
+      selected thermostat is a ZHA thermostat that a profile matches.
+  test-before-setup: done
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions:
+    status: exempt
+    comment: Easy TRV registers no service actions.
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable:
+    status: exempt
+    comment: |
+      The status sensor reports a state computed by Easy TRV itself, so it
+      never depends on a device being reachable. A thermostat that is
+      unavailable shows as "degraded".
+  integration-owner: done
+  log-when-unavailable:
+    status: done
+    comment: |
+      A thermostat that stops accepting writes is logged once as a warning and
+      once as info when it accepts writes again. Device availability itself is
+      logged by ZHA.
+  parallel-updates: done
+  reauthentication-flow:
+    status: exempt
+    comment: No authentication is involved.
+  test-coverage: done
+
+  # Gold
+  devices: done
+  diagnostics: done
+  entity-category: done
+  entity-translations: done
+  reconfiguration-flow:
+    status: done
+    comment: |
+      Rooms are edited through the reconfigure step of the room subentry; the
+      entry itself has nothing to reconfigure.
+  repair-issues: done
