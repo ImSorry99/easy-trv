@@ -1,6 +1,6 @@
 # Testing on real thermostats
 
-A manual checklist for the first run on real hardware: Oliver's four Sonoff TRVZB, three in the living room ("Wohnzimmer") and one in the bedroom ("Schlafzimmer"). It also holds the four spikes (S1 to S4) from [`profiles/sonoff-trvzb-native.md`](profiles/sonoff-trvzb-native.md) that the automated tests cannot answer. Work through it top to bottom and write down what you see; the table at the end collects the results.
+A manual checklist for the first run on real hardware: the owner's four Sonoff TRVZB, three in the living room ("Wohnzimmer") and one in the bedroom ("Schlafzimmer"). It also holds the four spikes (S1 to S4) from [`profiles/sonoff-trvzb-native.md`](profiles/sonoff-trvzb-native.md) that the automated tests cannot answer. Work through it top to bottom and write down what you see; the table at the end collects the results.
 
 ## What you need
 

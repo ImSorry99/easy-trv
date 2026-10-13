@@ -1,6 +1,6 @@
 # Easy TRV — Requirements
 
-Owner: Oliver. Living document. The technical design in `docs/specs/` is derived from this file, never the other way round. Phase 1 scope unless marked otherwise.
+Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is derived from this file, never the other way round. Phase 1 scope unless marked otherwise.
 
 ## Principles
 
@@ -54,4 +54,4 @@ Window contacts, presence, schedules, presets, outdoor cut-off, adaptive mode, b
 
 ## Roadmap
 
-The ordered roadmap lives in the vault (`Easy TRV — Wünsche & TODO`). Candidates, each as profile operations where possible: window contacts (off + restore, or the TRV's timer mode), presence, room setpoint without a climate entity, native weekly schedules, presets, outdoor cut-off, adaptive-mode switch, open-plan rooms, humidity use, learning.
+The ordered roadmap lives in the maintainer's planning notes outside this repo. Candidates, each as profile operations where possible: window contacts (off + restore, or the TRV's timer mode), presence, room setpoint without a climate entity, native weekly schedules, presets, outdoor cut-off, adaptive-mode switch, open-plan rooms, humidity use, learning.

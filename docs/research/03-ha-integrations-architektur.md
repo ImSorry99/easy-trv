@@ -620,7 +620,7 @@ def clear_trv_issue(hass, ieee: str) -> None:
   "domain": "room_heating",
   "name": "Raumheizung (ZHA)",
   "version": "0.1.0",
-  "codeowners": ["@olivermarkantelli"],
+  "codeowners": ["@ImSorry99"],
   "config_flow": true,
   "single_config_entry": true,
   "dependencies": ["zha"],
@@ -646,7 +646,7 @@ def clear_trv_issue(hass, ieee: str) -> None:
 - Alternativen: `python3 -m script.scaffold integration` (nur im Core-Checkout, erzeugt Core-Layout – für Custom-Repos nur als Referenz), `cookiecutter-homeassistant-custom-component` (zuletzt 2020/21, veraltet), `custom-components/blueprint` (Fork des gleichen Templates). **Empfehlung:** Blueprint als Template nehmen, ausdünnen, mit `pyproject.toml` (uv) und `tests/` ergänzen.
 
 ### 6.4 Tests [✓ PyPI-Metadaten, `tests/common.py`]
-- `pytest-homeassistant-custom-component==0.13.372` zieht `homeassistant==2026.10.1`, `pytest==9.0.3`, `pytest-asyncio==1.4.0`, `syrupy`, `freezegun`, `pytest-freezer`, `pytest-socket`, `pytest-timeout`; `requires_python >= 3.14`. Patch-Versionen folgen HA-Releases täglich → im Projekt auf die HA-Version pinnen, die Oliver fährt.
+- `pytest-homeassistant-custom-component==0.13.372` zieht `homeassistant==2026.10.1`, `pytest==9.0.3`, `pytest-asyncio==1.4.0`, `syrupy`, `freezegun`, `pytest-freezer`, `pytest-socket`, `pytest-timeout`; `requires_python >= 3.14`. Patch-Versionen folgen HA-Releases täglich → im Projekt auf die HA-Version pinnen, die produktiv läuft.
 - Fixtures: `hass`, `enable_custom_integrations` (als autouse-Fixture in `tests/conftest.py`), `freezer` (FrozenDateTimeFactory), `snapshot`; Helfer aus `pytest_homeassistant_custom_component.common`: `MockConfigEntry(domain=..., data=..., options=..., subentries_data=[ConfigSubentryData(data=..., subentry_type="room", title="Bad", unique_id=...)])` [✓ `subentries_data` existiert], `async_fire_time_changed(hass, dt)` – zusammen mit `freezer.tick(timedelta(...))` für Heartbeat/Retry-Tests.
 - Muster: `hass.states.async_set("sensor.bad_temp", "21.3", {...}); await hass.async_block_till_done()` → FakeGateway prüfen; Config-Flow-Tests über `hass.config_entries.subentries.async_init((entry.entry_id, "room"), context={"source": "user"})` und `async_configure` [? exakter Aufruf].
 - `pytest.ini`/`pyproject`: `asyncio_mode = "auto"`, `testpaths = ["tests"]`, `--cov=custom_components.room_heating`.
@@ -674,7 +674,7 @@ def clear_trv_issue(hass, ieee: str) -> None:
 
 **Fakten [✓ GitHub]**
 - *Superpowers* (`obra/superpowers`, 298 k Stars, letzter Push 2026-10-10): Skill-Bibliothek, keine Projektverwaltung. Ablauf: `brainstorming` → Spec unter `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` → `writing-plans` → Plan unter `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` (Tasks mit TDD-Schritten) → `subagent-driven-development` oder `executing-plans` → `test-driven-development`, `requesting-code-review`, `finishing-a-development-branch`; dazu `systematic-debugging`, `verification-before-completion`, `using-git-worktrees`. Installation als Plugin (`superpowers@claude-plugins-official`). Keine Roadmap-/Phasen-/State-Konzepte; der Zustand ist das Repo + die Markdown-Docs.
-- *GSD*: das Original `glittercowboy/get-shit-done` ist seit 2026-06-26 archiviert; Nachfolger **`open-gsd/gsd-core`** (10,4 k Stars, v1.7.0, letzter Push 2026-10-12, `npx @opengsd/gsd-core@latest`). Olivers installierte `gsd-*`-Skills entsprechen diesem Nachfolger. `.planning/` mit `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, `config.json`, `MILESTONES.md`, `research/`, `phases/XX-name/{CONTEXT,RESEARCH,XX-YY-PLAN,XX-YY-SUMMARY,VERIFICATION}.md`, `todos/`, `spikes/`, `sketches/`. Phasen-Loop *Discuss → Plan → Execute (parallele Wellen, frischer Kontext, ein Commit pro Task) → Verify (UAT, Fix-Pläne) → Ship*. `commit_docs: true` (Default) committet `.planning/` ins Repo; Forschungsagenten erzeugen `research/` beim `new-project`. Bemerkenswert: gsd-core nutzt im eigenen Repo `docs/superpowers/specs/` – beide Welten werden dort kombiniert.
+- *GSD*: das Original `glittercowboy/get-shit-done` ist seit 2026-06-26 archiviert; Nachfolger **`open-gsd/gsd-core`** (10,4 k Stars, v1.7.0, letzter Push 2026-10-12, `npx @opengsd/gsd-core@latest`). Die lokal installierten `gsd-*`-Skills entsprechen diesem Nachfolger. `.planning/` mit `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, `config.json`, `MILESTONES.md`, `research/`, `phases/XX-name/{CONTEXT,RESEARCH,XX-YY-PLAN,XX-YY-SUMMARY,VERIFICATION}.md`, `todos/`, `spikes/`, `sketches/`. Phasen-Loop *Discuss → Plan → Execute (parallele Wellen, frischer Kontext, ein Commit pro Task) → Verify (UAT, Fix-Pläne) → Ship*. `commit_docs: true` (Default) committet `.planning/` ins Repo; Forschungsagenten erzeugen `research/` beim `new-project`. Bemerkenswert: gsd-core nutzt im eigenen Repo `docs/superpowers/specs/` – beide Welten werden dort kombiniert.
 
 **Empfehlung für dieses Solo-Projekt**
 1. **GSD Core als Rückgrat**: `/gsd-new-project` → PROJECT.md/REQUIREMENTS/ROADMAP mit klaren Phasen (z. B. 1 Gerüst+Config-Flow, 2 Core-Logik mit Tests, 3 ZHA-Adapter+Verify, 4 Repairs/Status-Entität, 5 Diagnostics/Doku/HACS-Release). `.planning/` committen (`commit_docs: true`) – das ist die Spec/Docs-Quelle im Repo. Diese Recherche-Dateien gehören nach `.planning/research/`.

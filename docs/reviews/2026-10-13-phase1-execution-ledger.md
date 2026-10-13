@@ -5,7 +5,7 @@ Binding decisions taken during the subagent-driven execution of `docs/plans/2026
 ```
 # SDD ledger — plan: docs/plans/2026-10-12-phase1-implementation.md
 Spec: REQUIREMENTS.md (binding), docs/specs/2026-10-12-easy-trv-design.md, docs/concept/profiles.md, docs/profiles/sonoff-trvzb-native.md
-Execution: subagent-driven (implementers: sonnet, per-task reviewers: opus, final review: fable). Branch feat/phase1 in place (Oliver, 2026-10-12). No Co-Authored-By lines in commits.
+Execution: subagent-driven (implementers: sonnet, per-task reviewers: opus, final review: fable). Branch feat/phase1 in place (owner, 2026-10-12). No Co-Authored-By lines in commits.
 
 ## Pre-flight (shared interfaces)
 - T2 values → T4 engine (to_centi), T5 model (Version), T7 adapter (parse_zha_sw_version): names consistent.
@@ -137,7 +137,7 @@ Execution: subagent-driven (implementers: sonnet, per-task reviewers: opus, fina
 - Task 10: Ruling (carried to Task 11, cheap correctness fix): validate_room rejects a ZHA entity whose domain is not `climate` with `not_zha` before calling resolve_device.
 - Task 10: minor (deferred): prefill suggests TRVs already used by another room; area step forgets the area on name_exists; validate_room has an extra `profiles` parameter vs the brief; German max_attempts description says "wiederholt"; hysteresis key encode/decode split across config_flow and __init__ (shared constant in const.py would be cleaner); dead strings single_instance_allowed/reconfigure_successful/config.step.user.title (plan-mandated); test asserting removed private symbols; unique_id == DOMAIN not asserted; AreaSelector filter not asserted.
 - Task 10: complete (commits ba5fe69..bdba909, review clean)
-- Task 11: dispatched (implementer sonnet, BASE bdba909) — Step 6 (push to GitHub) excluded: outward-facing, Oliver decides.
+- Task 11: dispatched (implementer sonnet, BASE bdba909) — Step 6 (push to GitHub) excluded: outward-facing, the owner decides.
 - Task 11: implementer DONE_WITH_CONCERNS (commits bde4edd, e2f2f31, 16162a7). Accepted: F1/F2 fail-safe checks instead of the brief's (refresh 90 never triggers the 2 h hold); brands todo; no LICENSE yet; map keys: strings match as written, non-strings via str(value).lower(); extra schema rejection tests.
 - Task 11: Ruling (pre-review fix): RoomController.async_start clears the room's trv_unreachable and trv_firmware issues for its TRVs before the Start dispatch (fresh state → issues are re-raised if still true), so a reload after re-pairing or a firmware update clears stale issues; spec sentence for trv_firmware updated ("deleted on the next reload or when the capability verifies"). Cost if wrong: an issue flashes off and on across a reload.
 - Task 11: pre-review fix done (commit a04f56b): stale TRV issues cleared on room start.

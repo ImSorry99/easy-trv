@@ -162,4 +162,4 @@ CI runs the same checks plus hassfest and the HACS validation. Testing on real t
 
 ## License
 
-No license has been chosen yet.
+[MIT](LICENSE).

@@ -1,6 +1,6 @@
 # Easy TRV — Technical design, Phase 1
 
-Derived from `REQUIREMENTS.md` (2026-10-12). Device specifics live in `docs/profiles/sonoff-trvzb-native.md`, the profile concept in `docs/concept/profiles.md`. This document is for whoever implements; Oliver reviews the requirements, not this file.
+Derived from `REQUIREMENTS.md` (2026-10-12). Device specifics live in `docs/profiles/sonoff-trvzb-native.md`, the profile concept in `docs/concept/profiles.md`. This document is for whoever implements; the owner reviews the requirements, not this file.
 
 ## 1. Architecture
 
@@ -106,7 +106,7 @@ Setup also removes the `trv_unreachable_*` and `trv_firmware_*` issues of thermo
 | core + profiles | plain pytest | sensor selection (priority, timeout, unit, range), every row of §3, retry counting, fail-safe routing, profile schema (valid builtin, invalid user files), profile planning, encoders, firmware gating, value rounding/encoding |
 | controller | `pytest-homeassistant-custom-component` pinned to HA 2026.10.x, `FakeGateway`, `freezer` + `async_fire_time_changed` | HA states in → gateway calls out, in order; serial worker; issues raised/cleared; events; status sensor |
 | config flow | same | entry, room from area / custom, validation errors, reconfigure, options |
-| device | `docs/testing-on-device.md` | manual checklist on Oliver's four thermostats, spikes S1–S4 |
+| device | `docs/testing-on-device.md` | manual checklist on the owner's four thermostats, spikes S1–S4 |
 
 Tooling: start from `ludeeus/integration_blueprint` (trimmed), `pyproject.toml` + `uv`, Ruff, mypy strict for `core/`, `profiles/`, `adapters/`, GitHub Actions (hassfest, HACS action, lint, tests), `hacs.json` with `homeassistant: "2026.8.0"`, `manifest.json` with `dependencies: ["zha"]`, `integration_type: hub`, `iot_class: local_push`, `single_config_entry: true`. Target ≥ 95 % coverage on `core/`, `profiles/`, `controller.py`.
 
@@ -116,14 +116,14 @@ Typing scope: mypy's strict `files` are `core/`, `profiles/` and `adapters/`. Th
 
 | # | Decision | Reason |
 |---|---|---|
-| D1 | Superpowers process; planning notes in the vault, technical docs in the repo | Oliver's choice and his tool-docs rule |
-| D2 | Name `Easy TRV`, domain `easy_trv` | Oliver |
+| D1 | Superpowers process; planning notes in the vault, technical docs in the repo | the owner's choice and tool-docs rule |
+| D2 | Name `Easy TRV`, domain `easy_trv` | owner |
 | D3 | No climate entity, no regulation | Principle P1/P3 |
 | D4 | Profile layer between room logic and device; profiles are declarative YAML, shipped read-only, user copies in the config folder | Principles P2/P2a; native first, tested defaults, user-adaptable without touching code |
 | D5 | Phase 1 window handling = device detection flag | TRVZB has no window input; contacts move to the roadmap |
 | D6 | Direct ZHA adapter for write and read-back | Only path that sees the fail-safe; small surface, encapsulated |
 | D7 | One status sensor per room | Visibility without clutter |
-| D8 | One entry + room subentries, rooms from areas or custom | HA-native UI, matches how Oliver organises rooms |
+| D8 | One entry + room subentries, rooms from areas or custom | HA-native UI, matches how rooms are organised in HA |
 | D9 | Writes independent of HVAC mode | Requirement T6; spike S1 watches for side effects |
 | D10 | ZHA + TRVZB only, officially | Profiles are device specific by nature |
 | D11 | No own quirk | Built-in quirk is complete; a second one conflicts |
