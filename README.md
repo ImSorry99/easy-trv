@@ -92,7 +92,7 @@ Attributes:
 | Issue | Severity | Raised when | Cleared |
 |---|---|---|---|
 | `trv_unreachable` | Error | A thermostat did not accept a write after all attempts. Check battery and Zigbee signal. | When the write that failed is verified (the room temperature is re-sent at the refresh interval; settings and the source are sent again when the thermostat returns after being unavailable), or on a reload of the integration (raised again if the problem persists). |
-| `trv_firmware` | Warning | The thermostat's firmware is too old for a capability (for example hysteresis below 1.3.0). | On a reload of the integration, for example after a firmware update (raised again if the problem persists). |
+| `trv_firmware` | Warning | The thermostat's firmware is too old for a capability (for example hysteresis below 1.3.0), or the thermostat reports the setting as unsupported. Easy TRV does not retry it. | On a reload of the integration, for example after a firmware update (raised again if the problem persists). |
 | `zha_api_incompatible` | Error | Easy TRV cannot use the installed ZHA's internal API. Setup is retried. | When setup works. |
 | `profile_invalid` | Warning | A user profile file is invalid and is ignored. The issue names the file and the problem. | When the file loads cleanly after you fix it and reload the integration. |
 | `room_invalid` | Warning | A room could not be set up (for example a thermostat that is not a ZHA device, or no profile that fits it). The other rooms keep running. | When the room sets up cleanly after you fix it and reload the integration. |

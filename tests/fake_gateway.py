@@ -6,6 +6,7 @@ from custom_components.easy_trv.adapters.zha_gateway import (
     DeviceRef,
     GatewayError,
     NotZhaEntity,
+    UnsupportedAttribute,
 )
 
 if TYPE_CHECKING:
@@ -21,9 +22,11 @@ class FakeGateway:
     attribute)``. ``writes`` and ``reads`` record every call. ``fail_write``
     and ``fail_read`` (keyed by ``(ieee, attribute)``) raise a
     :class:`GatewayError` once and are then cleared; ``read_override`` returns
-    the given value instead of the stored one. Like the real adapter, every
-    method raises :class:`GatewayError` for an IEEE that no registered device
-    owns.
+    the given value instead of the stored one. ``unsupported_write`` (a set of
+    ``(ieee, attribute)``) makes every write to that attribute raise
+    :class:`UnsupportedAttribute`, like a device that lacks it. Like the real
+    adapter, every method raises :class:`GatewayError` for an IEEE that no
+    registered device owns.
     """
 
     def __init__(self) -> None:
@@ -35,6 +38,7 @@ class FakeGateway:
         self.fail_write: dict[tuple[str, int], str] = {}
         self.fail_read: dict[tuple[str, int], str] = {}
         self.read_override: dict[tuple[str, int], int] = {}
+        self.unsupported_write: set[tuple[str, int]] = set()
 
     def add_device(  # noqa: PLR0913 - keyword-only options mirror DeviceRef
         self,
@@ -85,6 +89,9 @@ class FakeGateway:
         message = self.fail_write.pop((ieee, attribute), None)
         if message is not None:
             raise GatewayError(message)
+        if (ieee, attribute) in self.unsupported_write:
+            msg = f"write rejected for 0x{attribute:04X}: UNSUPPORTED_ATTRIBUTE"
+            raise UnsupportedAttribute(msg)
         self.store[(ieee, endpoint, cluster, attribute)] = value
 
     async def read(

@@ -32,7 +32,10 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from custom_components.easy_trv import issues
-from custom_components.easy_trv.adapters.zha_gateway import GatewayError
+from custom_components.easy_trv.adapters.zha_gateway import (
+    GatewayError,
+    UnsupportedAttribute,
+)
 from custom_components.easy_trv.const import OPERATION_TIMEOUT, TICK_SECONDS
 from custom_components.easy_trv.core.model import (
     INTENT_NAMES,
@@ -553,6 +556,11 @@ class RoomController:
                 values = await self._gateway.read(
                     ieee, op.endpoint, op.cluster, [op.attribute, *op.also_read]
                 )
+        except UnsupportedAttribute:
+            # The device lacks the attribute: no retry will help. What the
+            # firmware needs is not known, only what is installed.
+            installed = _fmt_version(self._firmware[trv])
+            return Unsupported(op.capability, "unknown", installed)
         except (GatewayError, TimeoutError) as err:
             return Failed(str(err) or type(err).__name__)
         return _judge(op, values)

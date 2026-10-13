@@ -133,6 +133,7 @@ async def test_resolve_rejects_entity_whose_device_vanished(
 def test_error_hierarchy() -> None:
     assert issubclass(zha_gateway.ZhaUnavailable, zha_gateway.GatewayError)
     assert issubclass(zha_gateway.NotZhaEntity, zha_gateway.GatewayError)
+    assert issubclass(zha_gateway.UnsupportedAttribute, zha_gateway.GatewayError)
 
 
 # --- ZhaLibraryGateway ----------------------------------------------------
@@ -243,6 +244,39 @@ async def test_library_gateway_read_failure_raises(hass) -> None:
     assert "UNSUPPORTED_ATTRIBUTE" in str(excinfo.value)
 
 
+async def test_library_gateway_read_of_an_unsupported_primary_attribute(hass) -> None:
+    failure = {0x6011: Status.UNSUPPORTED_ATTRIBUTE}
+    device, _ = _device_with_cluster(({0x600E: 3}, failure))
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(zha_gateway.UnsupportedAttribute, match="0x6011"):
+            await gw.read(IEEE, 1, 0xFC11, [0x6011, 0x600E])
+
+
+async def test_library_gateway_read_of_an_unsupported_extra_attribute_is_plain(
+    hass,
+) -> None:
+    failure = {0x600E: Status.UNSUPPORTED_ATTRIBUTE}
+    device, _ = _device_with_cluster(({0x600D: 2140}, failure))
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(zha_gateway.GatewayError, match="0x600E") as excinfo:
+            await gw.read(IEEE, 1, 0xFC11, [0x600D, 0x600E])
+    assert type(excinfo.value) is zha_gateway.GatewayError
+
+
+@pytest.mark.parametrize("failure", [{0x6011: Status.FAILURE}, {}])
+async def test_library_gateway_other_read_failures_of_the_primary_are_plain(
+    hass, failure
+) -> None:
+    device, _ = _device_with_cluster(({0x600E: 3}, failure))
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(zha_gateway.GatewayError, match="0x6011") as excinfo:
+            await gw.read(IEEE, 1, 0xFC11, [0x6011, 0x600E])
+    assert type(excinfo.value) is zha_gateway.GatewayError
+
+
 async def test_library_gateway_read_missing_attribute_raises(hass) -> None:
     device, _ = _device_with_cluster(({0x600E: 3}, {}))
     with patch(PATCH_TARGET, return_value=_gateway_with(device)):
@@ -347,6 +381,44 @@ async def test_library_gateway_write_rejected_status_raises(
             await gw.write(IEEE, 1, 0xFC11, 0x600D, 2140)
     assert "0x600D" in str(excinfo.value)
     assert status_name in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        [[_record(Status.UNSUPPORTED_ATTRIBUTE, 0x6011)]],
+        [_record(Status.UNSUPPORTED_ATTRIBUTE, 0x6011)],
+        [[_record(Status.SUCCESS, 0x1234), _record(Status.UNSUPPORTED_ATTRIBUTE)]],
+        [Status.UNSUPPORTED_ATTRIBUTE],
+        Status.UNSUPPORTED_ATTRIBUTE,
+    ],
+)
+async def test_library_gateway_write_of_an_unsupported_attribute_has_its_own_error(
+    hass, response
+) -> None:
+    device, _ = _device_with_cluster(({}, {}))
+    device.write_zigbee_attribute = AsyncMock(return_value=response)
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(
+            zha_gateway.UnsupportedAttribute, match="write rejected"
+        ) as excinfo:
+            await gw.write(IEEE, 1, 0xFC11, 0x6011, -40)
+    assert "0x6011" in str(excinfo.value)
+    assert "UNSUPPORTED_ATTRIBUTE" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "status", [Status.READ_ONLY, Status.NOT_AUTHORIZED, Status.INVALID_VALUE]
+)
+async def test_library_gateway_other_write_rejections_stay_plain(hass, status) -> None:
+    device, _ = _device_with_cluster(({}, {}))
+    device.write_zigbee_attribute = AsyncMock(return_value=[[_record(status, 0x6011)]])
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(zha_gateway.GatewayError) as excinfo:
+            await gw.write(IEEE, 1, 0xFC11, 0x6011, -40)
+    assert type(excinfo.value) is zha_gateway.GatewayError
 
 
 @pytest.mark.parametrize(
@@ -488,6 +560,17 @@ async def test_fake_gateway_contract() -> None:
     # an attribute that was never written cannot be read
     with pytest.raises(zha_gateway.GatewayError, match="0x600E"):
         await fake.read(IEEE, 1, 0xFC11, [0x600E])
+
+    # unsupported_write keeps raising UnsupportedAttribute, records the write
+    # and stores nothing; other attributes and devices are not affected
+    fake.unsupported_write.add((IEEE, 0x6011))
+    for _ in range(2):
+        with pytest.raises(zha_gateway.UnsupportedAttribute, match="0x6011"):
+            await fake.write(IEEE, 1, 0xFC11, 0x6011, -40)
+    assert fake.writes[-1] == (IEEE, 1, 0xFC11, 0x6011, -40)
+    assert (IEEE, 1, 0xFC11, 0x6011) not in fake.store
+    await fake.write(IEEE, 1, 0xFC11, 0x600D, 2300)
+    fake.unsupported_write.clear()
 
     # unknown devices fail like the real adapter, leaving no trace
     unknown = "00:12:4b:00:00:00:00:99"

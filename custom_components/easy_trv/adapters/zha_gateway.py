@@ -37,6 +37,13 @@ class NotZhaEntity(GatewayError):  # noqa: N818 - public name fixed by the inter
     """The entity is not backed by a ZHA device."""
 
 
+class UnsupportedAttribute(GatewayError):  # noqa: N818 - public name fixed by the interface
+    """The device does not implement the attribute (a firmware or profile problem).
+
+    Unlike any other :class:`GatewayError` it will not go away by trying again.
+    """
+
+
 @dataclass(frozen=True)
 class DeviceRef:
     """A ZHA-backed TRV as seen from its climate entity."""
@@ -196,8 +203,9 @@ class ZhaLibraryGateway:
         """Write one attribute (never with a manufacturer code).
 
         Raises:
+            UnsupportedAttribute: If the device answers ``UNSUPPORTED_ATTRIBUTE``.
             GatewayError: If ZHA fails to send the write or the device answers
-                with a status other than SUCCESS.
+                with another status than SUCCESS.
 
         """
         device = self._device(ieee)
@@ -214,12 +222,21 @@ class ZhaLibraryGateway:
         rejected = self._first_rejection(response)
         if rejected is not None:
             msg = f"write rejected for 0x{attribute:04X}: {rejected}"
+            if rejected == self._foundation.Status.UNSUPPORTED_ATTRIBUTE:
+                raise UnsupportedAttribute(msg)
             raise GatewayError(msg)
 
     async def read(
         self, ieee: str, endpoint: int, cluster: int, attributes: Sequence[int]
     ) -> Mapping[int, int]:
-        """Read attributes from the device, bypassing ZHA's attribute cache."""
+        """Read attributes from the device, bypassing ZHA's attribute cache.
+
+        Raises:
+            UnsupportedAttribute: If the device reports the first requested
+                attribute (the one an operation verifies) as unsupported.
+            GatewayError: If any attribute cannot be read.
+
+        """
         device = self._device(ieee)
         try:
             cluster_obj = device.async_get_cluster(endpoint, cluster)
@@ -231,9 +248,15 @@ class ZhaLibraryGateway:
         except Exception as err:
             raise GatewayError(_describe(err)) from err
         result: dict[int, int] = {}
-        for attr in attributes:
+        for index, attr in enumerate(attributes):
             if attr in failure or attr not in success:
-                msg = f"read failed for 0x{attr:04X}: {failure.get(attr)}"
+                status = failure.get(attr)
+                msg = f"read failed for 0x{attr:04X}: {status}"
+                if (
+                    index == 0
+                    and status == self._foundation.Status.UNSUPPORTED_ATTRIBUTE
+                ):
+                    raise UnsupportedAttribute(msg)
                 raise GatewayError(msg)
             try:
                 result[attr] = int(success[attr])

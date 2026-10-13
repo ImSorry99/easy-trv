@@ -580,6 +580,35 @@ async def test_profile_without_capability_is_unsupported(
     }
 
 
+async def test_unsupported_attribute_raises_a_firmware_issue_without_retrying(
+    hass, freezer, make_controller, gateway
+) -> None:
+    gateway.unsupported_write.add((IEEE_A, HYSTERESIS))
+    controller = make_controller()
+    await controller.async_start()
+    # Longer than the first two retry delays, which a failure would have used.
+    await advance(hass, freezer, 60)
+
+    raised = issue(hass, "trv_firmware_0011")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_placeholders == {
+        "trv": "climate.a",
+        "trv_name": "climate.a",
+        "capability": "hysteresis",
+        "required": "unknown",
+        "installed": "1.3.0",
+    }
+    assert issue(hass, "trv_unreachable_0011") is None
+    assert issue(hass, "trv_firmware_0022") is None
+    # One attempt, no retry; the thermostat still gets source and value.
+    assert writes_to(gateway, IEEE_A, HYSTERESIS) == [-40]
+    assert writes_to(gateway, IEEE_A, SOURCE) == [1]
+    assert writes_to(gateway, IEEE_A, VALUE) == [2130]
+    assert health(controller) == {"climate.a": "unsupported", "climate.b": "ok"}
+    assert controller.status == RoomStatus.DEGRADED
+
+
 @pytest.mark.parametrize("scenario", ["unavailable", "unknown"])
 async def test_unreachable_device_is_a_failed_outcome(
     hass, freezer, make_controller, gateway, scenario
