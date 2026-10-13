@@ -46,17 +46,17 @@ capabilities:
     verify: { rule: one_of, external: [1, 3], internal: [0] }
     signals: { 2: failsafe }
   window_detection_flag:
-    intent: apply_settings.window_detection
+    intent: set_window_detection
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6000, encode: bool }
     verify: { rule: equals }
   hysteresis:
-    intent: apply_settings.hysteresis
+    intent: set_hysteresis
     min_firmware: "1.3.0"
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6011, encode: kelvin_centi_negative, range: [0.2, 1.0] }
     verify: { rule: equals }
 ```
 
-The vocabulary is small on purpose: a fixed set of intents (`set_room_temperature`, `set_source`, `apply_settings.*`), a fixed set of encoders (`temperature_centi`, `kelvin_centi_negative`, `bool`, `map`, `const`), two verify rules (`equals`, `one_of`) and named signals. New vocabulary is added in code when a new device needs it; profiles only combine it.
+The vocabulary is small on purpose: a fixed set of intents (`set_room_temperature`, `set_source`, `set_window_detection`, `set_hysteresis`), a fixed set of encoders (`temperature_centi`, `kelvin_centi_negative`, `bool`, `map`, `const`), two verify rules (`equals`, `one_of`) and named signals. New vocabulary is added in code when a new device needs it; profiles only combine it.
 
 ## Selection
 
