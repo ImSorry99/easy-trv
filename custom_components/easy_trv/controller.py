@@ -85,6 +85,7 @@ if TYPE_CHECKING:
         Outcome,
         RoomConfig,
     )
+    from custom_components.easy_trv.core.values import Version
     from custom_components.easy_trv.profiles.engine import Operation, Profile
 
 _LOGGER = logging.getLogger(__name__)
@@ -103,6 +104,11 @@ _NO_READING_STATES: Final = frozenset({STATE_UNKNOWN, STATE_UNAVAILABLE, ""})
 def _is_available(state: State | None) -> bool:
     """Return whether a thermostat state exists and is not ``unavailable``."""
     return state is not None and state.state != STATE_UNAVAILABLE
+
+
+def _fmt_version(version: Version | None) -> str:
+    """Render a firmware version as ``"1.3.0"``, or ``"unknown"`` if there is none."""
+    return "unknown" if version is None else ".".join(map(str, version))
 
 
 def _judge(op: Operation, values: Mapping[int, int]) -> Outcome:
@@ -367,7 +373,8 @@ class RoomController:
             case FireEvent(name=name, data=data):
                 self._hass.bus.async_fire(name, dict(data))
             case Log(level=level, message=message):
-                _LOGGER.log(_LOG_LEVELS[level], "%s: %s", self._config.name, message)
+                # The core's messages already carry the room name.
+                _LOGGER.log(_LOG_LEVELS[level], "%s", message)
             case _:
                 assert_never(command)
 
@@ -435,10 +442,12 @@ class RoomController:
         while True:
             trv, intent = await self._queue.get()
             try:
-                self._dispatch(await self._run_operation(trv, intent))
+                await self._process(trv, intent)
             except Exception:
+                # Reached only if the logic itself fails on the result; the
+                # worker must survive that as well.
                 _LOGGER.exception(
-                    "%s: unexpected error while running %s on %s",
+                    "%s: unexpected error while handling the result of %s on %s",
                     self._config.name,
                     INTENT_NAMES[type(intent)],
                     trv,
@@ -446,13 +455,32 @@ class RoomController:
             finally:
                 self._queue.task_done()
 
+    async def _process(self, trv: str, intent: Intent) -> None:
+        """Run one operation and feed its result, whatever it was, to the logic."""
+        try:
+            result = await self._run_operation(trv, intent)
+        except Exception as exc:
+            # Anything not mapped to an outcome yet: log it and report a
+            # failure so the logic's retry and issue machinery still runs.
+            _LOGGER.exception(
+                "%s: unexpected error while running %s on %s",
+                self._config.name,
+                INTENT_NAMES[type(intent)],
+                trv,
+            )
+            failed = Failed(f"unexpected: {type(exc).__name__}: {exc}")
+            result = OperationResult(trv, intent, self._capability_of(intent), failed)
+        self._dispatch(result)
+
     async def _run_operation(self, trv: str, intent: Intent) -> OperationResult:
         """Plan, write and read back one intent; every failure is an outcome."""
         try:
             op = self._profile.plan(intent, self._firmware[trv])
         except CapabilityUnsupported as exc:
             capability = self._profile.capability_for(intent) or exc.capability
-            outcome = Unsupported(exc.capability, str(exc.required), str(exc.installed))
+            outcome = Unsupported(
+                exc.capability, _fmt_version(exc.required), _fmt_version(exc.installed)
+            )
             return OperationResult(trv, intent, capability, outcome)
         except ValueError as exc:
             capability = self._capability_of(intent)

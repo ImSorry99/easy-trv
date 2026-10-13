@@ -312,7 +312,13 @@ async def test_verify_delay_and_mismatch_retry(
     assert raised.translation_placeholders["attempts"] == "3"
     assert issue(hass, "trv_unreachable_0022") is None
     assert [e.data["attribute"] for e in write_failed] == ["external_temperature"]
-    assert "did not accept external_temperature after 3 attempts" in caplog.text
+    [record] = [r for r in caplog.records if "did not accept" in r.getMessage()]
+    assert record.levelno == logging.WARNING
+    # The core's message already names the room; the controller adds nothing.
+    assert record.getMessage().startswith(
+        "Living: climate.a did not accept external_temperature after 3 attempts"
+    )
+    assert record.getMessage().count("Living:") == 1
 
 
 async def test_write_error_is_retried_and_recovers(
@@ -414,8 +420,8 @@ async def test_firmware_gated_capability_raises_issue_and_keeps_writing(
         "trv": "climate.a",
         "trv_name": "climate.a",
         "capability": "hysteresis",
-        "required": "(1, 3, 0)",
-        "installed": "(1, 2, 1)",
+        "required": "1.3.0",
+        "installed": "1.2.1",
     }
     assert issue(hass, "trv_firmware_0022") is None
     # Hysteresis never reaches the old device, everything else still does.
@@ -447,6 +453,9 @@ async def test_profile_without_capability_is_unsupported(
         raised = issue(hass, f"trv_firmware_{ieee}")
         assert raised is not None
         assert raised.translation_placeholders["capability"] == "set_hysteresis"
+        # The profile has no such capability, so no version is required.
+        assert raised.translation_placeholders["required"] == "unknown"
+        assert raised.translation_placeholders["installed"] == "1.3.0"
     assert writes_to(gateway, IEEE_A, HYSTERESIS) == []
     assert writes_to(gateway, IEEE_A, VALUE) == [2130]
     assert health(controller) == {
@@ -512,8 +521,8 @@ async def test_timeout_is_a_failed_outcome(
     assert controller.attributes["last_error"] == "TimeoutError"
 
 
-async def test_unexpected_error_does_not_kill_the_worker(
-    hass, controller, gateway, monkeypatch, caplog
+async def test_unexpected_error_becomes_a_failed_outcome_and_is_retried(
+    hass, freezer, controller, gateway, caplog
 ) -> None:
     original = gateway.write
     calls = []
@@ -525,13 +534,71 @@ async def test_unexpected_error_does_not_kill_the_worker(
             raise RuntimeError(msg)
         await original(*args)
 
-    monkeypatch.setattr(gateway, "write", explode_once)
+    gateway.write = explode_once
     await controller.async_start()
     await settle(hass)
+    # The first write (window detection of a) blew up; the worker went on.
     assert len(gateway.writes) == 7
+    assert writes_to(gateway, IEEE_A, WINDOW) == []
     errors = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
     assert len(errors) == 1
     assert "boom" in caplog.text
+    # The failure reached the core, which scheduled the first retry after 5 s.
+    await advance(hass, freezer, 5)
+    assert writes_to(gateway, IEEE_A, WINDOW) == [1]
+    assert controller.status == RoomStatus.OK
+
+
+async def test_persistent_unexpected_error_ends_in_error_and_spares_other_trv(
+    hass, freezer, controller, gateway, monkeypatch
+) -> None:
+    original = gateway.write
+
+    async def explode_on_a(ieee, *args) -> None:
+        if ieee == IEEE_A:
+            msg = "boom"
+            raise RuntimeError(msg)
+        await original(ieee, *args)
+
+    monkeypatch.setattr(gateway, "write", explode_on_a)
+    await controller.async_start()
+    await advance(hass, freezer, 25)
+    assert health(controller) == {"climate.a": "error", "climate.b": "ok"}
+    assert controller.attributes["last_error"] == "unexpected: RuntimeError: boom"
+    raised = issue(hass, "trv_unreachable_0011")
+    assert raised is not None
+    assert raised.translation_placeholders["error"] == "unexpected: RuntimeError: boom"
+    assert [w for w in written(gateway) if w[0] == IEEE_B] == [
+        (IEEE_B, WINDOW, 1),
+        (IEEE_B, HYSTERESIS, -40),
+        (IEEE_B, SOURCE, 1),
+        (IEEE_B, VALUE, 2130),
+    ]
+
+
+async def test_failing_listener_does_not_kill_the_worker(
+    hass, freezer, controller, gateway, caplog
+) -> None:
+    gateway.read_override[(IEEE_A, VALUE)] = 2000
+    await controller.async_start()
+    await settle(hass)
+
+    def broken() -> None:
+        msg = "listener broke"
+        raise RuntimeError(msg)
+
+    controller.add_listener(broken)
+    # The third mismatch flips the status to error; the listener then raises
+    # while the worker feeds the result to the logic.
+    await advance(hass, freezer, 25)
+    assert controller.status == RoomStatus.ERROR
+    assert "unexpected error while handling the result" in caplog.text
+    assert issue(hass, "trv_unreachable_0011") is not None
+    # The worker is still alive and keeps writing.
+    gateway.writes.clear()
+    hass.states.async_set("sensor.t1", "21.8", CELSIUS)
+    await advance(hass, freezer, 5)
+    assert [w[4] for w in gateway.writes] == [2180, 2180]
 
 
 # --- TRV availability -----------------------------------------------------
