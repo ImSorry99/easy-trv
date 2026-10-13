@@ -14,7 +14,21 @@ A manual checklist for the first run on real hardware: Oliver's four Sonoff TRVZ
 1. HACS > three dots > **Custom repositories** > add `https://github.com/ImSorry99/easy-trv`, type **Integration**.
 2. Download **Easy TRV**, restart Home Assistant.
 3. **Settings > Devices & services > Add integration > Easy TRV.** The entry is created without a form.
-4. Turn on debug logging for the test: Easy TRV page > three dots > **Enable debug logging**. Turn it off and download the log when you are done.
+4. Turn on debug logging for the test: Easy TRV page > three dots > **Enable debug logging**. Turn it off and download the log when you are done. Alternatively set it in `configuration.yaml` and restart:
+
+   ```yaml
+   logger:
+     logs:
+       custom_components.easy_trv: debug
+   ```
+
+   Every operation Easy TRV carries out produces one debug line once its outcome is known:
+
+   ```
+   Wohnzimmer: climate.living_trv_1 external_temperature attr 0x600D raw=2140 -> ok
+   ```
+
+   That is: room, thermostat entity, capability, attribute, the raw value written, and the result (`ok`, `mismatch expected [2140] got 2000`, `failed: <error>`, `signal failsafe`). An operation that is not sent at all (firmware too old, value out of range) is logged as `... hysteresis not sent -> unsupported ...`. Filter the log for `easy_trv` or `attr 0x`.
 5. Expected: the integration appears with no rooms and no Repairs issue.
 
 ## 2. Add the rooms
@@ -32,7 +46,7 @@ After Home Assistant is fully started (or after **Reload** on the Easy TRV page)
 | window detection | `0x6000` | `1` (on) or `0` (off) |
 | hysteresis (firmware 1.3.0 or newer, if chosen) | `0x6011` | minus hundredths of a kelvin, `-40` for 0.4 K |
 | source: external | `0x600E` | `1`; reads back `1` or `3` |
-| room temperature | `0x600D` | hundredths of a degree, `2135` for 21.35 °C |
+| room temperature | `0x600D` | the room temperature rounded to 0.1 °C, times 100: `2130` for 21.3 °C, `2140` for 21.35 °C |
 
 Every write is followed by a read about 10 seconds later, so the living room needs a few minutes to finish. The bedroom runs in parallel.
 
@@ -45,7 +59,7 @@ For each thermostat: device page > three dots > **Manage Zigbee device** > **Clu
 
 | Attribute | ID | Expect |
 |---|---|---|
-| `external_temperature_sensor_value` | `0x600D` (24589) | active sensor value times 100 |
+| `external_temperature_sensor_value` | `0x600D` (24589) | the active sensor's value rounded to 0.1 °C, times 100 (`2140` for 21.35 °C) |
 | `external_temperature_sensor_enable` | `0x600E` (24590) | `1` or `3` (external); `0` internal; `2` fail-safe |
 | `open_window` | `0x6000` (24576) | `1` if window detection is on |
 | `temperature_control_accuracy` | `0x6011` (24593) | `-40` for 0.4 K (firmware 1.3.0 or newer) |
@@ -54,7 +68,7 @@ For each thermostat: device page > three dots > **Manage Zigbee device** > **Clu
 
 - The Status sensor of both rooms ends as `ok`. Open its attributes: `source` is `external`, `active_sensor` is your first temperature sensor, `trv_health` lists every thermostat as `ok`, `last_error` is empty.
 - `climate.<thermostat>` shows the room temperature as `current_temperature` after a moment, not the radiator's own reading.
-- Change the active sensor's value by 0.1 K or more (warm the sensor with your hand). About 5 seconds after the last report, one new value write per thermostat appears in the debug log, and `0x600D` follows.
+- Change the active sensor's value by 0.1 K or more (warm the sensor with your hand). About 5 seconds after the last report, the debug log shows one new `external_temperature attr 0x600D raw=... -> ok` line per thermostat, and `0x600D` in ZHA holds that raw value.
 - Reload the integration, then check that nothing stays in Repairs.
 - Switch Home Assistant to German and check that the Status states (OK / Eingeschränkt / Fehler) and the room form are translated.
 
@@ -66,7 +80,7 @@ The TRVZB discards the external value after about two hours without a write and 
 
 1. Pick the bedroom thermostat. Download the diagnostics and note `last_value_write` of the room.
 2. **Disable** the Easy TRV entry (Easy TRV page > three dots > Disable). Nothing writes to the thermostats now. Disabling does not reset them.
-3. From 60 minutes on, read `0x600E` and `0x600D` of that thermostat every 30 minutes without writing anything. Note the time when `0x600E` first shows `2`, and whether `climate.current_temperature` changes to the radiator's own reading at that moment.
+3. From 60 minutes on, read `0x600E` and `0x600D` of that thermostat every 30 minutes without writing anything. (S2 below needs a run without these reads.) Note the time when `0x600E` first shows `2`, and whether `climate.current_temperature` changes to the radiator's own reading at that moment.
 4. After more than 2 hours, `0x600E` should read `2`. Note it.
 5. **Enable** the entry again. Expected: the room starts, `0x600E` reads `1` or `3` after the first writes, `0x600D` holds the current room temperature, and the Status is `ok`.
 
@@ -82,12 +96,12 @@ Set `refresh_minutes` back to 20 afterwards.
 ## 5. Robustness (optional)
 
 - **Sensor lost.** Make the active sensor unavailable (disable its entity or take its battery out). Expected within a few minutes: Status `degraded`, `source` `internal`, `0x600E` reads `0` on every thermostat of the room. With a second sensor in the room the thermostats stay on `external` and `active_sensor` switches to the second sensor. Restore the sensor: back to `external`, Status `ok`.
-- **Thermostat gone.** Take the batteries out of one thermostat. Expected: while ZHA still shows it as available, writes fail and after three attempts Repairs shows `trv_unreachable`, the event `easy_trv_write_failed` fires and the Status is `error`. Once ZHA marks it unavailable it is skipped and the Status is `degraded`. Put the batteries back: the next verified write clears the issue and fires `easy_trv_recovered`.
+- **Thermostat gone.** Take the batteries out of one thermostat. Writes only happen when there is something to write, so trigger one: change the room sensor by 0.1 K or more (warm it with your hand), or wait for the next refresh (default 20 minutes; set `refresh_minutes` to 5 for this check). Expected: while ZHA still shows the thermostat as available, the write fails (`failed: ...` or `mismatch ...` lines in the debug log) and after three attempts Repairs shows `trv_unreachable`, the event `easy_trv_write_failed` fires and the Status is `error`. Once ZHA marks it unavailable it is skipped and the Status is `degraded`. Put the batteries back: the next verified write clears the issue and fires `easy_trv_recovered`.
 - **Invalid profile.** Put a broken YAML file into `<config>/easy_trv/profiles/` and reload the integration. Expected: Repairs shows `profile_invalid` naming the file, and the rooms keep working. Remove the file and reload; the issue goes away.
 
 ## 6. Spikes
 
-Each spike answers one question that decides whether a requirement holds. Keep the Easy TRV debug log on and note timestamps.
+Each spike answers one question that decides whether a requirement holds. Keep the Easy TRV debug log on (section 1) and note timestamps; the `attr 0x...` lines show every write and its result.
 
 ### S1: Does a value write wake a thermostat that is off?
 
@@ -103,7 +117,7 @@ Why: requirement T6 keeps writing regardless of the thermostat's HVAC mode.
 Why: if it reports, the fail-safe could be caught immediately rather than at the next refresh.
 
 1. Enable debug logging for ZHA as well (ZHA page > three dots > Enable debug logging).
-2. Run F1 from section 4. Do not read `0x600E` by hand until the end of the wait.
+2. Run F1 from section 4 again as a separate run, without the half-hourly reads of F1 step 3: every manual read could itself make the device report. Read `0x600E` by hand only once, at the end of the wait (more than 2 hours).
 3. After the wait, search the log for `0x600E` and `external_temperature_sensor_enable`. Record whether an attribute report with value `2` arrived on its own, and when.
 
 ### S3: Does the built-in window detection trigger on the external source?
@@ -112,7 +126,7 @@ Why: validates the Phase 1 decision to use the thermostat's own detection with a
 
 1. Window detection `on` in the room, external source active, room Status `ok`. Pick a day when it is clearly colder outside.
 2. Open the window next to a thermostat for at least 10 minutes. Note when the thermostat reacts (valve closes, the target changes to 12 °C, `0x6000` stays `1`). According to the profile notes the device's own rule is a drop of more than 1.5 K within 4.5 minutes.
-3. Note the external sensor's reported values during that time and how often it reports. Also note whether Easy TRV writes a value meanwhile (the debug log) and whether the Status stays `ok`.
+3. Note the external sensor's reported values during that time and how often it reports. Also note whether Easy TRV writes a value meanwhile (`attr 0x600D` lines in the debug log) and whether the Status stays `ok`.
 4. Close the window. Note when and how the thermostat returns to the old target (on a rise, on a manual change, or after 30 minutes).
 5. Optional baseline: repeat with the entry disabled and the thermostat on its internal source (write `0` to `0x600E` in ZHA).
 
@@ -122,7 +136,7 @@ Why: verification compares exact integers.
 
 1. Disable the Easy TRV entry so nothing else writes.
 2. In ZHA > Manage Zigbee device > Clusters: confirm that the thermostat lists endpoint 1 with cluster `0xFC11`.
-3. Write `0x600E = 1`. Then write `0x600D = 2135` and read it back; then write `2140` and read it back; then `2135` again. Always read after about 10 seconds.
+3. Write `0x600E = 1`. Then write `0x600D = 2135` and read it back; then write `2140` and read it back; then `2135` again. Always read after about 10 seconds. These raw values are written by hand; Easy TRV itself rounds to 0.1 °C and only writes multiples of 10 (`2140` for 21.35 °C).
 4. Record whether each read returns exactly the written value, and `climate.current_temperature` after each (21.4 for 2135 or 2140?).
 5. Enable the entry again and confirm that its first value write verifies (Status `ok`, no `easy_trv_write_failed`).
 

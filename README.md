@@ -10,7 +10,7 @@ Status: Phase 1, version 0.1.0. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for wha
 
 | Device | Integration | Firmware | Notes |
 |---|---|---|---|
-| Sonoff TRVZB (Gen 1) | ZHA | 1.2.1 or newer | Hysteresis needs 1.3.0 or newer. Tested with 1.3.0 and 1.4.4. |
+| Sonoff TRVZB (Gen 1) | ZHA | 1.2.1 or newer | Hysteresis needs 1.3.0 or newer. Targeted firmware: 1.3.0 and 1.4.4. The first hardware run is pending (see [`docs/testing-on-device.md`](docs/testing-on-device.md)). |
 
 Home Assistant 2026.8 or newer is required. The thermostats must already be paired with ZHA. Use ZHA's built-in quirk for the TRVZB; do not add a custom quirk for the same model, the two conflict.
 
@@ -91,10 +91,12 @@ Attributes:
 
 | Issue | Severity | Raised when | Cleared |
 |---|---|---|---|
-| `trv_unreachable` | Error | A thermostat did not accept a write after all attempts. Check battery and Zigbee signal. | On the next verified write, or when the integration is reloaded. |
-| `trv_firmware` | Warning | The thermostat's firmware is too old for a capability (for example hysteresis below 1.3.0). | After a firmware update and a reload of the integration. |
+| `trv_unreachable` | Error | A thermostat did not accept a write after all attempts. Check battery and Zigbee signal. | On the next verified write, or on a reload of the integration (raised again if the problem persists). |
+| `trv_firmware` | Warning | The thermostat's firmware is too old for a capability (for example hysteresis below 1.3.0). | On a reload of the integration, for example after a firmware update (raised again if the problem persists). |
 | `zha_api_incompatible` | Error | Easy TRV cannot use the installed ZHA's internal API. Setup is retried. | When setup works. |
 | `profile_invalid` | Warning | A user profile file is invalid and is ignored. The issue names the file and the problem. | When the file loads cleanly after you fix it and reload the integration. |
+
+Issues of thermostats that no longer belong to any room are removed when the integration loads.
 
 ### Events
 
@@ -108,13 +110,17 @@ Events are fired on the Home Assistant bus (Developer tools > Events) and can tr
 
 Payload of all three: `room`, `room_id`, `trv_entity_id`, `ieee`. `easy_trv_write_failed` adds `attribute` (the capability that failed, for example `external_temperature`), `attempts` and `error`.
 
+### Debug log
+
+With debug logging on for `custom_components.easy_trv` (Settings > Devices & services > Easy TRV > three dots > Enable debug logging), every operation produces one line when its result is known, for example `Living room: climate.trv_1 external_temperature attr 0x600D raw=2140 -> ok`: room, thermostat, capability, attribute, raw value written and the result (`ok`, `mismatch expected [...] got ...`, `failed: ...`, `signal failsafe`). An operation that is not sent at all (firmware too old, for instance) is logged as `... not sent -> unsupported ...`.
+
 ### Diagnostics
 
 **Settings > Devices & services > Easy TRV > Download diagnostics** contains the options, the loaded profiles and skipped profile files, and for every room its configuration and full state (including timestamps and attempt counters). It includes the thermostats' IEEE addresses and entity ids, so look through it before posting it publicly.
 
 ## Profiles
 
-Easy TRV talks to a thermostat through a profile, a small YAML file that says which device it fits, from which firmware, and which attributes to write and read back. The shipped profile is `sonoff_trvzb_native` in [`custom_components/easy_trv/profiles/builtin/`](custom_components/easy_trv/profiles/builtin/). Shipped profiles are tested on real hardware and are never edited in place.
+Easy TRV talks to a thermostat through a profile, a small YAML file that says which device it fits, from which firmware, and which attributes to write and read back. The shipped profile is `sonoff_trvzb_native` in [`custom_components/easy_trv/profiles/builtin/`](custom_components/easy_trv/profiles/builtin/). Shipped profiles are never edited in place. The `sonoff_trvzb_native` profile targets firmware 1.3.0 and 1.4.4; the first run on real hardware is pending (see [`docs/testing-on-device.md`](docs/testing-on-device.md)).
 
 To adapt one:
 

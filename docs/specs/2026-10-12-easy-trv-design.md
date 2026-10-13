@@ -89,11 +89,13 @@ Retry (core): `mismatch` / `error` / `timeout` → `attempts += 1`; `< max_attem
 | Repairs `zha_api_incompatible` | adapter cannot be constructed | `severity=ERROR`; setup raises `ConfigEntryNotReady`. |
 | Repairs `profile_invalid_<file>` | a user profile fails schema validation | `severity=WARNING`, placeholders `file`, `error`; the file is ignored until fixed. Deleted when it validates on the next load. |
 | Events | `easy_trv_write_failed`, `easy_trv_recovered`, `easy_trv_failsafe_detected` | payload `room`, `room_id`, `trv_entity_id`, `ieee`, plus `attribute`, `attempts`, `error` for failures |
-| Log | once per transition | warning OK→error, info error→OK and fail-safe; debug decision log per evaluation |
+| Log | once per transition | warning OK→error, info error→OK and fail-safe; debug: one line per executed operation after its outcome is known (`<room>: <trv> <capability> attr 0x<attr> raw=<n> -> <outcome>`; `... not sent -> ...` when no operation could be planned), plus the core's notes on ignored signals |
 | Status sensor | always | one per room device (`identifiers={(DOMAIN, subentry_id)}`): `sensor`, `device_class=ENUM`, options `ok`/`degraded`/`error`, `EntityCategory.DIAGNOSTIC`, `has_entity_name`, `unique_id=f"{subentry_id}_status"`. `ok`: all thermostats ok and (if sensors configured) external active. `degraded`: no usable sensor though configured, any thermostat unavailable/unsupported, or fail-safe within the last refresh period. `error`: any thermostat in error. Attributes, written only on change: `active_sensor`, `source`, `trv_health`, `last_error`. |
 | Diagnostics | on download | options, every room config and full `RoomState` including timestamps and attempt counters |
 
 No `persistent_notification`, no entity per error, no entities besides the status sensor.
+
+Setup also removes the `trv_unreachable_*` and `trv_firmware_*` issues of thermostats that belong to no configured room (`issues.clear_thermostat_issues_except`), so issues do not outlive a removed thermostat or room.
 
 ## 6. Tests and tooling
 
