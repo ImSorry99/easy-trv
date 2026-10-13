@@ -1,0 +1,14 @@
+schema: 1
+id: user_dup
+name: Duplicate intent
+match: { manufacturer: SONOFF, model: TRVZB }
+min_firmware: "1.2.1"
+capabilities:
+  source_select:
+    intent: set_source
+    write: { endpoint: 1, cluster: 0xFC11, attribute: 0x600E, encode: { map: { external: 1, internal: 0 } } }
+    verify: { rule: one_of, external: [1, 3], internal: [0] }
+  source_select_copy:
+    intent: set_source
+    write: { endpoint: 1, cluster: 0xFC11, attribute: 0x600E, encode: { map: { external: 1, internal: 0 } } }
+    verify: { rule: one_of, external: [1, 3], internal: [0] }
