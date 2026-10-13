@@ -10,6 +10,11 @@ dev = [
     "ruff==0.14.*",
     "mypy==1.19.*",
     "types-PyYAML",
+    "zha==2.3.1",
+    "aiousbwatcher==1.1.2",
+    "zha-quirks==2.3.0",
+    "ha-silabs-firmware-client==0.3.0",
+    "universal-silabs-flasher==1.1.0",
 ]
 
 [tool.pytest.ini_options]
