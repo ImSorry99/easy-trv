@@ -220,6 +220,25 @@ async def test_new_sensor_value_rearms_the_debounce(
     assert [w[4] for w in gateway.writes] == [2240, 2240]
 
 
+async def test_state_reports_do_not_starve_the_debounce(
+    hass, freezer, controller, gateway
+) -> None:
+    await controller.async_start()
+    await settle(hass)
+    gateway.writes.clear()
+    hass.states.async_set("sensor.t1", "21.8", CELSIUS)
+    for second in range(1, 16):
+        await advance(hass, freezer, 1, step=1)
+        if second % 3 == 0:
+            # Same value again: only last_reported moves (a state report).
+            hass.states.async_set("sensor.t1", "21.8", CELSIUS)
+            await settle(hass)
+        if second < 5:
+            assert gateway.writes == []
+        else:
+            assert [w[4] for w in gateway.writes] == [2180, 2180]
+
+
 async def test_missing_sensor_state_falls_back_to_next_sensor(
     hass, controller, gateway
 ) -> None:

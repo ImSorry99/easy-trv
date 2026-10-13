@@ -68,6 +68,15 @@ def _without[V](mapping: Mapping[str, V], key: str) -> dict[str, V]:
     return {k: v for k, v in mapping.items() if k != key}
 
 
+def _value_changed(previous: SensorReading | None, reading: SensorReading) -> bool:
+    """Return whether a reading carries a new value for its sensor.
+
+    A first reading and a reading that follows one without a value count as
+    new; so does any different value.
+    """
+    return previous is None or previous.value is None or previous.value != reading.value
+
+
 @dataclass(frozen=True)
 class _Active:
     """The usable sensor with the highest priority and its raw value."""
@@ -159,12 +168,24 @@ class RoomLogic:
     def _on_sensor_changed(
         self, event: SensorChanged, now: datetime, state: RoomState
     ) -> _Step:
-        """Store the reading, then switch source or arm the debounce."""
+        """Store the reading, then switch source or arm the debounce.
+
+        A report that only carries a newer ``last_reported`` refreshes the
+        stored reading and nothing else, so a steady stream of reports cannot
+        keep pushing the debounce back.
+        """
         reading = event.reading
+        previous = state.readings.get(reading.entity_id)
+        before_sensor = state.active_sensor
         state = replace(state, readings={**state.readings, reading.entity_id: reading})
         before = state.source
         state, commands = self._reconcile_source(state, now)
         if state.source is not before:
+            return state, commands
+        # A sensor taking over without a source switch (for example the
+        # priority sensor reporting again) has a value that may differ.
+        handed_over = state.active_sensor != before_sensor
+        if not (handed_over or _value_changed(previous, reading)):
             return state, commands
         state, debounce = self._debounce_if_changed(state, now)
         return state, [*commands, *debounce]

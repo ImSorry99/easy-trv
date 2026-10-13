@@ -349,8 +349,67 @@ def test_change_debounces_then_writes_current_value() -> None:
 
 def test_first_value_is_always_debounced_when_nothing_was_written() -> None:
     st, _ = started()
-    st = replace(st, last_written=None)
+    st = replace(
+        st, last_written=None, readings={}
+    )  # sensor.t1 reports for the first time
     _, cmds = logic().handle(SensorChanged(reading("sensor.t1", 21.3)), T0, st)
+    assert debounces(cmds) == [ScheduleDebounce(5.0)]
+
+
+def test_unchanged_report_keeps_debounce_and_refreshes_reading() -> None:
+    st, _ = started()
+    st, cmds = logic().handle(SensorChanged(reading("sensor.t1", 21.8)), T0, st)
+    assert debounces(cmds) == [ScheduleDebounce(5.0)]
+    later = T0 + timedelta(seconds=3)
+    st, cmds = logic().handle(
+        SensorChanged(reading("sensor.t1", 21.8, at=later)), later, st
+    )
+    # Same value, newer last_reported: nothing to re-arm, nothing to write.
+    assert [type(c) for c in cmds] == [SetStatus]
+    assert st.debounce_pending
+    assert st.readings["sensor.t1"].last_reported == later
+
+
+def test_genuine_second_change_after_a_report_still_rearms_the_debounce() -> None:
+    st, _ = started()
+    st, _ = logic().handle(SensorChanged(reading("sensor.t1", 21.8)), T0, st)
+    later = T0 + timedelta(seconds=3)
+    st, _ = logic().handle(
+        SensorChanged(reading("sensor.t1", 21.8, at=later)), later, st
+    )
+    later = T0 + timedelta(seconds=4)
+    _, cmds = logic().handle(
+        SensorChanged(reading("sensor.t1", 22.4, at=later)), later, st
+    )
+    assert debounces(cmds) == [ScheduleDebounce(5.0)]
+
+
+def test_value_after_a_gap_counts_as_changed() -> None:
+    st, _ = started()
+    # sensor.t1 drops out (sensor.t2 takes over), then comes back with the
+    # value it had before: that is a change relative to the stored reading.
+    st, _ = logic().handle(SensorChanged(reading("sensor.t1", None)), T0, st)
+    st, _ = logic().handle(DebounceElapsed(), T0, st)
+    st, cmds = logic().handle(SensorChanged(reading("sensor.t1", 21.3)), T0, st)
+    assert debounces(cmds) == [ScheduleDebounce(5.0)]
+
+
+def test_report_that_hands_the_value_back_to_the_priority_sensor_is_debounced() -> None:
+    st, _ = started()
+    # sensor.t1 stops reporting; sensor.t2 keeps the room alive.
+    at = T0 + timedelta(minutes=100)
+    st, _ = logic().handle(SensorChanged(reading("sensor.t2", 20.0, at=at)), at, st)
+    at = T0 + timedelta(minutes=130)
+    st, cmds = logic().handle(Tick(), at, st)
+    assert st.active_sensor == "sensor.t2"
+    assert debounces(cmds) == [ScheduleDebounce(5.0)]
+    st, _ = logic().handle(DebounceElapsed(), at, st)
+    assert st.last_written == 20.0
+    # sensor.t1 reports again with its old value: it is the priority sensor
+    # once more, so its value must be written even though it did not change.
+    at = T0 + timedelta(minutes=131)
+    st, cmds = logic().handle(SensorChanged(reading("sensor.t1", 21.3, at=at)), at, st)
+    assert st.active_sensor == "sensor.t1"
     assert debounces(cmds) == [ScheduleDebounce(5.0)]
 
 
