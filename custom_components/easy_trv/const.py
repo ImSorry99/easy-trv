@@ -4,6 +4,12 @@ from typing import Final
 
 from homeassistant.const import Platform
 
+# The event names are defined in core.model, which cannot import this module.
+# The aliases mark them as explicit re-exports.
+from .core.model import EVENT_FAILSAFE as EVENT_FAILSAFE  # noqa: PLC0414
+from .core.model import EVENT_RECOVERED as EVENT_RECOVERED  # noqa: PLC0414
+from .core.model import EVENT_WRITE_FAILED as EVENT_WRITE_FAILED  # noqa: PLC0414
+
 DOMAIN: Final = "easy_trv"
 
 # Config subentries
@@ -38,11 +44,6 @@ DEBOUNCE_SECONDS: Final = 5.0
 OPERATION_TIMEOUT: Final = 20.0
 BACKOFF_SECONDS: Final = (5.0, 15.0, 45.0)
 TICK_SECONDS: Final = 60
-
-# Events
-EVENT_WRITE_FAILED: Final = "easy_trv_write_failed"
-EVENT_RECOVERED: Final = "easy_trv_recovered"
-EVENT_FAILSAFE: Final = "easy_trv_failsafe_detected"
 
 # Repairs issues
 ISSUE_ZHA_API: Final = "zha_api_incompatible"

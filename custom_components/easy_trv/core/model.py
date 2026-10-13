@@ -104,6 +104,25 @@ class GlobalParams:
             sensor_timeout=timedelta(minutes=120),
         )
 
+    @classmethod
+    def from_options(cls, options: Mapping[str, Any]) -> GlobalParams:
+        """Build the tunables from the config entry options.
+
+        A missing option falls back to its default and a ``sensor_timeout_minutes``
+        of ``0`` switches the timeout off. The literals mirror the ``DEFAULT_*``
+        constants, which core cannot import.
+        """
+        sensor_timeout = options.get("sensor_timeout_minutes", 120)
+        return cls(
+            refresh=timedelta(minutes=options.get("refresh_minutes", 20)),
+            verify_delay=float(options.get("verify_delay_seconds", 10)),
+            max_attempts=int(options.get("max_attempts", 3)),
+            min_delta=float(options.get("min_delta_kelvin", 0.1)),
+            sensor_timeout=(
+                timedelta(minutes=sensor_timeout) if sensor_timeout else None
+            ),
+        )
+
 
 @dataclass(frozen=True)
 class TrvConfig:

@@ -1,0 +1,32 @@
+{
+  "entity": {
+    "sensor": {
+      "room_status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "degraded": "Degraded",
+          "error": "Error"
+        }
+      }
+    }
+  },
+  "issues": {
+    "trv_unreachable": {
+      "title": "Thermostat {trv} in {room} is not responding",
+      "description": "Easy TRV could not set \"{attribute}\" on {trv} in {room} after {attempts} attempts. Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write to the thermostat has been verified."
+    },
+    "trv_firmware": {
+      "title": "Thermostat {trv} lacks a firmware feature",
+      "description": "Easy TRV cannot use \"{capability}\" on {trv}. Required firmware: {required}. Installed firmware: {installed}.\n\nEasy TRV skips this setting for this thermostat and keeps controlling it otherwise. Update the thermostat's firmware (for example through the ZHA over-the-air update) to enable it."
+    },
+    "zha_api_incompatible": {
+      "title": "Easy TRV cannot use the Zigbee integration",
+      "description": "Easy TRV could not talk to the installed ZHA integration: {error}\n\nIf ZHA has just been (re)loaded, Easy TRV retries on its own and this issue disappears once it works. After a Home Assistant update that keeps failing, check for a newer Easy TRV version."
+    },
+    "profile_invalid": {
+      "title": "Thermostat profile {file} is invalid",
+      "description": "The profile file {file} in the easy_trv/profiles folder of your configuration directory was skipped: {error}\n\nFix or remove the file and reload the Easy TRV integration. This issue disappears when the file loads cleanly."
+    }
+  }
+}
