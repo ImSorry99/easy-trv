@@ -296,9 +296,9 @@ class RoomLogic:
             pending_retry=_without(current.pending_retry, capability),
         )
         if attempts < self._params.max_attempts:
+            retry = self._retry_intent(event.intent, state)
             updated = replace(
-                updated,
-                pending_retry={**updated.pending_retry, capability: event.intent},
+                updated, pending_retry={**updated.pending_retry, capability: retry}
             )
             backoff = self._params.backoff
             delay = backoff[min(attempts - 1, len(backoff) - 1)]
@@ -362,7 +362,12 @@ class RoomLogic:
         now: datetime,
         state: RoomState,
     ) -> _Step:
-        """React to the thermostat falling back to its own sensor (fail-safe)."""
+        """React to the thermostat falling back to its own sensor (fail-safe).
+
+        The profile reads the fail-safe flag back on every value write, so the
+        re-enable's own value write can report it again. Re-enabling only
+        happens when the source write is not already failing, which bounds it.
+        """
         trv = event.trv
         if outcome.name != "failsafe" or not isinstance(
             event.intent, SetRoomTemperature
@@ -372,9 +377,12 @@ class RoomLogic:
         if state.source is not Source.EXTERNAL:
             note = f"{trv}: ignoring fail-safe, source is {state.source.value}"
             return state, [Log("debug", note)]
-        state = self._with_trv(
-            state, trv, replace(state.trvs[trv], failsafe_seen_at=now)
-        )
+        current = state.trvs[trv]
+        state = self._with_trv(state, trv, replace(current, failsafe_seen_at=now))
+        blocker = self._reenable_blocker(current)
+        if blocker is not None:
+            note = f"{trv}: fail-safe not re-enabled, {blocker}"
+            return state, [Log("debug", note)]
         commands: list[Command] = [
             FireEvent(EVENT_FAILSAFE, self._event_data(trv)),
             Log("info", f"{self._cfg.name}: {trv} fell back to its own sensor"),
@@ -482,6 +490,26 @@ class RoomLogic:
         return state, commands
 
     # --- Helpers ---------------------------------------------------------
+
+    def _reenable_blocker(self, trv_state: TrvState) -> str | None:
+        """Return why a fail-safe must not be re-enabled now, or ``None``."""
+        source = self._capability_of(SetSource("external"))
+        if not trv_state.available:
+            return "thermostat is unavailable"
+        if trv_state.health is TrvHealth.ERROR:
+            return "thermostat is in error"
+        if source in trv_state.unsupported:
+            return "source is not supported"
+        if trv_state.attempts.get(source, 0) or source in trv_state.pending_retry:
+            return "source write is already being retried"
+        return None
+
+    @staticmethod
+    def _retry_intent(intent: Intent, state: RoomState) -> Intent:
+        """Return what a retry should send: never an older temperature."""
+        if isinstance(intent, SetRoomTemperature) and state.last_written is not None:
+            return SetRoomTemperature(state.last_written)
+        return intent
 
     def _drop_unsupported(
         self, state: RoomState, commands: list[Command]

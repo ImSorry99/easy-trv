@@ -1120,6 +1120,30 @@ def test_newer_write_replaces_the_pending_retry_intent() -> None:
     assert executes(cmds) == [("climate.a", SetRoomTemperature(22.0))]
 
 
+def test_a_late_failure_of_an_older_write_retries_the_newest_value() -> None:
+    st, _ = started()
+    st, _ = logic().handle(SensorChanged(reading("sensor.t1", 22.0)), T0, st)
+    st, cmds = logic().handle(DebounceElapsed(), T0, st)
+    assert executes(cmds)[0] == ("climate.a", SetRoomTemperature(22.0))
+    st, cmds = logic().handle(result("climate.a", TEMP, Failed("late")), T0, st)
+    assert of_type(cmds, ScheduleRetry) == [
+        ScheduleRetry("climate.a", "room_temperature", 5.0)
+    ]
+    assert st.trvs["climate.a"].pending_retry == {
+        "room_temperature": SetRoomTemperature(22.0)
+    }
+    _, cmds = logic().handle(
+        RetryDue("climate.a", "room_temperature"), T0 + timedelta(seconds=5), st
+    )
+    assert executes(cmds) == [("climate.a", SetRoomTemperature(22.0))]
+
+
+def test_other_intents_are_retried_as_issued() -> None:
+    st, _ = started()
+    st, _ = logic().handle(result("climate.a", SetHysteresis(0.4), Failed("x")), T0, st)
+    assert st.trvs["climate.a"].pending_retry == {"hysteresis": SetHysteresis(0.4)}
+
+
 def test_retry_due_for_an_unavailable_trv_is_dropped_and_resynced_later() -> None:
     st, _ = started()
     st, _ = logic().handle(result("climate.a", SetHysteresis(0.4), Failed("x")), T0, st)
@@ -1388,12 +1412,6 @@ def test_a_flagged_source_capability_is_skipped_on_every_path() -> None:
     )
     st, cmds = logic().handle(Tick(), T0 + timedelta(minutes=121), st)
     assert executes(cmds) == [("climate.b", SetSource("internal"))]
-    st, cmds = logic().handle(
-        result("climate.a", TEMP, Signal("failsafe")),
-        T0,
-        replace(st, source=Source.EXTERNAL),
-    )
-    assert executes(cmds) == [("climate.a", SetRoomTemperature(21.3))]
 
 
 # --- Fail-safe on the re-enable write itself -----------------------------
@@ -1415,24 +1433,39 @@ def test_failsafe_on_the_source_write_is_a_failed_attempt_not_a_reenable() -> No
     assert executes(cmds) == [("climate.a", SetSource("external"))]
 
 
-def test_a_persistent_failsafe_ends_in_the_unreachable_issue() -> None:
-    st, _ = started()
-    st, cmds = logic().handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
-    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_FAILSAFE]
+def test_a_persistent_failsafe_is_bounded_with_the_shipped_profile_sequence() -> None:
+    """The profile reads the fail-safe flag back on every value write."""
+    room = logic()
     reenable = SetSource("external")
-    delays: list[float] = []
-    for _ in range(2):
-        st, cmds = logic().handle(
+    seen: list[Command] = []
+    st, _ = started()
+    st, cmds = room.handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
+    seen += cmds
+    assert executes(cmds) == [("climate.a", reenable), ("climate.a", TEMP)]
+    for delay in (5.0, 15.0):
+        # The read-back of the re-enable's SetSource is a failed attempt ...
+        st, cmds = room.handle(
             result("climate.a", reenable, Signal("failsafe")), T0, st
         )
-        delays += [c.seconds for c in of_type(cmds, ScheduleRetry)]
+        seen += cmds
+        assert [c.seconds for c in of_type(cmds, ScheduleRetry)] == [delay]
         assert executes(cmds) == []
-        assert not of_type(cmds, (FireEvent, RaiseIssue))
-        st, cmds = logic().handle(RetryDue("climate.a", "source"), T0, st)
+        # ... and so is the one of the re-enable's value write: nothing new,
+        # and the pending source retry (the backoff) stays untouched.
+        st, cmds = room.handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
+        seen += cmds
+        assert executes(cmds) == []
+        assert not of_type(cmds, (FireEvent, ScheduleRetry, RaiseIssue))
+        assert st.trvs["climate.a"].pending_retry == {"source": reenable}
+        st, cmds = room.handle(RetryDue("climate.a", "source"), T0, st)
+        seen += cmds
         assert executes(cmds) == [("climate.a", reenable)]
-    st, cmds = logic().handle(result("climate.a", reenable, Signal("failsafe")), T0, st)
-    assert delays == [5.0, 15.0]
-    assert executes(cmds) == []
+        # A value write while the source write is retried does not re-enable.
+        st, cmds = room.handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
+        seen += cmds
+        assert executes(cmds) == []
+    st, cmds = room.handle(result("climate.a", reenable, Signal("failsafe")), T0, st)
+    seen += cmds
     assert of_type(cmds, ScheduleRetry) == []
     assert of_type(cmds, RaiseIssue) == [
         RaiseIssue(
@@ -1447,9 +1480,67 @@ def test_a_persistent_failsafe_ends_in_the_unreachable_issue() -> None:
             },
         )
     ]
-    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_WRITE_FAILED]
     assert st.trvs["climate.a"].health == TrvHealth.ERROR
     assert cmds[-1].status == RoomStatus.ERROR
+    # Once in error a fail-safe on a value write only leaves a trace.
+    later = T0 + timedelta(minutes=1)
+    st, cmds = room.handle(result("climate.a", TEMP, Signal("failsafe")), later, st)
+    seen += cmds
+    assert executes(cmds) == []
+    assert not of_type(cmds, (FireEvent, RaiseIssue, ScheduleRetry))
+    assert st.trvs["climate.a"].failsafe_seen_at == later
+    assert [c.name for c in of_type(seen, FireEvent)] == [
+        EVENT_FAILSAFE,
+        EVENT_WRITE_FAILED,
+    ]
+    assert len(of_type(seen, RaiseIssue)) == 1
+
+
+def test_a_failsafe_that_is_not_re_enabled_is_still_recorded() -> None:
+    st, _ = started()
+    st, _ = logic().handle(
+        result("climate.a", SetSource("external"), Failed("x")), T0, st
+    )
+    at = T0 + timedelta(minutes=2)
+    st, cmds = logic().handle(result("climate.a", TEMP, Signal("failsafe")), at, st)
+    assert st.trvs["climate.a"].failsafe_seen_at == at
+    assert [c.level for c in of_type(cmds, Log)] == ["debug"]
+    assert executes(cmds) == []
+    assert not of_type(cmds, FireEvent)
+    assert cmds[-1].status == RoomStatus.DEGRADED
+
+
+def test_failsafe_with_an_unsupported_source_only_records_it() -> None:
+    st, _ = started()
+    st = with_trv(
+        st,
+        "climate.a",
+        health=TrvHealth.UNSUPPORTED,
+        unsupported=frozenset({"source"}),
+    )
+    st, cmds = logic().handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
+    assert executes(cmds) == []
+    assert not of_type(cmds, FireEvent)
+    assert st.trvs["climate.a"].failsafe_seen_at == T0
+
+
+def test_a_late_failsafe_for_an_unavailable_trv_emits_no_writes() -> None:
+    st, _ = started()
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    st, cmds = logic().handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
+    assert executes(cmds) == []
+    assert not of_type(cmds, FireEvent)
+    assert st.trvs["climate.a"].failsafe_seen_at == T0
+    assert st.trvs["climate.a"].health == TrvHealth.UNAVAILABLE
+
+
+def test_failsafe_is_re_enabled_again_once_the_source_write_recovered() -> None:
+    st, _ = started()
+    reenable = SetSource("external")
+    st, _ = logic().handle(result("climate.a", reenable, Signal("failsafe")), T0, st)
+    st, _ = logic().handle(result("climate.a", reenable, Ok()), T0, st)
+    st, cmds = logic().handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
+    assert executes(cmds) == [("climate.a", reenable), ("climate.a", TEMP)]
 
 
 def test_failsafe_on_a_settings_write_is_ignored() -> None:
