@@ -118,6 +118,17 @@ def errored(trv: str) -> RoomState:
     return st
 
 
+HYSTERESIS = SetHysteresis(0.4)
+
+
+def hysteresis_errored(trv: str = "climate.a") -> RoomState:
+    """Return a started room whose ``trv`` failed three hysteresis writes."""
+    st, _ = started()
+    for _ in range(3):
+        st, _ = logic().handle(result(trv, HYSTERESIS, Failed("busy")), T0, st)
+    return st
+
+
 def event_data(trv: str, ieee: str) -> dict[str, str]:
     return {
         "room": "Living",
@@ -968,6 +979,126 @@ def test_recovery_reports_issue_event_and_log_for_that_trv() -> None:
     assert [c.level for c in of_type(cmds, Log)] == ["info"]
     assert (trv.health, trv.attempts, trv.last_error) == (TrvHealth.OK, {}, None)
     assert cmds[-1].attributes["last_error"] is None
+
+
+# --- An error ends with the capability that caused it ----------------------
+
+
+def test_an_exhausted_settings_write_is_reapplied_on_the_next_resync() -> None:
+    st, _ = started()
+    for _ in range(2):
+        st, _ = logic().handle(result("climate.a", HYSTERESIS, Failed("busy")), T0, st)
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Failed("busy")), T0, st)
+    trv = st.trvs["climate.a"]
+    assert trv.health == TrvHealth.ERROR
+    assert trv.error_capability == "hysteresis"
+    assert not trv.settings_applied
+    assert of_type(cmds, RaiseIssue)[0].placeholders["attribute"] == "hysteresis"
+    assert st.trvs["climate.b"].settings_applied
+
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    st, cmds = logic().handle(
+        TrvAvailabilityChanged("climate.a", available=True), T0, st
+    )
+    assert [i for t, i in executes(cmds) if t == "climate.a"] == [
+        SetWindowDetection(enabled=True),
+        HYSTERESIS,
+        SetSource("external"),
+        SetRoomTemperature(21.3),
+    ]
+    assert st.trvs["climate.a"].settings_applied
+
+
+def test_an_exhausted_window_detection_write_is_reapplied_too() -> None:
+    st, _ = started()
+    for _ in range(3):
+        st, _ = logic().handle(
+            result("climate.b", SetWindowDetection(enabled=True), Failed("busy")),
+            T0,
+            st,
+        )
+    assert not st.trvs["climate.b"].settings_applied
+    assert st.trvs["climate.b"].error_capability == "window_detection"
+    assert st.trvs["climate.a"].settings_applied
+
+
+@pytest.mark.parametrize(
+    ("failing", "verified"),
+    [
+        (HYSTERESIS, TEMP),
+        (TEMP, HYSTERESIS),
+        (TEMP, SetSource("external")),
+    ],
+)
+def test_a_verified_write_of_another_capability_does_not_end_the_error(
+    failing: Intent, verified: Intent
+) -> None:
+    st, _ = started()
+    for _ in range(3):
+        st, _ = logic().handle(result("climate.a", failing, Failed("busy")), T0, st)
+    st, cmds = logic().handle(result("climate.a", verified, Ok()), T0, st)
+    trv = st.trvs["climate.a"]
+    assert trv.health == TrvHealth.ERROR
+    assert trv.last_error == "busy"
+    assert trv.error_capability == capability_of(failing)
+    assert of_type(cmds, ClearIssue) == []
+    assert of_type(cmds, FireEvent) == []
+    assert [c.level for c in of_type(cmds, Log)] == ["debug"]
+    assert cmds[-1].status == RoomStatus.ERROR
+
+
+def test_the_capability_that_failed_clears_the_error_when_it_verifies() -> None:
+    st = hysteresis_errored()
+    st, _ = logic().handle(result("climate.a", TEMP, Ok()), T0, st)
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), T0, st)
+    trv = st.trvs["climate.a"]
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert (trv.health, trv.last_error, trv.error_capability) == (
+        TrvHealth.OK,
+        None,
+        None,
+    )
+    assert cmds[-1].status == RoomStatus.OK
+
+
+def test_an_outage_and_a_return_do_not_forget_a_failed_setting() -> None:
+    st = hysteresis_errored()
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    st, cmds = logic().handle(
+        TrvAvailabilityChanged("climate.a", available=True), T0, st
+    )
+    assert ("climate.a", HYSTERESIS) in executes(cmds)
+    # The value write that follows the resync verifies, the setting does not yet.
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), T0, st)
+    assert of_type(cmds, ClearIssue) == []
+    assert of_type(cmds, FireEvent) == []
+    assert st.trvs["climate.a"].error_capability == "hysteresis"
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), T0, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert st.trvs["climate.a"].health == TrvHealth.OK
+
+
+def test_a_second_failure_keeps_the_capability_that_raised_the_issue() -> None:
+    st = errored("climate.a")
+    for _ in range(3):
+        st, cmds = logic().handle(
+            result("climate.a", HYSTERESIS, Failed("busy")), T0, st
+        )
+    trv = st.trvs["climate.a"]
+    assert trv.error_capability == "room_temperature"
+    assert not trv.settings_applied
+    assert not any(isinstance(c, (RaiseIssue, FireEvent)) for c in cmds)
+
+
+def test_a_late_failure_after_error_and_outage_is_not_reported_again() -> None:
+    st = errored("climate.a")
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    assert st.trvs["climate.a"].health == TrvHealth.UNAVAILABLE
+    st, cmds = logic().handle(result("climate.a", TEMP, Failed("late")), T0, st)
+    assert not any(isinstance(c, (RaiseIssue, FireEvent, Log)) for c in cmds)
+    assert st.trvs["climate.a"].error_capability == "room_temperature"
 
 
 # --- Failed and mismatched results ---------------------------------------

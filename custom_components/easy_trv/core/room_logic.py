@@ -273,7 +273,11 @@ class RoomLogic:
                 assert_never(outcome)
 
     def _on_ok(self, event: OperationResult, now: datetime, state: RoomState) -> _Step:
-        """Forget earlier trouble with the capability and record a verified value."""
+        """Forget earlier trouble with the capability and record a verified value.
+
+        An error ends only when the capability that caused it verifies; a
+        verified write of any other capability says nothing about it.
+        """
         trv, capability = event.trv, event.capability
         current = state.trvs[trv]
         updated = replace(
@@ -285,16 +289,27 @@ class RoomLogic:
         commands: list[Command] = []
         if capability in current.unsupported:
             commands.append(ClearIssue("firmware", trv))
-        # ``last_error`` marks an unreachable issue that is still raised, which
-        # also covers a thermostat that went away while in error.
-        if current.health is TrvHealth.ERROR or current.last_error is not None:
-            updated = replace(updated, last_error=None)
-            commands += [
-                ClearIssue("unreachable", trv),
-                FireEvent(EVENT_RECOVERED, self._event_data(trv)),
-                Log("info", f"{self._cfg.name}: {trv} accepts writes again"),
-            ]
-        if updated.health in (TrvHealth.ERROR, TrvHealth.UNSUPPORTED):
+        still_failing = False
+        if self._reported(current):
+            if current.error_capability in (None, capability):
+                updated = replace(updated, last_error=None, error_capability=None)
+                commands += [
+                    ClearIssue("unreachable", trv),
+                    FireEvent(EVENT_RECOVERED, self._event_data(trv)),
+                    Log("info", f"{self._cfg.name}: {trv} accepts writes again"),
+                ]
+            else:
+                still_failing = True
+                note = (
+                    f"{trv}: {capability} verified, still failing on "
+                    f"{current.error_capability}"
+                )
+                commands.append(Log("debug", note))
+        keeps_error = still_failing and updated.health is TrvHealth.ERROR
+        if (
+            updated.health in (TrvHealth.ERROR, TrvHealth.UNSUPPORTED)
+            and not keeps_error
+        ):
             updated = replace(updated, health=self._baseline(updated))
         state = self._with_trv(state, trv, updated)
         if isinstance(event.intent, SetRoomTemperature):
@@ -329,9 +344,15 @@ class RoomLogic:
             return self._with_trv(state, trv, updated), [
                 ScheduleRetry(trv, capability, delay)
             ]
+        reported = self._reported(current)
         updated = replace(updated, health=TrvHealth.ERROR, last_error=error)
+        if not reported:
+            updated = replace(updated, error_capability=capability)
+        if isinstance(event.intent, (SetWindowDetection, SetHysteresis)):
+            # The setting never arrived: apply it again on the next resync.
+            updated = replace(updated, settings_applied=False)
         state = self._with_trv(state, trv, updated)
-        if current.health is TrvHealth.ERROR:
+        if reported:
             return state, []
         data = {"attribute": capability, "attempts": attempts, "error": error}
         return state, [
@@ -541,6 +562,16 @@ class RoomLogic:
         if trv_state.attempts.get(source, 0) or source in trv_state.pending_retry:
             return "source write is already being retried"
         return None
+
+    @staticmethod
+    def _reported(trv_state: TrvState) -> bool:
+        """Return whether the thermostat's error was already reported.
+
+        ``last_error`` outlives the health, which falls back to unavailable or
+        ok while the thermostat is away, so it is the mark of an issue that is
+        still raised.
+        """
+        return trv_state.health is TrvHealth.ERROR or trv_state.last_error is not None
 
     @staticmethod
     def _retry_intent(intent: Intent, state: RoomState) -> Intent:
