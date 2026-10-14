@@ -86,7 +86,7 @@ New intents, encoders stay as they are except one addition:
 
 Schema additions: `write.step`, `write.min` / `write.max` (device limits of the capability, used for the room's effective range) (round the intent value to this step before encoding), `observe: true` on a capability (2b: the adapter subscribes to reports of this attribute), `signals` extended to the standard cluster. The built-in profile declares all of them; `tested_firmware` stays `["1.3.0", "1.4.4"]` until the owner's hardware run confirms.
 
-**Hysteresis rule.** The room logic applies `set_hysteresis` only when the resolved `adaptive_mode` is not `on`. With `adaptive_mode: leave` the hysteresis is written regardless (the device ignores it while adaptive is active, keeps it, and uses it once adaptive is switched off).
+**Hysteresis rule.** The room logic applies `set_hysteresis` only when the resolved `adaptive_mode` is not `on`. With `adaptive_mode: leave` the hysteresis is written regardless (the device ignores it while adaptive is active, keeps it, and uses it once adaptive is switched off). A thermostat whose firmware cannot do adaptive mode (`Unsupported` outcome, firmware < 1.4.4) gets the room's hysteresis written anyway, because adaptive cannot be effective there.
 
 **Settings order per thermostat** (resync and start): window detection, adaptive mode, hysteresis (conditional), frost temperature, then source and value (Phase 1), then (2b) hvac mode and setpoint.
 
