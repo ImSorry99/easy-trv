@@ -33,6 +33,7 @@ IEEE_A = "00:11"
 IEEE_B = "00:22"
 WINDOW = 0x6000
 HYSTERESIS = 0x6011
+FROST = 0x6002
 SOURCE = 0x600E
 VALUE = 0x600D
 CELSIUS = {"unit_of_measurement": "°C"}
@@ -133,6 +134,8 @@ def config() -> RoomConfig:
         ("sensor.t1", "sensor.t2"),
         "on",
         0.4,
+        "leave",
+        7.0,
     )
 
 
@@ -180,8 +183,10 @@ async def test_start_writes_settings_source_and_value_in_order(
     assert written(gateway) == [
         (IEEE_A, WINDOW, 1),
         (IEEE_A, HYSTERESIS, -40),
+        (IEEE_A, FROST, 700),
         (IEEE_B, WINDOW, 1),
         (IEEE_B, HYSTERESIS, -40),
+        (IEEE_B, FROST, 700),
         (IEEE_A, SOURCE, 1),
         (IEEE_B, SOURCE, 1),
         (IEEE_A, VALUE, 2130),
@@ -299,7 +304,7 @@ async def test_operations_run_one_at_a_time(
     assert gateway.calls == ["write", "read", "write"]
     await advance(hass, freezer, 100)
     # Every write is read back before the next operation starts.
-    assert gateway.calls == ["write", "read"] * 8
+    assert gateway.calls == ["write", "read"] * 10
     assert controller_with_delay.status == RoomStatus.OK
 
 
@@ -417,8 +422,10 @@ async def test_every_executed_operation_is_logged_at_debug(
     assert operation_lines(caplog) == [
         "Living: climate.a window_detection_flag attr 0x6000 raw=1 -> ok",
         "Living: climate.a hysteresis attr 0x6011 raw=-40 -> ok",
+        "Living: climate.a frost_protection attr 0x6002 raw=700 -> ok",
         "Living: climate.b window_detection_flag attr 0x6000 raw=1 -> ok",
         "Living: climate.b hysteresis attr 0x6011 raw=-40 -> ok",
+        "Living: climate.b frost_protection attr 0x6002 raw=700 -> ok",
         "Living: climate.a source_select attr 0x600E raw=1 -> ok",
         "Living: climate.b source_select attr 0x600E raw=1 -> ok",
         "Living: climate.a external_temperature attr 0x600D raw=2130 -> ok",
@@ -543,8 +550,10 @@ async def test_firmware_gated_capability_raises_issue_and_keeps_writing(
     # Hysteresis never reaches the old device, everything else still does.
     assert written(gateway) == [
         (IEEE_A, WINDOW, 1),
+        (IEEE_A, FROST, 700),
         (IEEE_B, WINDOW, 1),
         (IEEE_B, HYSTERESIS, -40),
+        (IEEE_B, FROST, 700),
         (IEEE_A, SOURCE, 1),
         (IEEE_B, SOURCE, 1),
         (IEEE_A, VALUE, 2130),
@@ -707,7 +716,7 @@ async def test_unexpected_error_becomes_a_failed_outcome_and_is_retried(
     await controller.async_start()
     await settle(hass)
     # The first write (window detection of a) blew up; the worker went on.
-    assert len(gateway.writes) == 7
+    assert len(gateway.writes) == 9
     assert writes_to(gateway, IEEE_A, WINDOW) == []
     errors = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
     assert len(errors) == 1
@@ -740,6 +749,7 @@ async def test_persistent_unexpected_error_ends_in_error_and_spares_other_trv(
     assert [w for w in written(gateway) if w[0] == IEEE_B] == [
         (IEEE_B, WINDOW, 1),
         (IEEE_B, HYSTERESIS, -40),
+        (IEEE_B, FROST, 700),
         (IEEE_B, SOURCE, 1),
         (IEEE_B, VALUE, 2130),
     ]
@@ -789,6 +799,7 @@ async def test_unavailable_trv_is_skipped_and_resynced(
     assert written(gateway) == [
         (IEEE_A, WINDOW, 1),
         (IEEE_A, HYSTERESIS, -40),
+        (IEEE_A, FROST, 700),
         (IEEE_A, SOURCE, 1),
         (IEEE_A, VALUE, 2130),
     ]

@@ -22,14 +22,14 @@ from custom_components.easy_trv.const import (
     CONF_PROFILE,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
-    CONF_WINDOW_DETECTION,
     PLATFORMS,
     PROFILE_AUTO,
+    SETTING_GLOBAL,
     SUBENTRY_ROOM,
 )
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.core.model import RoomConfig, RoomParams, TrvConfig
-from custom_components.easy_trv.core.settings import resolve_settings
+from custom_components.easy_trv.core.settings import RoomSettings, resolve_settings
 from custom_components.easy_trv.profiles.loader import LoadResult, async_load_profiles
 
 if TYPE_CHECKING:
@@ -42,22 +42,11 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# The way to reach ZHA; tests replace it with a factory returning a fake gateway.
-GATEWAY_FACTORY: Callable[[HomeAssistant], TrvGateway] = ZhaLibraryGateway
-
+# The hysteresis choice that version 1 entries could store and version 2 retired.
 _HYSTERESIS_LEAVE = "leave"
 
-
-def _hysteresis_kelvin(stored: str) -> float | None:
-    """Return the stored hysteresis choice in kelvin (``None``: leave as is).
-
-    The choice is a translation-safe key (``0_4``), not a number. The dotted
-    form (``0.4``) is accepted as well. Python's own ``float("0_4")`` would
-    read this as 4.0, so the separator is replaced explicitly.
-    """
-    if stored == _HYSTERESIS_LEAVE:
-        return None
-    return float(str(stored).replace("_", "."))
+# The way to reach ZHA; tests replace it with a factory returning a fake gateway.
+GATEWAY_FACTORY: Callable[[HomeAssistant], TrvGateway] = ZhaLibraryGateway
 
 
 @dataclass
@@ -67,6 +56,7 @@ class EasyTrvRuntimeData:
     gateway: TrvGateway
     profiles: LoadResult
     rooms: dict[str, RoomController]
+    settings: dict[str, RoomSettings]  # resolved settings by subentry id
 
 
 type EasyTrvConfigEntry = ConfigEntry[EasyTrvRuntimeData]
@@ -77,14 +67,13 @@ def room_config_from_subentry(
     title: str,
     data: Mapping[str, Any],
     device_refs: Mapping[str, DeviceRef],
+    settings: RoomSettings,
 ) -> RoomConfig:
     """Build the :class:`RoomConfig` of a ``room`` subentry.
 
-    ``device_refs`` must hold every thermostat listed in ``data``. A hysteresis
-    of ``"leave"`` means the thermostat's own setting stays untouched (``None``);
-    ``"0_4"`` (or the older ``"0.4"``) means 0.4 K.
+    ``device_refs`` must hold every thermostat listed in ``data``. The
+    thermostat settings come from ``settings``, the resolved settings of the room.
     """
-    hysteresis = data.get(CONF_HYSTERESIS, _HYSTERESIS_LEAVE)
     return RoomConfig(
         room_id=subentry_id,
         name=title,
@@ -97,8 +86,10 @@ def room_config_from_subentry(
             for entity_id in data[CONF_TRVS]
         ),
         temp_sensors=tuple(data.get(CONF_TEMP_SENSORS, ())),
-        window_detection=data.get(CONF_WINDOW_DETECTION, "on"),
-        hysteresis=_hysteresis_kelvin(hysteresis),
+        window_detection=settings.window_detection,
+        hysteresis=settings.hysteresis,
+        adaptive_mode=settings.adaptive_mode,
+        frost_temperature=settings.frost_temperature,
     )
 
 
@@ -179,21 +170,49 @@ def _describe_room_error(err: Exception) -> str:
 
 def _build_room(
     hass: HomeAssistant,
+    entry: EasyTrvConfigEntry,
     subentry: ConfigSubentry,
-    params: RoomParams,
     gateway: TrvGateway,
     profiles: Mapping[str, Profile],
-) -> tuple[RoomController, Profile]:
+) -> tuple[RoomController, Profile, RoomSettings]:
     """Create the controller of one ``room`` subentry."""
+    settings = resolve_settings(entry.options, subentry.data)
     device_refs = _resolve_thermostats(gateway, list(subentry.data[CONF_TRVS]))
     profile = select_profile(
         profiles, subentry.data.get(CONF_PROFILE, PROFILE_AUTO), device_refs
     )
     config = room_config_from_subentry(
-        subentry.subentry_id, subentry.title, subentry.data, device_refs
+        subentry.subentry_id, subentry.title, subentry.data, device_refs, settings
     )
+    params = RoomParams.from_settings(settings)
     controller = RoomController(hass, config, params, profile, gateway, device_refs)
-    return controller, profile
+    return controller, profile, settings
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an entry to the current version.
+
+    Version 2 retires the hysteresis choice "leave unchanged": the hysteresis is
+    always written now, so a room that said "leave" follows the global value. The
+    rooms that changed are reported in a Repairs issue.
+    """
+    if entry.version == 1:
+        migrated: list[str] = []
+        for subentry in list(entry.subentries.values()):
+            if (
+                subentry.subentry_type != SUBENTRY_ROOM
+                or subentry.data.get(CONF_HYSTERESIS) != _HYSTERESIS_LEAVE
+            ):
+                continue
+            hass.config_entries.async_update_subentry(
+                entry, subentry, data={**subentry.data, CONF_HYSTERESIS: SETTING_GLOBAL}
+            )
+            migrated.append(subentry.title)
+        hass.config_entries.async_update_entry(entry, version=2)
+        if migrated:
+            hysteresis = resolve_settings(entry.options, {}).hysteresis
+            issues.raise_settings_migrated(hass, migrated, f"{hysteresis:.1f} K")
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> bool:
@@ -213,16 +232,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
         hass, keep={Path(error.file).stem for error in profiles.errors}
     )
 
-    params = RoomParams.from_settings(resolve_settings(entry.options, {}))
     rooms: dict[str, RoomController] = {}
+    resolved: dict[str, RoomSettings] = {}
     summaries: dict[str, str] = {}
     invalid: set[str] = set()
     for subentry in entry.subentries.values():
         if subentry.subentry_type != SUBENTRY_ROOM:
             continue
         try:
-            controller, profile = _build_room(
-                hass, subentry, params, gateway, profiles.profiles
+            controller, profile, settings = _build_room(
+                hass, entry, subentry, gateway, profiles.profiles
             )
         except (ConfigEntryError, ValueError, KeyError, TypeError) as err:
             # One room that cannot be set up must not take the others down.
@@ -241,6 +260,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
             invalid.add(subentry.subentry_id)
             continue
         rooms[subentry.subentry_id] = controller
+        resolved[subentry.subentry_id] = settings
         summaries[subentry.subentry_id] = (
             f"{subentry.title} ({len(subentry.data[CONF_TRVS])} thermostat(s), "
             f"profile {profile.id})"
@@ -249,7 +269,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     issues.clear_thermostat_issues_except(
         hass, {ieee for controller in rooms.values() for ieee in controller.ieees}
     )
-    entry.runtime_data = EasyTrvRuntimeData(gateway, profiles, rooms)
+    entry.runtime_data = EasyTrvRuntimeData(gateway, profiles, rooms, resolved)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

@@ -604,10 +604,9 @@ class RoomLogic:
         adaptive_in_charge = (
             cfg.adaptive_mode == "on" and adaptive not in trv_state.unsupported
         )
-        if cfg.hysteresis is not None and not adaptive_in_charge:
+        if not adaptive_in_charge:
             intents.append(SetHysteresis(cfg.hysteresis))
-        if cfg.frost_temperature is not None:
-            intents.append(SetFrostTemperature(cfg.frost_temperature))
+        intents.append(SetFrostTemperature(cfg.frost_temperature))
         return intents
 
     def _adaptive_was_in_charge(self, capability: str) -> bool:

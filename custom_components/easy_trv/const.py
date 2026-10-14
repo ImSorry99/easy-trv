@@ -59,6 +59,7 @@ TICK_SECONDS: Final = 60
 
 # Repairs issues
 ISSUE_ZHA_API: Final = "zha_api_incompatible"
+ISSUE_SETTINGS_MIGRATED: Final = "settings_migrated"
 
 # Profiles
 PROFILE_AUTO: Final = "auto"

@@ -166,3 +166,17 @@ async def test_clear_room_issues_except_keeps_only_the_named_rooms(hass) -> None
     assert ir.async_get(hass).async_get_issue("other_domain", "room_invalid_fixed")
     issues.clear_room_issues_except(hass, set())
     assert get(hass, "room_invalid_keep") is None
+
+
+async def test_settings_migrated_issue_is_a_dismissible_warning(hass) -> None:
+    issues.raise_settings_migrated(hass, ["Living", "Bed"], "0.4 K")
+    raised = get(hass, "settings_migrated")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_key == "settings_migrated"
+    assert raised.translation_placeholders == {
+        "rooms": "Living, Bed",
+        "hysteresis": "0.4 K",
+    }
+    assert raised.is_fixable is False
+    assert raised.is_persistent is True

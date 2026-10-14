@@ -36,6 +36,7 @@ GATEWAY_FACTORY = "custom_components.easy_trv.GATEWAY_FACTORY"
 CELSIUS = {"unit_of_measurement": "°C"}
 IEEE_A = "00:11"
 IEEE_B = "00:22"
+FIRMWARE = (1, 4, 4)
 # No wait between a write and its read-back, so a test does not sit out 10 s.
 FAST_OPTIONS = {"verify_delay_seconds": 0}
 # Enough loop iterations for the worker to run a queue of fake-gateway
@@ -62,11 +63,13 @@ def make_entry(
     hass: HomeAssistant,
     rooms: list[dict[str, Any]],
     options: dict[str, Any] | None = None,
+    version: int = 2,
 ) -> MockConfigEntry:
     """Add an Easy TRV config entry with one ``room`` subentry per dict."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={},
+        version=version,
         options=options if options is not None else {},
         title="Easy TRV",
         subentries_data=[
@@ -84,10 +87,13 @@ def make_entry(
 
 
 def make_gateway(hass: HomeAssistant) -> FakeGateway:
-    """Return a gateway with two TRVZB thermostats and matching HA states."""
+    """Return a gateway with two TRVZB thermostats and matching HA states.
+
+    The firmware is new enough for adaptive mode, which is on by default.
+    """
     gateway = FakeGateway()
-    gateway.add_device("climate.a", IEEE_A)
-    gateway.add_device("climate.b", IEEE_B)
+    gateway.add_device("climate.a", IEEE_A, firmware=FIRMWARE)
+    gateway.add_device("climate.b", IEEE_B, firmware=FIRMWARE)
     hass.states.async_set("climate.a", "heat")
     hass.states.async_set("climate.b", "heat")
     hass.states.async_set("sensor.t1", "21.3", CELSIUS)

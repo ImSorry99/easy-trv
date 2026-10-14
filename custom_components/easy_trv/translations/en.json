@@ -125,6 +125,10 @@
     "room_invalid": {
       "title": "Room {room} could not be set up",
       "description": "Easy TRV skipped the room {room}: {error}\n\nThe other rooms keep running. Edit the room, or fix what it depends on (the thermostat in ZHA, a profile file), and reload the Easy TRV integration. This issue disappears when the room sets up cleanly."
+    },
+    "settings_migrated": {
+      "title": "Thermostat settings changed by the update",
+      "description": "These rooms used \"Leave unchanged\" for the hysteresis: {rooms}.\n\nThe hysteresis is now always written to the thermostats, so these rooms use the global value {hysteresis} instead. Check the global setting in the Easy TRV options, or set a hysteresis in the room itself.\n\nYou can dismiss this notice."
     }
   },
   "options": {

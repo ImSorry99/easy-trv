@@ -270,7 +270,7 @@ def _entity_fields(profiles: Mapping[str, Profile]) -> dict[Any, Any]:
 class EasyTrvConfigFlow(ConfigFlow, domain=DOMAIN):
     """Create the one Easy TRV entry; rooms are added as subentries."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, _user_input: dict[str, Any] | None = None

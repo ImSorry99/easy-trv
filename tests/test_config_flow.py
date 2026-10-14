@@ -254,7 +254,7 @@ async def test_user_flow_creates_single_entry(hass) -> None:
 async def test_config_flow_is_the_registered_handler(entry) -> None:
     # The stand-in flow of the earlier tests is gone: the real one answers.
     assert HANDLERS[DOMAIN] is EasyTrvConfigFlow
-    assert EasyTrvConfigFlow.VERSION == 1
+    assert EasyTrvConfigFlow.VERSION == 2
     assert not hasattr(helpers_entry, "_StandInFlow")
     assert not hasattr(helpers_entry, "CONFIG_FLOW_FILE")
     assert EasyTrvConfigFlow.async_get_supported_subentry_types(entry) == {

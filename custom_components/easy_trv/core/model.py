@@ -161,8 +161,8 @@ class TrvConfig:
 class RoomConfig:
     """Static configuration of a room.
 
-    ``hysteresis`` and ``frost_temperature`` are ``None`` when the thermostat's
-    own value stays untouched.
+    The thermostat settings come from the resolved settings of the room.
+    ``"leave"`` keeps the thermostat's own window detection or adaptive mode.
     """
 
     room_id: str
@@ -170,9 +170,9 @@ class RoomConfig:
     trvs: tuple[TrvConfig, ...]
     temp_sensors: tuple[str, ...]
     window_detection: Literal["on", "off", "leave"]
-    hysteresis: float | None
-    adaptive_mode: Literal["on", "off", "leave"] = "leave"
-    frost_temperature: float | None = None
+    hysteresis: float  # kelvin
+    adaptive_mode: Literal["on", "off", "leave"]
+    frost_temperature: float  # celsius
 
 
 # --- State ---------------------------------------------------------------

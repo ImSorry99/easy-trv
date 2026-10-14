@@ -5,10 +5,14 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.helpers import issue_registry as ir
 
-from custom_components.easy_trv.const import DOMAIN, ISSUE_ZHA_API
+from custom_components.easy_trv.const import (
+    DOMAIN,
+    ISSUE_SETTINGS_MIGRATED,
+    ISSUE_ZHA_API,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
     from homeassistant.core import HomeAssistant
 
@@ -108,6 +112,26 @@ def raise_zha_api(hass: HomeAssistant, error: str) -> None:
 def clear_zha_api(hass: HomeAssistant) -> None:
     """Remove the "ZHA API incompatible" issue."""
     ir.async_delete_issue(hass, DOMAIN, ISSUE_ZHA_API)
+
+
+def raise_settings_migrated(
+    hass: HomeAssistant, rooms: Iterable[str], hysteresis: str
+) -> None:
+    """Report rooms whose "leave unchanged" hysteresis now follows the global value.
+
+    The migration runs only once, so this notice is persistent: it survives a
+    restart until the user dismisses it.
+    """
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_SETTINGS_MIGRATED,
+        is_fixable=False,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="settings_migrated",
+        translation_placeholders={"rooms": ", ".join(rooms), "hysteresis": hysteresis},
+    )
 
 
 def raise_profile_invalid(hass: HomeAssistant, file: str, error: str) -> None:

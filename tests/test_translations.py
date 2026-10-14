@@ -131,6 +131,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "zha_api_incompatible",
         "profile_invalid",
         "room_invalid",
+        "settings_migrated",
     }
 
 

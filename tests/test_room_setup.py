@@ -3,6 +3,7 @@ from homeassistant.exceptions import ConfigEntryError
 
 from custom_components.easy_trv import room_config_from_subentry, select_profile
 from custom_components.easy_trv.core.model import RoomConfig, TrvConfig
+from custom_components.easy_trv.core.settings import resolve_settings
 from custom_components.easy_trv.profiles.loader import (
     BUILTIN_DIR,
     load_profiles_sync,
@@ -21,7 +22,9 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
     }
     data = room_data(trvs=["climate.b", "climate.a"], hysteresis="0_6")
 
-    config = room_config_from_subentry("sub1", "Living", data, refs)
+    config = room_config_from_subentry(
+        "sub1", "Living", data, refs, resolve_settings({}, data)
+    )
 
     assert config == RoomConfig(
         room_id="sub1",
@@ -33,6 +36,8 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
         temp_sensors=("sensor.t1", "sensor.t2"),
         window_detection="on",
         hysteresis=0.6,
+        adaptive_mode="on",
+        frost_temperature=7.0,
     )
 
 
@@ -54,20 +59,39 @@ def test_room_config_hysteresis_key_maps_to_kelvin(stored, kelvin) -> None:
     refs = {"climate.a": gateway.add_device("climate.a", IEEE_A)}
     data = room_data(trvs=["climate.a"], hysteresis=stored)
 
-    config = room_config_from_subentry("sub1", "Living", data, refs)
+    config = room_config_from_subentry(
+        "sub1", "Living", data, refs, resolve_settings({}, data)
+    )
 
     assert config.hysteresis == kelvin
 
 
-def test_room_config_hysteresis_leave_means_untouched() -> None:
+def test_room_config_takes_the_resolved_settings() -> None:
     gateway = FakeGateway()
     refs = {"climate.a": gateway.add_device("climate.a", IEEE_A)}
-    data = room_data(trvs=["climate.a"], hysteresis="leave", window_detection="leave")
+    data = room_data(trvs=["climate.a"], hysteresis="global", window_detection="leave")
+    options = {"hysteresis": "0_8", "adaptive_mode": "off", "frost_temperature": 9.0}
 
-    config = room_config_from_subentry("sub1", "Living", data, refs)
+    config = room_config_from_subentry(
+        "sub1", "Living", data, refs, resolve_settings(options, data)
+    )
 
-    assert config.hysteresis is None
+    assert config.hysteresis == 0.8
     assert config.window_detection == "leave"
+    assert config.adaptive_mode == "off"
+    assert config.frost_temperature == 9.0
+
+
+def test_room_config_hysteresis_leave_resolves_to_the_global_value() -> None:
+    gateway = FakeGateway()
+    refs = {"climate.a": gateway.add_device("climate.a", IEEE_A)}
+    data = room_data(trvs=["climate.a"], hysteresis="leave")
+
+    config = room_config_from_subentry(
+        "sub1", "Living", data, refs, resolve_settings({}, data)
+    )
+
+    assert config.hysteresis == 0.4
 
 
 def test_select_profile_auto_prefers_builtin_over_user_profiles(tmp_path) -> None:

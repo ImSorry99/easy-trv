@@ -20,6 +20,7 @@ from custom_components.easy_trv.profiles.loader import (
 from tests.helpers_entry import (
     CELSIUS,
     FAST_OPTIONS,
+    FIRMWARE,
     GATEWAY_FACTORY,
     advance,
     make_entry,
@@ -231,7 +232,7 @@ async def test_one_unresolvable_room_leaves_the_other_rooms_running(
     assert "Room Bedroom could not be set up" in caplog.text
 
     # Fixing the room and reloading removes the issue and brings the room up.
-    fake_gateway.add_device("climate.c", "00:33")
+    fake_gateway.add_device("climate.c", "00:33", firmware=FIRMWARE)
     hass.states.async_set("climate.c", "heat")
     hass.config_entries.async_update_subentry(
         entry,
@@ -426,7 +427,7 @@ async def test_adding_a_room_reloads_and_adds_its_status_sensor(
     hass, entry, fake_gateway
 ) -> None:
     await start(hass, entry)
-    fake_gateway.add_device("climate.c", "00:33")
+    fake_gateway.add_device("climate.c", "00:33", firmware=FIRMWARE)
     hass.states.async_set("climate.c", "heat")
 
     hass.config_entries.async_add_subentry(
@@ -517,3 +518,130 @@ async def test_unload_stops_the_controllers(hass, freezer, entry, fake_gateway) 
     await advance(hass, freezer, 130)
     assert fake_gateway.writes == []
     assert fake_gateway.reads == []
+
+
+# --- Resolved settings and migration ---------------------------------------
+
+HYSTERESIS = 0x6011
+ADAPTIVE = 0x6017
+
+
+def attribute_writes(gateway, attribute: int) -> list[int]:
+    """Return the raw values written to ``attribute`` so far."""
+    return [w[4] for w in gateway.writes if w[3] == attribute]
+
+
+def migrated_issue(hass):
+    return ir.async_get(hass).async_get_issue(DOMAIN, "settings_migrated")
+
+
+async def test_room_uses_global_hysteresis_when_room_says_global(
+    hass, fake_gateway
+) -> None:
+    options = {**FAST_OPTIONS, "hysteresis": "0_6", "adaptive_mode": "off"}
+    entry = make_entry(
+        hass, [room_data(trvs=["climate.a"], hysteresis="global")], options
+    )
+    await start(hass, entry)
+    assert attribute_writes(fake_gateway, HYSTERESIS) == [-60]
+
+
+async def test_a_room_setting_wins_over_the_global_one(hass, fake_gateway) -> None:
+    options = {**FAST_OPTIONS, "hysteresis": "0_6", "adaptive_mode": "off"}
+    entry = make_entry(hass, [room_data(trvs=["climate.a"], hysteresis="0_2")], options)
+    await start(hass, entry)
+    assert attribute_writes(fake_gateway, HYSTERESIS) == [-20]
+
+
+async def test_runtime_data_holds_the_resolved_settings_per_room(hass) -> None:
+    options = {**FAST_OPTIONS, "frost_temperature": 9.0}
+    entry = make_entry(
+        hass,
+        [room_data(name="Living"), room_data(name="Bed", frost_temperature=12.0)],
+        options,
+    )
+    await start(hass, entry)
+    resolved = entry.runtime_data.settings
+    assert set(resolved) == set(entry.subentries)
+    by_title = {
+        entry.subentries[sid].title: settings for sid, settings in resolved.items()
+    }
+    assert by_title["Living"].frost_temperature == 9.0
+    assert by_title["Bed"].frost_temperature == 12.0
+    assert by_title["Living"].verify_delay_seconds == 0
+
+
+async def test_migrate_v1_entry_turns_leave_into_global_and_raises_issue(
+    hass,
+) -> None:
+    entry = make_entry(
+        hass,
+        [
+            room_data(name="Living", hysteresis="leave"),
+            room_data(name="Bed", hysteresis="0_2"),
+        ],
+        FAST_OPTIONS,
+        version=1,
+    )
+    await start(hass, entry)
+    assert entry.version == 2
+    living = subentry_of(entry, "Living")
+    bed = subentry_of(entry, "Bed")
+    assert living.data["hysteresis"] == "global"
+    assert bed.data["hysteresis"] == "0_2"
+    issue = migrated_issue(hass)
+    assert issue is not None
+    assert issue.translation_placeholders == {"rooms": "Living", "hysteresis": "0.4 K"}
+    assert issue.severity == ir.IssueSeverity.WARNING
+    assert issue.is_fixable is False
+
+
+async def test_migration_names_every_changed_room_and_the_global_value(
+    hass,
+) -> None:
+    options = {**FAST_OPTIONS, "hysteresis": "0_6"}
+    entry = make_entry(
+        hass,
+        [
+            room_data(name="Living", hysteresis="leave"),
+            room_data(name="Bed", hysteresis="leave"),
+        ],
+        options,
+        version=1,
+    )
+    await start(hass, entry)
+    issue = migrated_issue(hass)
+    assert issue is not None
+    assert issue.translation_placeholders == {
+        "rooms": "Living, Bed",
+        "hysteresis": "0.6 K",
+    }
+
+
+async def test_migrated_room_with_default_adaptive_writes_no_hysteresis(
+    hass, fake_gateway
+) -> None:
+    entry = make_entry(
+        hass,
+        [room_data(trvs=["climate.a"], hysteresis="leave")],
+        FAST_OPTIONS,
+        version=1,
+    )
+    await start(hass, entry)
+    assert attribute_writes(fake_gateway, ADAPTIVE) == [2]
+    assert attribute_writes(fake_gateway, HYSTERESIS) == []
+
+
+async def test_migration_without_leave_rooms_raises_no_issue(hass) -> None:
+    entry = make_entry(hass, [room_data(hysteresis="0_4")], FAST_OPTIONS, version=1)
+    await start(hass, entry)
+    assert entry.version == 2
+    assert migrated_issue(hass) is None
+
+
+async def test_a_version_2_entry_is_not_migrated_again(hass) -> None:
+    entry = make_entry(hass, [room_data(hysteresis="leave")], FAST_OPTIONS)
+    await start(hass, entry)
+    assert entry.version == 2
+    assert subentry_of(entry, "Living").data["hysteresis"] == "leave"
+    assert migrated_issue(hass) is None

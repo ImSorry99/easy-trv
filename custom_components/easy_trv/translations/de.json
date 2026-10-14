@@ -125,6 +125,10 @@
     "room_invalid": {
       "title": "Raum {room} konnte nicht eingerichtet werden",
       "description": "Easy TRV hat den Raum {room} übersprungen: {error}\n\nDie übrigen Räume laufen weiter. Bearbeite den Raum oder behebe, wovon er abhängt (das Thermostat in ZHA, eine Profildatei), und lade die Integration Easy TRV neu. Dieses Problem verschwindet, sobald der Raum fehlerfrei eingerichtet wird."
+    },
+    "settings_migrated": {
+      "title": "Thermostat-Einstellungen durch das Update geändert",
+      "description": "Diese Räume hatten bei der Hysterese „Unverändert lassen“ gewählt: {rooms}.\n\nDie Hysterese wird jetzt immer auf die Thermostate geschrieben, deshalb gilt für diese Räume stattdessen der globale Wert {hysteresis}. Prüfe die globale Einstellung in den Optionen von Easy TRV oder lege eine Hysterese im Raum selbst fest.\n\nDu kannst diesen Hinweis ausblenden."
     }
   },
   "options": {

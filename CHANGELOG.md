@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Hysteresis is always written (default 0.4 K); rooms that had 'leave unchanged' are migrated and get a Repairs notice
+
 ## [0.1.0] - 2026-10-13
 
 ### Added
