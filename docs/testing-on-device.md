@@ -1,6 +1,6 @@
 # Testing on real thermostats
 
-A manual checklist for the first run on real hardware: the owner's four Sonoff TRVZB, three in the living room ("Wohnzimmer") and one in the bedroom ("Schlafzimmer"). It also holds the five spikes (S1 to S5) from [`profiles/sonoff-trvzb-native.md`](profiles/sonoff-trvzb-native.md) that the automated tests cannot answer. Work through it top to bottom and write down what you see; the table at the end collects the results.
+A manual checklist for the first run on real hardware: the owner's four Sonoff TRVZB, three in the living room ("Wohnzimmer") and one in the bedroom ("Schlafzimmer"). It also holds the spikes S1 to S4 from [`profiles/sonoff-trvzb-native.md`](profiles/sonoff-trvzb-native.md) plus S10 for the adaptive mode, which the automated tests cannot answer. Work through it top to bottom and write down what you see; the table at the end collects the results.
 
 ## What you need
 
@@ -34,9 +34,9 @@ A manual checklist for the first run on real hardware: the owner's four Sonoff T
 ## 2. Add the rooms
 
 1. **Add room > From area**, choose "Wohnzimmer". Expected: the next page is prefilled with the three thermostats and the area's temperature and humidity sensors (the thermostats' own readings are not among them). Order the temperature sensors by priority and submit. On the next page, **Room settings**, set **Adaptive mode** to "Adaptive off" and leave everything else on **Global** (open-window detection on, hysteresis 0.4 K, frost protection 7 °C, profile auto). This room checks the hysteresis write (section 3).
-2. **Add room > From area**, choose "Schlafzimmer". One thermostat. Before you submit the first page, add one of the living-room thermostats to the thermostats field. Expected: the form says it already belongs to another room. Remove it again and submit. On **Room settings** leave every field on **Global** (so adaptive mode is on). This room checks the adaptive mode and is the one used for S5.
+2. **Add room > From area**, choose "Schlafzimmer". One thermostat. Before you submit the first page, add one of the living-room thermostats to the thermostats field. Expected: the form says it already belongs to another room. Remove it again and submit. On **Room settings** leave every field on **Global** (so adaptive mode is on). This room checks the adaptive mode and is the one used for S10.
 3. Expected: two devices, "Heizung Wohnzimmer" and "Heizung Schlafzimmer" (English: "Wohnzimmer heating", "Schlafzimmer heating"), each placed in its area and with one diagnostic sensor "Status" whose entity id is `sensor.wohnzimmer_heating_status` or `sensor.schlafzimmer_heating_status`.
-4. Open **Configure** on the Easy TRV page. Expected: two sections, "Writes" and "Thermostat settings"; number fields can be left empty ("Empty = built-in default" in the description).
+4. Open **Configure** on the Easy TRV page. Expected: two sections, "Writes" and "Thermostat settings"; number fields can be left empty, and the description of each says what an empty field means (for the refresh interval: "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Empty = 20 min.").
 
 ## 3. The first writes
 
@@ -51,7 +51,7 @@ After Home Assistant is fully started (or after **Reload** on the Easy TRV page)
 | source: external | `0x600E` | `1`; reads back `1` or `3` |
 | room temperature | `0x600D` | the room temperature rounded to 0.1 °C, times 100: `2130` for 21.3 °C, `2140` for 21.35 °C |
 
-Every write is followed by a read about 10 seconds later, so the living room needs a few minutes to finish. The bedroom runs in parallel. In the bedroom (adaptive mode on) there is no `hysteresis attr 0x6011` line; in the living room (adaptive mode off) there is one.
+Every write is followed by a read about 10 seconds later, so the living room needs a few minutes to finish. The bedroom runs in parallel. In the bedroom (adaptive mode on, firmware 1.4.4) there is no `hysteresis attr 0x6011` line; in the living room (adaptive mode off) there is one.
 
 ### Read the raw values in ZHA
 
@@ -75,7 +75,7 @@ The two rooms from section 2 cover both sides of the hysteresis rule. Needs firm
 
 1. **Adaptive mode on (Schlafzimmer).** Read `0x6017` of the bedroom thermostat: expected `2`. In the debug log there is an `adaptive_mode attr 0x6017 raw=2 -> ok` line and no `hysteresis attr 0x6011` line for that room. Note the value `0x6011` holds anyway (the thermostat's own; Easy TRV did not write it).
 2. **Adaptive mode off (Wohnzimmer).** Read `0x6017` of a living-room thermostat: expected `0` (a `1` also counts as off). `0x6011` reads `-40`, and the log has `adaptive_mode attr 0x6017 raw=0 -> ok` followed by `hysteresis attr 0x6011 raw=-40 -> ok`.
-3. **Switch the bedroom to adaptive off.** Edit the room, set Adaptive mode to "Adaptive off", save. Expected after the reload: `0x6017` reads `0` or `1`, and `0x6011` reads `-40` (written now). Switch it back to **Global** afterwards (for S5).
+3. **Switch the bedroom to adaptive off.** Edit the room, set Adaptive mode to "Adaptive off", save. Expected after the reload: `0x6017` reads `0` or `1`, and `0x6011` reads `-40` (written now). Switch it back to **Global** afterwards (for S10).
 4. **Firmware below 1.4.4** (only if one thermostat still runs 1.3.0): Repairs shows `trv_firmware` naming "Adaptive mode" and the thermostat, and the hysteresis is written to that thermostat anyway, even with adaptive mode on.
 5. **Frost protection.** `0x6002` reads `700`. Change the global frost protection temperature to 9 °C in the options: after the reload `0x6002` reads `900` on every room that has no value of its own. Set it back.
 
@@ -155,7 +155,7 @@ Why: verification compares exact integers.
 4. Record whether each read returns exactly the written value, and `climate.current_temperature` after each (21.4 for 2135 or 2140?).
 5. Enable the entry again and confirm that its first value write verifies (Status `ok`, no `easy_trv_write_failed`).
 
-### S5: Adaptive mode with the external sensor
+### S10: Adaptive mode with the external sensor
 
 Why: with the adaptive mode on, the thermostat ignores the hysteresis and adapts to the room itself. Whether that works well with a value fed from an external sensor is not known.
 
@@ -202,4 +202,4 @@ The diagnostics contain the thermostats' IEEE addresses and entity ids. Remove o
 | S2: unsolicited report of `2` (yes / no, when) | | |
 | S3: window detection with external source | | |
 | S4: exact read-back of 2135 and 2140, endpoint | | |
-| S5: adaptive mode with the external sensor (±0.5 K over an evening, valve behaviour, swing) | | |
+| S10: adaptive mode with the external sensor (±0.5 K over an evening, valve behaviour, swing) | | |

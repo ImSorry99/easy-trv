@@ -22,9 +22,11 @@ def test_global_overrides_default_and_room_overrides_global():
 
 def test_legacy_values_are_accepted():
     assert resolve_settings({}, {"hysteresis": "0.4"}).hysteresis == 0.4
+    # "leave" no longer exists: the room follows the global value.
     assert (
-        resolve_settings({}, {"hysteresis": "leave"}).hysteresis == 0.4
-    )  # leave -> global
+        resolve_settings({"hysteresis": "0_6"}, {"hysteresis": "leave"}).hysteresis
+        == 0.6
+    )
 
 
 def test_overrides_lists_only_room_specific_keys():

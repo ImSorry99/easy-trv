@@ -11,7 +11,7 @@ custom_components/easy_trv/
   const.py               domain, config keys, defaults, event names, issue ids
   controller.py          RoomController: HA events → core events; core commands → profile/adapter/HA; timers; one serial worker per room
   core/
-    model.py             frozen dataclasses: RoomConfig, GlobalParams, RoomState, TrvState, Intent, events, commands
+    model.py             frozen dataclasses: RoomConfig, RoomParams, RoomState, TrvState, Intent, events, commands
     room_logic.py        RoomLogic.handle(event, now, state) -> (state, [commands]) — pure, no HA imports
     values.py            temperature validity, rounding (Decimal, half-up to 0.1 K), firmware parsing
   profiles/

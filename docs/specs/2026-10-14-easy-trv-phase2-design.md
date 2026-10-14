@@ -192,6 +192,7 @@ Coverage stays at the Phase 1 level (≥ 95 % for `core/` and `profiles/`).
 | S5 | does the thermostat report `0x0012 = 1200` during its open-window phase? | rule 5.2-4b is never taken; delete it in 2c |
 | S8 | does every knob step arrive as a report (ZHA min reporting 30 s)? | the 3 s debounce is replaced by "adopt the last report" |
 | S9 | does a setpoint write while `system_mode = auto` switch the thermostat to heat? | affects only thermostats a user put into auto; the exclusion rule 5.2-4a stays |
+| S10 | does the adaptive mode work well with a value fed from an external sensor (stays within ±0.5 K, no swing)? | compare with adaptive off and a 0.4 K hysteresis; if worse, adaptive mode should not be the default |
 
 ## 11. Repository process (plan 2a, small)
 
