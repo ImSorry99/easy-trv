@@ -129,12 +129,12 @@
   },
   "issues": {
     "trv_unreachable": {
-      "title": "Thermostat {trv} in {room} is not responding",
-      "description": "Easy TRV could not set \"{attribute}\" on {trv} in {room} after {attempts} attempts. Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{attribute}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Easy TRV could not set \"{setting}\" on {thermostat} in {room} after {attempts} attempts. Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
     },
     "trv_firmware": {
-      "title": "Thermostat {trv} lacks a firmware feature",
-      "description": "Easy TRV cannot use \"{capability}\" on {trv}. Required firmware: {required}. Installed firmware: {installed}.\n\nEasy TRV skips this setting for this thermostat and keeps controlling it otherwise. Update the thermostat's firmware (for example through the ZHA over-the-air update) to enable it."
+      "title": "Thermostat {thermostat} in {room} lacks a firmware feature",
+      "description": "Easy TRV cannot use \"{setting}\" on {thermostat} in {room}. Required firmware: {required}. Installed firmware: {current}.\n\nEasy TRV skips this setting for this thermostat and keeps controlling it otherwise. Update the thermostat's firmware (for example through the ZHA over-the-air update) to enable it."
     },
     "zha_api_incompatible": {
       "title": "Easy TRV cannot use the Zigbee integration",
@@ -228,14 +228,24 @@
     "adaptive_mode": {
       "options": {
         "global": "Global",
-        "on": "Turn adaptive mode on",
-        "off": "Turn adaptive mode off",
+        "on": "Adaptive on",
+        "off": "Adaptive off",
         "leave": "Leave as set in the thermostat"
       }
     },
     "sensor_timeout": {
       "options": {
         "off": "Off"
+      }
+    },
+    "capability": {
+      "options": {
+        "external_temperature": "Room temperature",
+        "source_select": "Temperature source",
+        "window_detection_flag": "Thermostat's open-window detection",
+        "hysteresis": "Hysteresis",
+        "adaptive_mode": "Adaptive mode",
+        "frost_protection": "Frost protection temperature"
       }
     }
   }

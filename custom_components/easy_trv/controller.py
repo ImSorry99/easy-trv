@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final, assert_never
 
 from homeassistant.const import (
@@ -66,6 +67,7 @@ from custom_components.easy_trv.core.model import (
 )
 from custom_components.easy_trv.core.room_logic import RoomLogic
 from custom_components.easy_trv.core.values import parse_temperature
+from custom_components.easy_trv.labels import thermostat_name
 from custom_components.easy_trv.profiles.engine import CapabilityUnsupported
 
 if TYPE_CHECKING:
@@ -192,14 +194,21 @@ class RoomController:
         profile: Profile,
         gateway: TrvGateway,
         device_refs: Mapping[str, DeviceRef],
+        *,
+        labels: Mapping[str, str] = MappingProxyType({}),
     ) -> None:
-        """Wire the room logic to Home Assistant, the profile and the gateway."""
+        """Wire the room logic to Home Assistant, the profile and the gateway.
+
+        ``labels`` maps a capability to the plain-language name of the setting
+        for Repairs texts; a capability without a label is shown by its key.
+        """
         self._hass = hass
         self._config = config
         self._params = params
         self._profile = profile
         self._gateway = gateway
         self._device_refs = device_refs
+        self._labels = labels
         self._firmware = {trv.entity_id: trv.firmware for trv in config.trvs}
         self._trv_ids = frozenset(self._firmware)
         self._logic = RoomLogic(config, params, self._capability_of)
@@ -446,14 +455,35 @@ class RoomController:
     def _raise_issue(self, command: RaiseIssue) -> None:
         """Create the repairs issue of a thermostat."""
         ref = self._device_refs[command.trv]
-        placeholders = {"trv_name": ref.entity_id, **command.placeholders}
+        found = command.placeholders
+        thermostat = thermostat_name(self._hass, ref.entity_id)
         match command.kind:
             case "unreachable":
-                issues.raise_unreachable(self._hass, ref.ieee, placeholders)
+                issues.raise_unreachable(
+                    self._hass,
+                    ref.ieee,
+                    room=found["room"],
+                    setting=self._setting_name(found["attribute"]),
+                    thermostat=thermostat,
+                    attempts=int(found["attempts"]),
+                    error=found["error"],
+                )
             case "firmware":
-                issues.raise_firmware(self._hass, ref.ieee, placeholders)
+                issues.raise_firmware(
+                    self._hass,
+                    ref.ieee,
+                    room=self._config.name,
+                    setting=self._setting_name(found["capability"]),
+                    thermostat=thermostat,
+                    required=found["required"],
+                    current=found["installed"],
+                )
             case _:
                 assert_never(command.kind)
+
+    def _setting_name(self, capability: str) -> str:
+        """Return the plain-language name of a capability (its key if unlabelled)."""
+        return self._labels.get(capability, capability)
 
     def _clear_issue(self, command: ClearIssue) -> None:
         """Delete the repairs issue of a thermostat."""

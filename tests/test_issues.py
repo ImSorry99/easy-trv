@@ -11,6 +11,18 @@ def get(hass, issue_id):
     return ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
 
 
+def raise_unreachable(hass, ieee) -> None:
+    issues.raise_unreachable(
+        hass, ieee, room="Old", setting="x", thermostat="y", attempts=3, error="z"
+    )
+
+
+def raise_firmware(hass, ieee) -> None:
+    issues.raise_firmware(
+        hass, ieee, room="Old", setting="x", thermostat="y", required="1", current="0"
+    )
+
+
 def test_issue_ids_drop_the_colons_of_the_ieee() -> None:
     assert issues.issue_id_unreachable(IEEE) == "trv_unreachable_00124b00aabb"
     assert issues.issue_id_firmware(IEEE) == "trv_firmware_00124b00aabb"
@@ -18,12 +30,26 @@ def test_issue_ids_drop_the_colons_of_the_ieee() -> None:
 
 
 async def test_unreachable_issue_is_raised_and_cleared(hass) -> None:
-    issues.raise_unreachable(hass, IEEE, {"room": "Living", "attempts": 3})
+    issues.raise_unreachable(
+        hass,
+        IEEE,
+        room="Living",
+        setting="Hysteresis",
+        thermostat="Living TRV",
+        attempts=3,
+        error="radio busy",
+    )
     raised = get(hass, "trv_unreachable_00124b00aabb")
     assert raised is not None
     assert raised.severity == IssueSeverity.ERROR
     assert raised.translation_key == "trv_unreachable"
-    assert raised.translation_placeholders == {"room": "Living", "attempts": "3"}
+    assert raised.translation_placeholders == {
+        "room": "Living",
+        "setting": "Hysteresis",
+        "thermostat": "Living TRV",
+        "attempts": "3",
+        "error": "radio busy",
+    }
     assert raised.is_fixable is False
     assert raised.is_persistent is False
     issues.clear_unreachable(hass, IEEE)
@@ -31,14 +57,25 @@ async def test_unreachable_issue_is_raised_and_cleared(hass) -> None:
 
 
 async def test_firmware_issue_is_raised_and_cleared(hass) -> None:
-    issues.raise_firmware(hass, IEEE, {"trv": "climate.a", "required": "1.3.0"})
+    issues.raise_firmware(
+        hass,
+        IEEE,
+        room="Living",
+        setting="Hysteresis",
+        thermostat="Living TRV",
+        required="1.3.0",
+        current="1.2.1",
+    )
     raised = get(hass, "trv_firmware_00124b00aabb")
     assert raised is not None
     assert raised.severity == IssueSeverity.WARNING
     assert raised.translation_key == "trv_firmware"
     assert raised.translation_placeholders == {
-        "trv": "climate.a",
+        "room": "Living",
+        "setting": "Hysteresis",
+        "thermostat": "Living TRV",
         "required": "1.3.0",
+        "current": "1.2.1",
     }
     assert raised.is_fixable is False
     assert raised.is_persistent is False
@@ -76,7 +113,7 @@ async def test_profile_invalid_issue_is_named_after_the_file_stem(hass) -> None:
 async def test_clear_profile_issues_keeps_only_the_named_stems(hass) -> None:
     issues.raise_profile_invalid(hass, "keep.yaml", "still broken")
     issues.raise_profile_invalid(hass, "fixed.yaml", "was broken")
-    issues.raise_unreachable(hass, IEEE, {})
+    raise_unreachable(hass, IEEE)
     ir.async_create_issue(
         hass,
         "other_domain",
@@ -100,8 +137,8 @@ async def test_clear_thermostat_issues_except_keeps_only_the_named_thermostats(
 ) -> None:
     other = "00:12:4b:00:cc:dd"
     for ieee in (IEEE, other):
-        issues.raise_unreachable(hass, ieee, {})
-        issues.raise_firmware(hass, ieee, {})
+        raise_unreachable(hass, ieee)
+        raise_firmware(hass, ieee)
     issues.raise_profile_invalid(hass, "my_trv.yaml", "bad")
     issues.raise_zha_api(hass, "broken")
     ir.async_create_issue(
@@ -147,7 +184,7 @@ async def test_room_invalid_issue_names_the_room_and_the_problem(hass) -> None:
 async def test_clear_room_issues_except_keeps_only_the_named_rooms(hass) -> None:
     issues.raise_room_invalid(hass, "keep", "Still broken", "x")
     issues.raise_room_invalid(hass, "fixed", "Was broken", "y")
-    issues.raise_unreachable(hass, IEEE, {})
+    raise_unreachable(hass, IEEE)
     ir.async_create_issue(
         hass,
         "other_domain",

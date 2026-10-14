@@ -32,6 +32,7 @@ from custom_components.easy_trv.const import (
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.core.model import RoomConfig, RoomParams, TrvConfig
 from custom_components.easy_trv.core.settings import RoomSettings, resolve_settings
+from custom_components.easy_trv.labels import async_capability_labels
 from custom_components.easy_trv.profiles.loader import LoadResult, async_load_profiles
 
 if TYPE_CHECKING:
@@ -60,6 +61,7 @@ class EasyTrvRuntimeData:
     rooms: dict[str, RoomController]
     settings: dict[str, RoomSettings]  # resolved settings by subentry id
     areas: dict[str, str | None]  # area name by subentry id (None: no area)
+    labels: Mapping[str, str]  # plain-language setting name by capability
 
 
 type EasyTrvConfigEntry = ConfigEntry[EasyTrvRuntimeData]
@@ -171,12 +173,13 @@ def _describe_room_error(err: Exception) -> str:
     return f"invalid room data: {type(err).__name__}: {err}"
 
 
-def _build_room(
+def _build_room(  # noqa: PLR0913 - the collaborators of one room
     hass: HomeAssistant,
     entry: EasyTrvConfigEntry,
     subentry: ConfigSubentry,
     gateway: TrvGateway,
     profiles: Mapping[str, Profile],
+    labels: Mapping[str, str],
 ) -> tuple[RoomController, Profile, RoomSettings]:
     """Create the controller of one ``room`` subentry."""
     settings = resolve_settings(entry.options, subentry.data)
@@ -188,7 +191,9 @@ def _build_room(
         subentry.subentry_id, subentry.title, subentry.data, device_refs, settings
     )
     params = RoomParams.from_settings(settings)
-    controller = RoomController(hass, config, params, profile, gateway, device_refs)
+    controller = RoomController(
+        hass, config, params, profile, gateway, device_refs, labels=labels
+    )
     return controller, profile, settings
 
 
@@ -244,6 +249,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
         hass, keep={Path(error.file).stem for error in profiles.errors}
     )
 
+    labels = await async_capability_labels(hass)
     rooms: dict[str, RoomController] = {}
     resolved: dict[str, RoomSettings] = {}
     areas: dict[str, str | None] = {}
@@ -254,7 +260,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
             continue
         try:
             controller, profile, settings = _build_room(
-                hass, entry, subentry, gateway, profiles.profiles
+                hass, entry, subentry, gateway, profiles.profiles, labels
             )
         except (ConfigEntryError, ValueError, KeyError, TypeError) as err:
             # One room that cannot be set up must not take the others down.
@@ -283,7 +289,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     issues.clear_thermostat_issues_except(
         hass, {ieee for controller in rooms.values() for ieee in controller.ieees}
     )
-    entry.runtime_data = EasyTrvRuntimeData(gateway, profiles, rooms, resolved, areas)
+    entry.runtime_data = EasyTrvRuntimeData(
+        gateway, profiles, rooms, resolved, areas, labels
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

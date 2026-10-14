@@ -746,7 +746,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_profile": "Auto",
         "global_window_detection": "Detection on",
         "global_hysteresis": "0.4 K",
-        "global_adaptive_mode": "Turn adaptive mode on",
+        "global_adaptive_mode": "Adaptive on",
         "global_frost_temperature": "7.0 °C",
         "global_refresh_minutes": "20 min",
         "global_verify_delay_seconds": "10 s",
@@ -773,7 +773,7 @@ async def test_room_settings_placeholders_follow_the_global_options(hass) -> Non
 
     placeholders = result["description_placeholders"]
     assert placeholders["global_hysteresis"] == "0.6 K"
-    assert placeholders["global_adaptive_mode"] == "Turn adaptive mode off"
+    assert placeholders["global_adaptive_mode"] == "Adaptive off"
     assert placeholders["global_frost_temperature"] == "9.5 °C"
     assert placeholders["global_refresh_minutes"] == "45 min"
     # A timeout of 0 means "off".
@@ -792,7 +792,7 @@ async def test_room_settings_placeholders_are_german_in_a_german_instance(
     placeholders = result["description_placeholders"]
     assert placeholders["global_hysteresis"] == "0,4 K"
     assert placeholders["global_window_detection"] == "Erkennung an"
-    assert placeholders["global_adaptive_mode"] == "Adaptiven Modus einschalten"
+    assert placeholders["global_adaptive_mode"] == "Adaptiv an"
     assert placeholders["global_profile"] == "Auto"
     assert placeholders["global_frost_temperature"] == "7,0 °C"
     assert placeholders["global_min_delta_kelvin"] == "0,1 K"

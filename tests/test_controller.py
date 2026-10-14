@@ -5,9 +5,12 @@ from dataclasses import replace
 from datetime import timedelta
 
 import pytest
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.issue_registry import IssueSeverity
 from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
     async_capture_events,
     async_fire_time_changed,
 )
@@ -41,6 +44,11 @@ PARAMS = replace(RoomParams.defaults(), verify_delay=0.0)
 # Enough loop iterations for the worker to run a queue of fake-gateway
 # operations (each one yields about once) to completion.
 SETTLE_ITERATIONS = 50
+LABELS = {
+    "hysteresis": "Hysteresis",
+    "external_temperature": "Room temperature",
+    "window_detection_flag": "Thermostat's open-window detection",
+}
 
 
 class SpyGateway(FakeGateway):
@@ -144,10 +152,10 @@ async def make_controller(hass, gateway, profile, config):
     """Build controllers for the room and stop them again after the test."""
     created: list[RoomController] = []
 
-    def make(*, cfg=None, params=PARAMS, prof=None) -> RoomController:
+    def make(*, cfg=None, params=PARAMS, prof=None, labels=LABELS) -> RoomController:
         refs = {ref.entity_id: ref for ref in gateway.devices.values()}
         controller = RoomController(
-            hass, cfg or config, params, prof or profile, gateway, refs
+            hass, cfg or config, params, prof or profile, gateway, refs, labels=labels
         )
         created.append(controller)
         return controller
@@ -332,9 +340,13 @@ async def test_verify_delay_and_mismatch_retry(
     assert raised is not None
     assert raised.severity == IssueSeverity.ERROR
     assert raised.translation_key == "trv_unreachable"
-    assert raised.translation_placeholders["room"] == "Living"
-    assert raised.translation_placeholders["trv"] == "climate.a"
-    assert raised.translation_placeholders["attempts"] == "3"
+    assert raised.translation_placeholders == {
+        "room": "Living",
+        "setting": "Room temperature",
+        "thermostat": "climate.a",
+        "attempts": "3",
+        "error": "mismatch: expected [2130] got 2000",
+    }
     assert issue(hass, "trv_unreachable_0022") is None
     assert [e.data["attribute"] for e in write_failed] == ["external_temperature"]
     [record] = [r for r in caplog.records if "did not accept" in r.getMessage()]
@@ -344,6 +356,49 @@ async def test_verify_delay_and_mismatch_retry(
         "Living: climate.a did not accept external_temperature after 3 attempts"
     )
     assert record.getMessage().count("Living:") == 1
+
+
+async def test_unreachable_issue_names_setting_and_thermostat(
+    hass, freezer, make_controller, gateway
+) -> None:
+    owner = MockConfigEntry(domain="test")
+    owner.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=owner.entry_id, identifiers={("test", "a")}, name="Living TRV"
+    )
+    # The state of the fixture would make the registry pick "climate.a_2".
+    hass.states.async_remove("climate.a")
+    entity = er.async_get(hass).async_get_or_create(
+        "climate", "test", "a", device_id=device.id, suggested_object_id="a"
+    )
+    assert entity.entity_id == "climate.a"
+    hass.states.async_set("climate.a", "heat")
+    gateway.read_override[(IEEE_A, WINDOW)] = 0
+    controller = make_controller()
+    await controller.async_start()
+    await advance(hass, freezer, 25)
+    raised = issue(hass, "trv_unreachable_0011")
+    assert raised is not None
+    assert raised.translation_placeholders == {
+        "room": "Living",
+        "setting": "Thermostat's open-window detection",
+        "thermostat": "Living TRV",
+        "attempts": "3",
+        "error": raised.translation_placeholders["error"],
+    }
+
+
+async def test_labels_fall_back_to_keys_and_entity_ids(
+    hass, freezer, make_controller, gateway
+) -> None:
+    gateway.read_override[(IEEE_A, WINDOW)] = 0
+    controller = make_controller(labels={})
+    await controller.async_start()
+    await advance(hass, freezer, 25)
+    raised = issue(hass, "trv_unreachable_0011")
+    assert raised is not None
+    assert raised.translation_placeholders["setting"] == "window_detection_flag"
+    assert raised.translation_placeholders["thermostat"] == "climate.a"
 
 
 async def test_write_error_is_retried_and_recovers(
@@ -382,10 +437,25 @@ async def test_start_clears_stale_thermostat_issues(hass, controller, gateway) -
     # Issues left over from before a reload: the controller starts from a fresh
     # state, so it must not inherit them (a still-valid problem is raised again
     # by the first operations).
-    placeholders = {"room": "Living", "trv": "climate.a", "attribute": "x"}
     for ieee in (IEEE_A, IEEE_B, "00:99"):
-        issues.raise_unreachable(hass, ieee, placeholders)
-        issues.raise_firmware(hass, ieee, placeholders)
+        issues.raise_unreachable(
+            hass,
+            ieee,
+            room="Living",
+            setting="x",
+            thermostat="y",
+            attempts=3,
+            error="z",
+        )
+        issues.raise_firmware(
+            hass,
+            ieee,
+            room="Living",
+            setting="x",
+            thermostat="y",
+            required="1",
+            current="0",
+        )
 
     await controller.async_start()
 
@@ -540,11 +610,11 @@ async def test_firmware_gated_capability_raises_issue_and_keeps_writing(
     assert raised.severity == IssueSeverity.WARNING
     assert raised.translation_key == "trv_firmware"
     assert raised.translation_placeholders == {
-        "trv": "climate.a",
-        "trv_name": "climate.a",
-        "capability": "hysteresis",
+        "room": "Living",
+        "setting": "Hysteresis",
+        "thermostat": "climate.a",
         "required": "1.3.0",
-        "installed": "1.2.1",
+        "current": "1.2.1",
     }
     assert issue(hass, "trv_firmware_0022") is None
     # Hysteresis never reaches the old device, everything else still does.
@@ -577,10 +647,11 @@ async def test_profile_without_capability_is_unsupported(
     for ieee in ("0011", "0022"):
         raised = issue(hass, f"trv_firmware_{ieee}")
         assert raised is not None
-        assert raised.translation_placeholders["capability"] == "set_hysteresis"
+        # No label for the intent name of a missing capability: it stays as is.
+        assert raised.translation_placeholders["setting"] == "set_hysteresis"
         # The profile has no such capability, so no version is required.
         assert raised.translation_placeholders["required"] == "unknown"
-        assert raised.translation_placeholders["installed"] == "1.3.0"
+        assert raised.translation_placeholders["current"] == "1.3.0"
     assert writes_to(gateway, IEEE_A, HYSTERESIS) == []
     assert writes_to(gateway, IEEE_A, VALUE) == [2130]
     assert health(controller) == {
@@ -602,11 +673,11 @@ async def test_unsupported_attribute_raises_a_firmware_issue_without_retrying(
     assert raised is not None
     assert raised.severity == IssueSeverity.WARNING
     assert raised.translation_placeholders == {
-        "trv": "climate.a",
-        "trv_name": "climate.a",
-        "capability": "hysteresis",
+        "room": "Living",
+        "setting": "Hysteresis",
+        "thermostat": "climate.a",
         "required": "unknown",
-        "installed": "1.3.0",
+        "current": "1.3.0",
     }
     assert issue(hass, "trv_unreachable_0011") is None
     assert issue(hass, "trv_firmware_0022") is None
@@ -627,7 +698,7 @@ async def test_a_failed_setting_is_sent_again_and_the_issue_resolves_itself(
     await advance(hass, freezer, 25)
     raised = issue(hass, "trv_unreachable_0011")
     assert raised is not None
-    assert raised.translation_placeholders["attribute"] == "hysteresis"
+    assert raised.translation_placeholders["setting"] == "Hysteresis"
     assert health(controller)["climate.a"] == "error"
 
     # The thermostat accepts the setting again; nothing but the refresh interval

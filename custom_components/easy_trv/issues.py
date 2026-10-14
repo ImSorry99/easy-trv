@@ -62,16 +62,32 @@ def _create(
     )
 
 
-def raise_unreachable(
-    hass: HomeAssistant, ieee: str, placeholders: Mapping[str, Any]
+def raise_unreachable(  # noqa: PLR0913 - one argument per placeholder of the text
+    hass: HomeAssistant,
+    ieee: str,
+    *,
+    room: str,
+    setting: str,
+    thermostat: str,
+    attempts: int,
+    error: str,
 ) -> None:
-    """Report a thermostat that keeps failing to accept writes."""
+    """Report a thermostat that keeps failing to accept writes.
+
+    ``setting`` and ``thermostat`` are plain-language names, not keys.
+    """
     _create(
         hass,
         issue_id_unreachable(ieee),
         ir.IssueSeverity.ERROR,
         "trv_unreachable",
-        placeholders,
+        {
+            "room": room,
+            "setting": setting,
+            "thermostat": thermostat,
+            "attempts": attempts,
+            "error": error,
+        },
     )
 
 
@@ -80,16 +96,32 @@ def clear_unreachable(hass: HomeAssistant, ieee: str) -> None:
     ir.async_delete_issue(hass, DOMAIN, issue_id_unreachable(ieee))
 
 
-def raise_firmware(
-    hass: HomeAssistant, ieee: str, placeholders: Mapping[str, Any]
+def raise_firmware(  # noqa: PLR0913 - one argument per placeholder of the text
+    hass: HomeAssistant,
+    ieee: str,
+    *,
+    room: str,
+    setting: str,
+    thermostat: str,
+    required: str,
+    current: str,
 ) -> None:
-    """Report a thermostat whose firmware lacks a capability."""
+    """Report a thermostat whose firmware lacks a capability.
+
+    ``setting`` and ``thermostat`` are plain-language names, not keys.
+    """
     _create(
         hass,
         issue_id_firmware(ieee),
         ir.IssueSeverity.WARNING,
         "trv_firmware",
-        placeholders,
+        {
+            "room": room,
+            "setting": setting,
+            "thermostat": thermostat,
+            "required": required,
+            "current": current,
+        },
     )
 
 

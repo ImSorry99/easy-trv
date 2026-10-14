@@ -13,6 +13,15 @@ PLACEHOLDER = re.compile(r"\{[^{}]*\}")
 # hassfest's rule for the keys of selector options, entity states and issues.
 TRANSLATION_KEY = re.compile(r"^(?!.+[_-]{2})(?![_-])[a-z0-9-_]+(?<![_-])$")
 
+CAPABILITIES = {
+    "external_temperature",
+    "source_select",
+    "window_detection_flag",
+    "hysteresis",
+    "adaptive_mode",
+    "frost_protection",
+}
+
 ROOM_ERRORS = {
     "no_trv",
     "not_zha",
@@ -145,6 +154,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "0_8",
         "1_0",
     }
+    assert set(data["selector"]["capability"]["options"]) == CAPABILITIES
     assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
     assert set(data["selector"]["sensor_timeout"]["options"]) == {"off"}
     # Existing sections of the earlier tasks stay in place.
@@ -204,3 +214,73 @@ def test_german_translation_is_actually_german() -> None:
 def test_room_device_name_is_translated() -> None:
     assert load(EN)["device"]["room"]["name"] == "{room} heating"
     assert load(DE)["device"]["room"]["name"] == "Heizung {room}"
+
+
+@pytest.mark.parametrize("path", [STRINGS, EN, DE])
+def test_thermostat_issues_name_the_setting_and_the_thermostat(path: Path) -> None:
+    issues = load(path)["issues"]
+    expected = {
+        "trv_unreachable": {
+            "room",
+            "setting",
+            "thermostat",
+            "attempts",
+            "error",
+        },
+        "trv_firmware": {"room", "setting", "thermostat", "required", "current"},
+    }
+    for key, allowed in expected.items():
+        used = {
+            name.strip("{}")
+            for text in issues[key].values()
+            for name in PLACEHOLDER.findall(text)
+        }
+        assert used <= allowed, f"{key}: {used - allowed}"
+        assert {"setting", "thermostat"} <= used
+
+
+def test_capability_labels_en() -> None:
+    assert load(EN)["selector"]["capability"]["options"] == {
+        "external_temperature": "Room temperature",
+        "source_select": "Temperature source",
+        "window_detection_flag": "Thermostat's open-window detection",
+        "hysteresis": "Hysteresis",
+        "adaptive_mode": "Adaptive mode",
+        "frost_protection": "Frost protection temperature",
+    }
+
+
+def test_capability_labels_de() -> None:
+    assert load(DE)["selector"]["capability"]["options"] == {
+        "external_temperature": "Raumtemperatur",
+        "source_select": "Temperaturquelle",
+        "window_detection_flag": "Fenster-offen-Erkennung des Thermostats",
+        "hysteresis": "Hysterese",
+        "adaptive_mode": "Adaptiver Modus",
+        "frost_protection": "Frostschutztemperatur",
+    }
+
+
+def test_window_detection_option_texts_de() -> None:
+    options = load(DE)["selector"]["window_detection"]["options"]
+    assert options == {
+        "global": "Global",
+        "on": "Erkennung an",
+        "off": "Erkennung aus",
+        "leave": "Im Thermostat unverändert lassen",
+    }
+
+
+def test_adaptive_mode_option_texts_are_state_like() -> None:
+    assert load(EN)["selector"]["adaptive_mode"]["options"] == {
+        "global": "Global",
+        "on": "Adaptive on",
+        "off": "Adaptive off",
+        "leave": "Leave as set in the thermostat",
+    }
+    assert load(DE)["selector"]["adaptive_mode"]["options"] == {
+        "global": "Global",
+        "on": "Adaptiv an",
+        "off": "Adaptiv aus",
+        "leave": "Im Thermostat unverändert lassen",
+    }

@@ -33,7 +33,6 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
     TextSelector,
 )
-from homeassistant.helpers.translation import async_get_translations
 
 from custom_components.easy_trv.adapters.zha_gateway import (
     ZHA_DOMAIN,
@@ -67,6 +66,7 @@ from custom_components.easy_trv.core.settings import (
     overrides,
     resolve_settings,
 )
+from custom_components.easy_trv.labels import async_option_labels
 from custom_components.easy_trv.profiles.loader import async_load_profiles
 
 if TYPE_CHECKING:
@@ -356,19 +356,6 @@ def _timeout_error(values: Mapping[str, Any]) -> dict[str, str]:
     if timeout and not _TIMEOUT_MIN <= timeout <= _TIMEOUT_MAX:
         return {CONF_SENSOR_TIMEOUT: _ERR_TIMEOUT_RANGE}
     return {}
-
-
-async def async_option_labels(hass: HomeAssistant, key: str) -> dict[str, str]:
-    """Return the translated option labels of the selector ``key``, by option value."""
-    translations = await async_get_translations(
-        hass, hass.config.language, "selector", {DOMAIN}
-    )
-    prefix = f"component.{DOMAIN}.selector.{key}.options."
-    return {
-        name.removeprefix(prefix): text
-        for name, text in translations.items()
-        if name.startswith(prefix)
-    }
 
 
 async def _setting_texts(
