@@ -205,8 +205,8 @@
     "window_detection": {
       "options": {
         "global": "Global",
-        "on": "Erkennung einschalten",
-        "off": "Erkennung ausschalten",
+        "on": "Erkennung an",
+        "off": "Erkennung aus",
         "leave": "Im Thermostat unverändert lassen"
       }
     },

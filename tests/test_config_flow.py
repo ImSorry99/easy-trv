@@ -744,7 +744,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
     # Selects read as the labels of their selectors, numbers carry their unit.
     assert result["description_placeholders"] == {
         "global_profile": "Auto",
-        "global_window_detection": "Turn detection on",
+        "global_window_detection": "Detection on",
         "global_hysteresis": "0.4 K",
         "global_adaptive_mode": "Turn adaptive mode on",
         "global_frost_temperature": "7.0 °C",
@@ -791,7 +791,7 @@ async def test_room_settings_placeholders_are_german_in_a_german_instance(
 
     placeholders = result["description_placeholders"]
     assert placeholders["global_hysteresis"] == "0,4 K"
-    assert placeholders["global_window_detection"] == "Erkennung einschalten"
+    assert placeholders["global_window_detection"] == "Erkennung an"
     assert placeholders["global_adaptive_mode"] == "Adaptiven Modus einschalten"
     assert placeholders["global_profile"] == "Auto"
     assert placeholders["global_frost_temperature"] == "7,0 °C"

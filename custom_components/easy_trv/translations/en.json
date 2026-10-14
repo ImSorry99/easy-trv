@@ -205,8 +205,8 @@
     "window_detection": {
       "options": {
         "global": "Global",
-        "on": "Turn detection on",
-        "off": "Turn detection off",
+        "on": "Detection on",
+        "off": "Detection off",
         "leave": "Leave as set in the thermostat"
       }
     },
