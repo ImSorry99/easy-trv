@@ -13,6 +13,7 @@ from custom_components.easy_trv.core.model import (
     EVENT_FAILSAFE,
     EVENT_RECOVERED,
     EVENT_WRITE_FAILED,
+    SETTING_INTENTS,
     ClearIssue,
     Command,
     DebounceElapsed,
@@ -20,7 +21,6 @@ from custom_components.easy_trv.core.model import (
     Execute,
     Failed,
     FireEvent,
-    GlobalParams,
     Intent,
     Log,
     Mismatch,
@@ -29,12 +29,15 @@ from custom_components.easy_trv.core.model import (
     RaiseIssue,
     RetryDue,
     RoomConfig,
+    RoomParams,
     RoomState,
     RoomStatus,
     ScheduleDebounce,
     ScheduleRetry,
     SensorChanged,
     SensorReading,
+    SetAdaptiveMode,
+    SetFrostTemperature,
     SetHysteresis,
     SetRoomTemperature,
     SetSource,
@@ -91,7 +94,7 @@ class RoomLogic:
     def __init__(
         self,
         cfg: RoomConfig,
-        params: GlobalParams,
+        params: RoomParams,
         capability_of: Callable[[Intent], str],
     ) -> None:
         """Store the room configuration, tunables and the intent-to-capability map."""
@@ -246,7 +249,7 @@ class RoomLogic:
         )
         if trv in self._writable(state):
             return self._with_trv(state, trv, updated), [Execute(trv, intent)]
-        if isinstance(intent, (SetWindowDetection, SetHysteresis)):
+        if isinstance(intent, SETTING_INTENTS):
             # Dropped while the thermostat is away: re-apply on its return.
             updated = replace(updated, settings_applied=False)
         return self._with_trv(state, trv, updated), []
@@ -354,7 +357,7 @@ class RoomLogic:
             # Only the reported capability moves the clock: another write that
             # keeps failing must not postpone the one that is sent again.
             updated = replace(updated, last_error_retry=now)
-        if isinstance(event.intent, (SetWindowDetection, SetHysteresis)):
+        if isinstance(event.intent, SETTING_INTENTS):
             # The setting never arrived: apply it again on the next resync.
             updated = replace(updated, settings_applied=False)
         state = self._with_trv(state, trv, updated)
@@ -404,7 +407,16 @@ class RoomLogic:
                 "installed": outcome.installed,
             },
         )
-        return self._with_trv(state, trv, updated), [issue]
+        commands: list[Command] = [issue]
+        kelvin = self._cfg.hysteresis
+        if kelvin is not None and self._adaptive_was_in_charge(capability):
+            # Adaptive mode is what suppressed the hysteresis write; without it
+            # the thermostat needs the hysteresis (in the next apply if away).
+            if trv in self._writable(state):
+                commands.append(Execute(trv, SetHysteresis(kelvin)))
+            else:
+                updated = replace(updated, settings_applied=False)
+        return self._with_trv(state, trv, updated), commands
 
     def _on_signal(
         self,
@@ -455,11 +467,7 @@ class RoomLogic:
         for trv in trvs:
             if updated[trv].settings_applied:
                 continue
-            if self._cfg.window_detection != "leave":
-                enabled = self._cfg.window_detection == "on"
-                commands.append(Execute(trv, SetWindowDetection(enabled)))
-            if self._cfg.hysteresis is not None:
-                commands.append(Execute(trv, SetHysteresis(self._cfg.hysteresis)))
+            commands.extend(Execute(trv, i) for i in self._settings(updated[trv]))
             updated[trv] = replace(updated[trv], settings_applied=True)
         return replace(state, trvs=updated), commands
 
@@ -550,12 +558,12 @@ class RoomLogic:
         that raised the error is issued again with a fresh set of attempts. The
         value write that follows in the same tick covers an error on the value.
         """
-        intents = self._reissuable(state)
         trvs = dict(state.trvs)
         commands: list[Command] = []
         for trv in self._writable(state):
             current = trvs[trv]
             capability = current.error_capability
+            intents = self._reissuable(state, current)
             intent = intents.get(capability) if capability is not None else None
             attempts = current.attempts.get(capability, 0) if capability else 0
             if (
@@ -580,17 +588,42 @@ class RoomLogic:
             commands.append(Execute(trv, intent))
         return replace(state, trvs=trvs), commands
 
-    def _reissuable(self, state: RoomState) -> dict[str, Intent]:
+    def _settings(self, trv_state: TrvState) -> list[Intent]:
+        """Return the settings to write to a thermostat, in write order.
+
+        The hysteresis is left out while adaptive mode is on, since adaptive mode
+        manages it itself, unless the thermostat cannot do adaptive mode.
+        """
+        cfg = self._cfg
+        intents: list[Intent] = []
+        if cfg.window_detection != "leave":
+            intents.append(SetWindowDetection(cfg.window_detection == "on"))
+        if cfg.adaptive_mode != "leave":
+            intents.append(SetAdaptiveMode(cfg.adaptive_mode == "on"))
+        adaptive = self._capability_of(SetAdaptiveMode(enabled=True))
+        adaptive_in_charge = (
+            cfg.adaptive_mode == "on" and adaptive not in trv_state.unsupported
+        )
+        if cfg.hysteresis is not None and not adaptive_in_charge:
+            intents.append(SetHysteresis(cfg.hysteresis))
+        if cfg.frost_temperature is not None:
+            intents.append(SetFrostTemperature(cfg.frost_temperature))
+        return intents
+
+    def _adaptive_was_in_charge(self, capability: str) -> bool:
+        """Return whether ``capability`` is the adaptive mode that owns hysteresis."""
+        return self._cfg.adaptive_mode == "on" and capability == self._capability_of(
+            SetAdaptiveMode(enabled=True)
+        )
+
+    def _reissuable(self, state: RoomState, trv_state: TrvState) -> dict[str, Intent]:
         """Map each capability the room writes besides the value to its intent."""
         intents: list[Intent] = []
         if state.source is Source.EXTERNAL:
             intents.append(SetSource("external"))
         elif state.source is Source.INTERNAL:
             intents.append(SetSource("internal"))
-        if self._cfg.window_detection != "leave":
-            intents.append(SetWindowDetection(self._cfg.window_detection == "on"))
-        if self._cfg.hysteresis is not None:
-            intents.append(SetHysteresis(self._cfg.hysteresis))
+        intents.extend(self._settings(trv_state))
         return {self._capability_of(intent): intent for intent in intents}
 
     def _resync_trv(self, state: RoomState, now: datetime, trv: str) -> _Step:

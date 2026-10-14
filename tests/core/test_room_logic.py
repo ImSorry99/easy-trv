@@ -14,7 +14,6 @@ from custom_components.easy_trv.core.model import (
     Execute,
     Failed,
     FireEvent,
-    GlobalParams,
     Intent,
     Log,
     Mismatch,
@@ -24,12 +23,15 @@ from custom_components.easy_trv.core.model import (
     RaiseIssue,
     RetryDue,
     RoomConfig,
+    RoomParams,
     RoomState,
     RoomStatus,
     ScheduleDebounce,
     ScheduleRetry,
     SensorChanged,
     SensorReading,
+    SetAdaptiveMode,
+    SetFrostTemperature,
     SetHysteresis,
     SetRoomTemperature,
     SetSource,
@@ -56,6 +58,8 @@ CFG = RoomConfig(
     ("sensor.t1", "sensor.t2"),
     "on",
     0.4,
+    "leave",
+    7.0,
 )
 T0 = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
 BOTH_AVAILABLE = {"climate.a": True, "climate.b": True}
@@ -70,7 +74,7 @@ def capability_of(intent: Intent) -> str:
 
 
 def logic() -> RoomLogic:
-    return RoomLogic(CFG, GlobalParams.defaults(), capability_of=capability_of)
+    return RoomLogic(CFG, RoomParams.defaults(), capability_of=capability_of)
 
 
 def executes(cmds: list[Command]) -> list[tuple[str, Intent]]:
@@ -119,6 +123,7 @@ def errored(trv: str) -> RoomState:
 
 
 HYSTERESIS = SetHysteresis(0.4)
+FROST = SetFrostTemperature(7.0)
 
 
 def hysteresis_errored(trv: str = "climate.a") -> RoomState:
@@ -143,13 +148,15 @@ def event_data(trv: str, ieee: str) -> dict[str, str]:
 
 def test_start_applies_settings_then_external_and_value() -> None:
     st, cmds = started()
-    assert executes(cmds)[:4] == [
+    assert executes(cmds)[:6] == [
         ("climate.a", SetWindowDetection(enabled=True)),
         ("climate.a", SetHysteresis(0.4)),
+        ("climate.a", SetFrostTemperature(7.0)),
         ("climate.b", SetWindowDetection(enabled=True)),
         ("climate.b", SetHysteresis(0.4)),
+        ("climate.b", SetFrostTemperature(7.0)),
     ]
-    assert executes(cmds)[4:] == [
+    assert executes(cmds)[6:] == [
         ("climate.a", SetSource("external")),
         ("climate.b", SetSource("external")),
         ("climate.a", SetRoomTemperature(21.3)),
@@ -197,7 +204,7 @@ def test_out_of_range_value_is_unusable() -> None:
 def test_room_without_sensors_never_touches_source() -> None:
     cfg = replace(CFG, temp_sensors=())
     st, cmds = RoomLogic(
-        cfg, GlobalParams.defaults(), capability_of=capability_of
+        cfg, RoomParams.defaults(), capability_of=capability_of
     ).handle(Start((), {}), T0, RoomState.initial(cfg))
     assert not any(
         isinstance(i, (SetSource, SetRoomTemperature)) for _, i in executes(cmds)
@@ -208,9 +215,7 @@ def test_room_without_sensors_never_touches_source() -> None:
 
 def test_settings_are_only_emitted_when_configured() -> None:
     cfg = replace(CFG, window_detection="leave", hysteresis=None)
-    _, cmds = RoomLogic(
-        cfg, GlobalParams.defaults(), capability_of=capability_of
-    ).handle(
+    _, cmds = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of).handle(
         Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )
     assert not any(
@@ -230,12 +235,14 @@ def test_settings_are_applied_only_once() -> None:
 
 def test_window_detection_off_is_sent_as_disabled() -> None:
     cfg = replace(CFG, window_detection="off", hysteresis=None, temp_sensors=())
-    _, cmds = RoomLogic(
-        cfg, GlobalParams.defaults(), capability_of=capability_of
-    ).handle(Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg))
+    _, cmds = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of).handle(
+        Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
+    )
     assert executes(cmds) == [
         ("climate.a", SetWindowDetection(enabled=False)),
+        ("climate.a", SetFrostTemperature(7.0)),
         ("climate.b", SetWindowDetection(enabled=False)),
+        ("climate.b", SetFrostTemperature(7.0)),
     ]
 
 
@@ -291,7 +298,7 @@ def test_reading_without_timestamp_is_unusable_when_timeout_is_set() -> None:
 
 
 def test_timeout_can_be_disabled() -> None:
-    params = replace(GlobalParams.defaults(), sensor_timeout=None)
+    params = replace(RoomParams.defaults(), sensor_timeout=None)
     room = RoomLogic(CFG, params, capability_of=capability_of)
     assert room.usable(SensorReading("sensor.t1", 21.3, None), T0)
     assert room.usable(reading("sensor.t1", 21.3), T0 + timedelta(days=30))
@@ -1003,6 +1010,7 @@ def test_an_exhausted_settings_write_is_reapplied_on_the_next_resync() -> None:
     assert [i for t, i in executes(cmds) if t == "climate.a"] == [
         SetWindowDetection(enabled=True),
         HYSTERESIS,
+        FROST,
         SetSource("external"),
         SetRoomTemperature(21.3),
     ]
@@ -1107,6 +1115,7 @@ SEND_AGAIN = [
     (SetSource("external"), "source"),
     (SetWindowDetection(enabled=True), "window_detection"),
     (HYSTERESIS, "hysteresis"),
+    (FROST, "frost_temperature"),
 ]
 
 
@@ -1251,7 +1260,7 @@ def test_a_failed_source_write_is_sent_again_while_the_room_is_on_its_own_sensor
 
 def test_a_failed_setting_is_sent_again_in_a_room_without_sensors() -> None:
     cfg = replace(CFG, temp_sensors=())
-    room = RoomLogic(cfg, GlobalParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
     st, _ = room.handle(Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg))
     for _ in range(3):
         st, _ = room.handle(result("climate.a", HYSTERESIS, Failed("busy")), T0, st)
@@ -1270,7 +1279,7 @@ def test_a_failed_setting_is_sent_again_in_a_room_without_sensors() -> None:
 def test_nothing_is_sent_again_for_a_capability_the_room_does_not_manage(
     cfg: RoomConfig, capability: str
 ) -> None:
-    room = RoomLogic(cfg, GlobalParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
     st, _ = room.handle(
         Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )
@@ -1311,7 +1320,7 @@ def test_attempts_are_counted_per_capability() -> None:
 
 
 def test_backoff_clamps_to_its_last_entry() -> None:
-    params = replace(GlobalParams.defaults(), max_attempts=6, backoff=(5.0, 15.0))
+    params = replace(RoomParams.defaults(), max_attempts=6, backoff=(5.0, 15.0))
     room = RoomLogic(CFG, params, capability_of=capability_of)
     st, _ = started()
     delays: list[float] = []
@@ -1708,6 +1717,7 @@ def test_regaining_availability_applies_settings_that_were_missed() -> None:
     assert executes(cmds) == [
         ("climate.a", SetWindowDetection(enabled=True)),
         ("climate.a", SetHysteresis(0.4)),
+        ("climate.a", SetFrostTemperature(7.0)),
         ("climate.a", SetSource("external")),
         ("climate.a", SetRoomTemperature(21.3)),
     ]
@@ -1734,19 +1744,22 @@ def test_regaining_availability_follows_the_current_internal_source() -> None:
     _, cmds = logic().handle(
         TrvAvailabilityChanged("climate.a", available=True), T0, st
     )
-    assert executes(cmds)[2:] == [("climate.a", SetSource("internal"))]
+    assert executes(cmds)[3:] == [("climate.a", SetSource("internal"))]
 
 
 def test_regaining_availability_in_a_room_without_sensors_only_applies_settings() -> (
     None
 ):
     cfg = replace(CFG, temp_sensors=(), window_detection="off", hysteresis=None)
-    room = RoomLogic(cfg, GlobalParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
     st, _ = room.handle(
         Start((), {"climate.a": False, "climate.b": True}), T0, RoomState.initial(cfg)
     )
     _, cmds = room.handle(TrvAvailabilityChanged("climate.a", available=True), T0, st)
-    assert executes(cmds) == [("climate.a", SetWindowDetection(enabled=False))]
+    assert executes(cmds) == [
+        ("climate.a", SetWindowDetection(enabled=False)),
+        ("climate.a", SetFrostTemperature(7.0)),
+    ]
 
 
 def test_repeated_availability_events_change_nothing() -> None:
@@ -1800,12 +1813,14 @@ def test_start_drives_a_flagged_trv_but_skips_the_flagged_capability() -> None:
     st, cmds = flagged_start()
     assert [i for t, i in executes(cmds) if t == "climate.a"] == [
         SetWindowDetection(enabled=True),
+        FROST,
         SetSource("external"),
         SetRoomTemperature(21.3),
     ]
     assert [i for t, i in executes(cmds) if t == "climate.b"] == [
         SetWindowDetection(enabled=True),
         SetHysteresis(0.4),
+        FROST,
         SetSource("external"),
         SetRoomTemperature(21.3),
     ]
@@ -1822,6 +1837,7 @@ def test_regain_resyncs_a_flagged_trv_without_the_flagged_capability() -> None:
     )
     assert executes(cmds) == [
         ("climate.a", SetWindowDetection(enabled=True)),
+        ("climate.a", SetFrostTemperature(7.0)),
         ("climate.a", SetSource("external")),
         ("climate.a", SetRoomTemperature(21.3)),
     ]
@@ -2017,7 +2033,7 @@ def test_start_marks_settings_applied_for_every_writable_trv() -> None:
 
 def test_a_trv_with_nothing_to_apply_counts_as_applied() -> None:
     cfg = replace(CFG, window_detection="leave", hysteresis=None)
-    room = RoomLogic(cfg, GlobalParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
     st, _ = room.handle(
         Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )
@@ -2098,3 +2114,203 @@ def test_result_handling_never_mutates_the_previous_state() -> None:
     assert before == snapshot
     assert dict(before.trvs["climate.a"].attempts) == attempts
     assert dict(before.trvs["climate.a"].pending_retry) == pending
+
+
+# --- Adaptive mode, hysteresis and frost temperature ----------------------
+
+ADAPTIVE_UNSUPPORTED = Unsupported("adaptive_mode", "1.4.0", "1.3.0")
+READINGS = (reading("sensor.t1", 21.3), reading("sensor.t2", 20.0))
+
+
+def adaptive_logic(cfg: RoomConfig) -> RoomLogic:
+    return RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+
+
+def start_room(cfg: RoomConfig) -> tuple[RoomLogic, RoomState, list[Command]]:
+    room = adaptive_logic(cfg)
+    st, cmds = room.handle(Start(READINGS, BOTH_AVAILABLE), T0, RoomState.initial(cfg))
+    return room, st, cmds
+
+
+def intents_for(cmds: list[Command], trv: str = "climate.a") -> list[Intent]:
+    return [i for t, i in executes(cmds) if t == trv]
+
+
+def test_start_applies_settings_in_order_with_adaptive_on() -> None:
+    cfg = replace(CFG, adaptive_mode="on", hysteresis=0.4, frost_temperature=7.0)
+    _, _, cmds = start_room(cfg)
+    assert intents_for(cmds)[:4] == [
+        SetWindowDetection(enabled=True),
+        SetAdaptiveMode(enabled=True),
+        SetFrostTemperature(7.0),
+        SetSource("external"),
+    ]
+
+
+@pytest.mark.parametrize("mode", ["off", "leave"])
+def test_hysteresis_is_written_when_adaptive_is_off_or_leave(mode: str) -> None:
+    cfg = replace(CFG, adaptive_mode=mode, hysteresis=0.4)
+    _, _, cmds = start_room(cfg)
+    expected: list[Intent] = [SetWindowDetection(enabled=True)]
+    if mode == "off":
+        expected.append(SetAdaptiveMode(enabled=False))
+    expected += [SetHysteresis(0.4), SetFrostTemperature(7.0), SetSource("external")]
+    assert intents_for(cmds)[: len(expected)] == expected
+
+
+def test_adaptive_leave_writes_nothing_for_adaptive() -> None:
+    _, _, cmds = start_room(replace(CFG, adaptive_mode="leave"))
+    assert not any(isinstance(i, SetAdaptiveMode) for _, i in executes(cmds))
+
+
+def test_frost_temperature_is_written_with_its_configured_value() -> None:
+    _, _, cmds = start_room(replace(CFG, frost_temperature=9.5))
+    assert SetFrostTemperature(9.5) in intents_for(cmds)
+    assert SetFrostTemperature(9.5) in intents_for(cmds, "climate.b")
+
+
+def test_frost_temperature_none_leaves_the_thermostat_untouched() -> None:
+    _, _, cmds = start_room(replace(CFG, frost_temperature=None))
+    assert not any(isinstance(i, SetFrostTemperature) for _, i in executes(cmds))
+
+
+def test_unsupported_adaptive_mode_does_not_block_other_settings() -> None:
+    cfg = replace(CFG, adaptive_mode="on")
+    room, st, _ = start_room(cfg)
+    st, cmds = room.handle(
+        result("climate.a", SetAdaptiveMode(enabled=True), ADAPTIVE_UNSUPPORTED),
+        T0,
+        st,
+    )
+    assert st.trvs["climate.a"].health == TrvHealth.UNSUPPORTED
+    assert [i.kind for i in of_type(cmds, RaiseIssue)] == ["firmware"]
+    # The other settings of that thermostat keep working and verify.
+    st, cmds = room.handle(result("climate.a", FROST, Ok()), T0, st)
+    assert st.trvs["climate.a"].health == TrvHealth.UNSUPPORTED
+    assert of_type(cmds, RaiseIssue) == []
+    st = with_trv(st, "climate.a", settings_applied=False)
+    _, cmds = room.handle(Start(READINGS, BOTH_AVAILABLE), T0, st)
+    sent = intents_for(cmds)
+    assert FROST in sent
+    assert SetWindowDetection(enabled=True) in sent
+    assert not any(isinstance(i, SetAdaptiveMode) for i in sent)
+
+
+def test_unsupported_adaptive_mode_triggers_the_hysteresis_write() -> None:
+    cfg = replace(CFG, adaptive_mode="on", hysteresis=0.4)
+    room, st, start_cmds = start_room(cfg)
+    assert SetHysteresis(0.4) not in intents_for(start_cmds)
+    _, cmds = room.handle(
+        result("climate.a", SetAdaptiveMode(enabled=True), ADAPTIVE_UNSUPPORTED),
+        T0,
+        st,
+    )
+    assert executes(cmds) == [("climate.a", SetHysteresis(0.4))]
+
+
+def test_unsupported_adaptive_mode_without_adaptive_on_writes_no_extra_hysteresis() -> (
+    None
+):
+    cfg = replace(CFG, adaptive_mode="off", hysteresis=0.4)
+    room, st, _ = start_room(cfg)
+    _, cmds = room.handle(
+        result("climate.a", SetAdaptiveMode(enabled=False), ADAPTIVE_UNSUPPORTED),
+        T0,
+        st,
+    )
+    assert executes(cmds) == []
+
+
+def test_unsupported_hysteresis_does_not_trigger_a_hysteresis_write() -> None:
+    cfg = replace(CFG, adaptive_mode="on", hysteresis=0.4)
+    room, st, _ = start_room(cfg)
+    _, cmds = room.handle(result("climate.a", HYSTERESIS, UNSUPPORTED), T0, st)
+    assert executes(cmds) == []
+
+
+def test_unsupported_adaptive_hysteresis_write_waits_for_an_absent_thermostat() -> None:
+    cfg = replace(CFG, adaptive_mode="on", hysteresis=0.4)
+    room, st, _ = start_room(cfg)
+    st, _ = room.handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    st, cmds = room.handle(
+        result("climate.a", SetAdaptiveMode(enabled=True), ADAPTIVE_UNSUPPORTED),
+        T0,
+        st,
+    )
+    assert executes(cmds) == []
+    assert not st.trvs["climate.a"].settings_applied
+    _, cmds = room.handle(TrvAvailabilityChanged("climate.a", available=True), T0, st)
+    assert HYSTERESIS in intents_for(cmds)
+
+
+def test_a_thermostat_without_adaptive_mode_gets_the_hysteresis_on_later_applies() -> (
+    None
+):
+    cfg = replace(CFG, adaptive_mode="on", hysteresis=0.4)
+    room = adaptive_logic(cfg)
+    initial = with_trv(
+        RoomState.initial(cfg),
+        "climate.a",
+        health=TrvHealth.UNSUPPORTED,
+        unsupported=frozenset({"adaptive_mode"}),
+    )
+    _, cmds = room.handle(Start(READINGS, BOTH_AVAILABLE), T0, initial)
+    assert intents_for(cmds)[:3] == [
+        SetWindowDetection(enabled=True),
+        SetHysteresis(0.4),
+        SetFrostTemperature(7.0),
+    ]
+    assert intents_for(cmds, "climate.b")[:3] == [
+        SetWindowDetection(enabled=True),
+        SetAdaptiveMode(enabled=True),
+        SetFrostTemperature(7.0),
+    ]
+
+
+def test_a_failed_hysteresis_is_sent_again_for_a_thermostat_without_adaptive_mode() -> (
+    None
+):
+    cfg = replace(CFG, adaptive_mode="on", hysteresis=0.4)
+    room = adaptive_logic(cfg)
+    initial = with_trv(
+        RoomState.initial(cfg),
+        "climate.a",
+        health=TrvHealth.UNSUPPORTED,
+        unsupported=frozenset({"adaptive_mode"}),
+    )
+    st, _ = room.handle(Start(READINGS, BOTH_AVAILABLE), T0, initial)
+    for _ in range(3):
+        st, _ = room.handle(result("climate.a", HYSTERESIS, Failed("busy")), T0, st)
+    _, cmds = room.handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert ("climate.a", HYSTERESIS) in executes(cmds)
+
+
+def test_a_failed_adaptive_mode_is_sent_again_at_the_refresh_interval() -> None:
+    cfg = replace(CFG, adaptive_mode="on")
+    room, st, _ = start_room(cfg)
+    for _ in range(3):
+        st, _ = room.handle(
+            result("climate.a", SetAdaptiveMode(enabled=True), Failed("busy")), T0, st
+        )
+    assert st.trvs["climate.a"].error_capability == "adaptive_mode"
+    assert not st.trvs["climate.a"].settings_applied
+    _, cmds = room.handle(Tick(), T0 + timedelta(minutes=20), st)
+    assert ("climate.a", SetAdaptiveMode(enabled=True)) in executes(cmds)
+
+
+def test_exhausted_frost_write_is_reapplied_on_resync() -> None:
+    st = errored_on(FROST)
+    assert not st.trvs["climate.a"].settings_applied
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    _, cmds = logic().handle(
+        TrvAvailabilityChanged("climate.a", available=True), T0, st
+    )
+    assert FROST in intents_for(cmds)
+
+
+def test_a_pending_frost_retry_is_reapplied_when_the_thermostat_is_away() -> None:
+    st, _ = started()
+    st, _ = logic().handle(result("climate.a", FROST, Failed("busy")), T0, st)
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    st, _ = logic().handle(RetryDue("climate.a", "frost_temperature"), T0, st)
+    assert not st.trvs["climate.a"].settings_applied

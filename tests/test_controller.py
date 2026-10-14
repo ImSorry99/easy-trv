@@ -21,8 +21,8 @@ from custom_components.easy_trv.const import (
 )
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.core.model import (
-    GlobalParams,
     RoomConfig,
+    RoomParams,
     RoomStatus,
     TrvConfig,
 )
@@ -36,7 +36,7 @@ HYSTERESIS = 0x6011
 SOURCE = 0x600E
 VALUE = 0x600D
 CELSIUS = {"unit_of_measurement": "°C"}
-PARAMS = replace(GlobalParams.defaults(), verify_delay=0.0)
+PARAMS = replace(RoomParams.defaults(), verify_delay=0.0)
 # Enough loop iterations for the worker to run a queue of fake-gateway
 # operations (each one yields about once) to completion.
 SETTLE_ITERATIONS = 50

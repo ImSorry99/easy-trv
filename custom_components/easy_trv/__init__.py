@@ -28,7 +28,8 @@ from custom_components.easy_trv.const import (
     SUBENTRY_ROOM,
 )
 from custom_components.easy_trv.controller import RoomController
-from custom_components.easy_trv.core.model import GlobalParams, RoomConfig, TrvConfig
+from custom_components.easy_trv.core.model import RoomConfig, RoomParams, TrvConfig
+from custom_components.easy_trv.core.settings import resolve_settings
 from custom_components.easy_trv.profiles.loader import LoadResult, async_load_profiles
 
 if TYPE_CHECKING:
@@ -179,7 +180,7 @@ def _describe_room_error(err: Exception) -> str:
 def _build_room(
     hass: HomeAssistant,
     subentry: ConfigSubentry,
-    params: GlobalParams,
+    params: RoomParams,
     gateway: TrvGateway,
     profiles: Mapping[str, Profile],
 ) -> tuple[RoomController, Profile]:
@@ -212,7 +213,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
         hass, keep={Path(error.file).stem for error in profiles.errors}
     )
 
-    params = GlobalParams.from_options(entry.options)
+    params = RoomParams.from_settings(resolve_settings(entry.options, {}))
     rooms: dict[str, RoomController] = {}
     summaries: dict[str, str] = {}
     invalid: set[str] = set()

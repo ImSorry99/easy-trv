@@ -5,9 +5,12 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Final, Literal
 
+from custom_components.easy_trv.core.settings import resolve_settings
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from custom_components.easy_trv.core.settings import RoomSettings
     from custom_components.easy_trv.core.values import Version
 
 # --- Intents -------------------------------------------------------------
@@ -41,14 +44,45 @@ class SetHysteresis:
     kelvin: float
 
 
-Intent = SetRoomTemperature | SetSource | SetWindowDetection | SetHysteresis
+@dataclass(frozen=True)
+class SetAdaptiveMode:
+    """Enable or disable the thermostat's adaptive (learning) regulation."""
+
+    enabled: bool
+
+
+@dataclass(frozen=True)
+class SetFrostTemperature:
+    """Set the temperature the thermostat holds as frost protection."""
+
+    celsius: float
+
+
+Intent = (
+    SetRoomTemperature
+    | SetSource
+    | SetWindowDetection
+    | SetAdaptiveMode
+    | SetHysteresis
+    | SetFrostTemperature
+)
 
 INTENT_NAMES: dict[type, str] = {
     SetRoomTemperature: "set_room_temperature",
     SetSource: "set_source",
     SetWindowDetection: "set_window_detection",
+    SetAdaptiveMode: "set_adaptive_mode",
     SetHysteresis: "set_hysteresis",
+    SetFrostTemperature: "set_frost_temperature",
 }
+
+# The settings a room applies to a thermostat, in the order they are written.
+SETTING_INTENTS: Final = (
+    SetWindowDetection,
+    SetAdaptiveMode,
+    SetHysteresis,
+    SetFrostTemperature,
+)
 
 # --- Enums ---------------------------------------------------------------
 
@@ -82,8 +116,8 @@ class RoomStatus(StrEnum):
 
 
 @dataclass(frozen=True)
-class GlobalParams:
-    """Integration-wide tunables shared by all rooms."""
+class RoomParams:
+    """Tunables of one room: timing, retries and sensor handling."""
 
     refresh: timedelta
     verify_delay: float
@@ -94,34 +128,24 @@ class GlobalParams:
     backoff: tuple[float, ...] = (5.0, 15.0, 45.0)
 
     @classmethod
-    def defaults(cls) -> GlobalParams:
-        """Return the default tunables (mirrors the ``DEFAULT_*`` constants)."""
+    def from_settings(cls, settings: RoomSettings) -> RoomParams:
+        """Build the tunables from the resolved settings of a room.
+
+        A ``sensor_timeout_minutes`` of ``0`` switches the timeout off.
+        """
+        timeout = settings.sensor_timeout_minutes
         return cls(
-            refresh=timedelta(minutes=20),
-            verify_delay=10.0,
-            max_attempts=3,
-            min_delta=0.1,
-            sensor_timeout=timedelta(minutes=120),
+            refresh=timedelta(minutes=settings.refresh_minutes),
+            verify_delay=float(settings.verify_delay_seconds),
+            max_attempts=settings.max_attempts,
+            min_delta=settings.min_delta_kelvin,
+            sensor_timeout=timedelta(minutes=timeout) if timeout else None,
         )
 
     @classmethod
-    def from_options(cls, options: Mapping[str, Any]) -> GlobalParams:
-        """Build the tunables from the config entry options.
-
-        A missing option falls back to its default and a ``sensor_timeout_minutes``
-        of ``0`` switches the timeout off. The literals mirror the ``DEFAULT_*``
-        constants, which core cannot import.
-        """
-        sensor_timeout = options.get("sensor_timeout_minutes", 120)
-        return cls(
-            refresh=timedelta(minutes=options.get("refresh_minutes", 20)),
-            verify_delay=float(options.get("verify_delay_seconds", 10)),
-            max_attempts=int(options.get("max_attempts", 3)),
-            min_delta=float(options.get("min_delta_kelvin", 0.1)),
-            sensor_timeout=(
-                timedelta(minutes=sensor_timeout) if sensor_timeout else None
-            ),
-        )
+    def defaults(cls) -> RoomParams:
+        """Return the tunables of a room that sets nothing itself."""
+        return cls.from_settings(resolve_settings({}, {}))
 
 
 @dataclass(frozen=True)
@@ -135,7 +159,11 @@ class TrvConfig:
 
 @dataclass(frozen=True)
 class RoomConfig:
-    """Static configuration of a room."""
+    """Static configuration of a room.
+
+    ``hysteresis`` and ``frost_temperature`` are ``None`` when the thermostat's
+    own value stays untouched.
+    """
 
     room_id: str
     name: str
@@ -143,6 +171,8 @@ class RoomConfig:
     temp_sensors: tuple[str, ...]
     window_detection: Literal["on", "off", "leave"]
     hysteresis: float | None
+    adaptive_mode: Literal["on", "off", "leave"] = "leave"
+    frost_temperature: float | None = None
 
 
 # --- State ---------------------------------------------------------------

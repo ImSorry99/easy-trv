@@ -13,6 +13,8 @@ from typing import Any
 from custom_components.easy_trv.core.model import (
     INTENT_NAMES,
     Intent,
+    SetAdaptiveMode,
+    SetFrostTemperature,
     SetHysteresis,
     SetRoomTemperature,
     SetSource,
@@ -114,6 +116,10 @@ def _intent_value(intent: Intent) -> _Value:
         case SetRoomTemperature(celsius=value):
             return value
         case SetHysteresis(kelvin=value):
+            return value
+        case SetFrostTemperature(celsius=value):
+            return value
+        case SetAdaptiveMode(enabled=value):
             return value
         case SetWindowDetection(enabled=value):
             return value

@@ -22,7 +22,8 @@ from custom_components.easy_trv.config_flow import (
     validate_room,
 )
 from custom_components.easy_trv.const import DOMAIN, SUBENTRY_ROOM
-from custom_components.easy_trv.core.model import GlobalParams
+from custom_components.easy_trv.core.model import RoomParams
+from custom_components.easy_trv.core.settings import resolve_settings
 from custom_components.easy_trv.profiles.loader import BUILTIN_DIR, async_load_profiles
 from tests import helpers_entry
 from tests.helpers_entry import (
@@ -813,22 +814,25 @@ async def test_reconfigure_rejects_errors_and_keeps_the_room(hass) -> None:
 # --- Options flow -----------------------------------------------------------
 
 
-def test_from_options_reads_the_keys_the_options_flow_writes() -> None:
-    params = GlobalParams.from_options(
-        {
-            const.CONF_REFRESH_MINUTES: 30,
-            const.CONF_VERIFY_DELAY: 5,
-            const.CONF_MAX_ATTEMPTS: 4,
-            const.CONF_MIN_DELTA: 0.3,
-            const.CONF_SENSOR_TIMEOUT: 45,
-        }
+def test_params_read_the_keys_the_options_flow_writes() -> None:
+    params = RoomParams.from_settings(
+        resolve_settings(
+            {
+                const.CONF_REFRESH_MINUTES: 30,
+                const.CONF_VERIFY_DELAY: 5,
+                const.CONF_MAX_ATTEMPTS: 4,
+                const.CONF_MIN_DELTA: 0.3,
+                const.CONF_SENSOR_TIMEOUT: 45,
+            },
+            {},
+        )
     )
     assert params.refresh == timedelta(minutes=30)
     assert params.verify_delay == 5.0
     assert params.max_attempts == 4
     assert params.min_delta == 0.3
     assert params.sensor_timeout == timedelta(minutes=45)
-    assert GlobalParams.from_options({}) == GlobalParams.defaults()
+    assert RoomParams.from_settings(resolve_settings({}, {})) == RoomParams.defaults()
 
 
 async def test_options_form_defaults_come_from_options_then_constants(
@@ -910,7 +914,8 @@ async def test_options_flow_sets_values(hass, entry) -> None:
             "sensor_timeout_minutes",
         )
     )
-    assert GlobalParams.from_options(entry.options).sensor_timeout is None
+    params = RoomParams.from_settings(resolve_settings(entry.options, {}))
+    assert params.sensor_timeout is None
 
 
 @pytest.mark.parametrize(

@@ -83,10 +83,10 @@ if TYPE_CHECKING:
     from custom_components.easy_trv.adapters.zha_gateway import DeviceRef, TrvGateway
     from custom_components.easy_trv.core.model import Event as LogicEvent
     from custom_components.easy_trv.core.model import (
-        GlobalParams,
         Intent,
         Outcome,
         RoomConfig,
+        RoomParams,
     )
     from custom_components.easy_trv.core.values import Version
     from custom_components.easy_trv.profiles.engine import Operation, Profile
@@ -188,7 +188,7 @@ class RoomController:
         self,
         hass: HomeAssistant,
         config: RoomConfig,
-        params: GlobalParams,
+        params: RoomParams,
         profile: Profile,
         gateway: TrvGateway,
         device_refs: Mapping[str, DeviceRef],
