@@ -146,6 +146,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "1_0",
     }
     assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
+    assert set(data["selector"]["sensor_timeout"]["options"]) == {"off"}
     # Existing sections of the earlier tasks stay in place.
     assert set(data["entity"]["sensor"]["room_status"]["state"]) == {
         "ok",

@@ -741,11 +741,12 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
     # Every select starts at "global"; the numbers start empty (= global).
     assert defaults(result) == ALL_GLOBAL
     assert suggested_values(result) == {}
+    # Selects read as the labels of their selectors, numbers carry their unit.
     assert result["description_placeholders"] == {
-        "global_profile": "auto",
-        "global_window_detection": "on",
+        "global_profile": "Auto",
+        "global_window_detection": "Turn detection on",
         "global_hysteresis": "0.4 K",
-        "global_adaptive_mode": "on",
+        "global_adaptive_mode": "Turn adaptive mode on",
         "global_frost_temperature": "7.0 °C",
         "global_refresh_minutes": "20 min",
         "global_verify_delay_seconds": "10 s",
@@ -772,11 +773,31 @@ async def test_room_settings_placeholders_follow_the_global_options(hass) -> Non
 
     placeholders = result["description_placeholders"]
     assert placeholders["global_hysteresis"] == "0.6 K"
-    assert placeholders["global_adaptive_mode"] == "off"
+    assert placeholders["global_adaptive_mode"] == "Turn adaptive mode off"
     assert placeholders["global_frost_temperature"] == "9.5 °C"
     assert placeholders["global_refresh_minutes"] == "45 min"
-    assert placeholders["global_sensor_timeout_minutes"] == "0 min"
+    # A timeout of 0 means "off".
+    assert placeholders["global_sensor_timeout_minutes"] == "Off"
     assert placeholders["global_max_attempts"] == "3"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_placeholders_are_german_in_a_german_instance(
+    hass,
+) -> None:
+    hass.config.language = "de"
+    entry = make_entry(hass, [], {"sensor_timeout_minutes": 0})
+    result = await open_settings_step(hass, entry)
+
+    placeholders = result["description_placeholders"]
+    assert placeholders["global_hysteresis"] == "0,4 K"
+    assert placeholders["global_window_detection"] == "Erkennung einschalten"
+    assert placeholders["global_adaptive_mode"] == "Adaptiven Modus einschalten"
+    assert placeholders["global_profile"] == "Auto"
+    assert placeholders["global_frost_temperature"] == "7,0 °C"
+    assert placeholders["global_min_delta_kelvin"] == "0,1 K"
+    assert placeholders["global_refresh_minutes"] == "20 min"
+    assert placeholders["global_sensor_timeout_minutes"] == "Aus"
 
 
 @pytest.mark.usefixtures("area_with_trvs")
@@ -1187,24 +1208,24 @@ async def test_options_form_is_grouped_in_two_sections(hass, entry) -> None:
     ]
 
 
-async def test_options_form_defaults_come_from_options_then_constants(
-    hass, entry
-) -> None:
+async def test_options_form_suggests_only_saved_numbers(hass, entry) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert suggested_values(result, "writes") == {
-        "refresh_minutes": const.DEFAULT_REFRESH_MINUTES,
-        "verify_delay_seconds": const.DEFAULT_VERIFY_DELAY,
-        "max_attempts": const.DEFAULT_MAX_ATTEMPTS,
-        "min_delta_kelvin": const.DEFAULT_MIN_DELTA,
-        "sensor_timeout_minutes": const.DEFAULT_SENSOR_TIMEOUT,
-    }
+    # Nothing saved: the numbers stay empty, the selects start at the defaults.
+    assert suggested_values(result, "writes") == {}
+    assert suggested_values(result, "thermostat") == {}
     assert defaults(result, "thermostat") == {
         "window_detection": const.DEFAULT_WINDOW_DETECTION,
         "hysteresis": const.DEFAULT_HYSTERESIS,
         "adaptive_mode": const.DEFAULT_ADAPTIVE_MODE,
     }
-    assert suggested_values(result, "thermostat") == {
-        "frost_temperature": const.DEFAULT_FROST_TEMPERATURE
+    # Each number says what empty means.
+    assert result["description_placeholders"] == {
+        "default_refresh_minutes": "20 min",
+        "default_verify_delay_seconds": "10 s",
+        "default_max_attempts": "3",
+        "default_min_delta_kelvin": "0.1 K",
+        "default_sensor_timeout_minutes": "120 min",
+        "default_frost_temperature": "7.0 °C",
     }
 
     saved = make_entry(
@@ -1213,12 +1234,33 @@ async def test_options_form_defaults_come_from_options_then_constants(
         {"refresh_minutes": 45, "hysteresis": "0_8", "frost_temperature": 9.0},
     )
     result = await hass.config_entries.options.async_init(saved.entry_id)
-    assert suggested_values(result, "writes")["refresh_minutes"] == 45
-    assert suggested_values(result, "writes")["max_attempts"] == (
-        const.DEFAULT_MAX_ATTEMPTS
-    )
+    assert suggested_values(result, "writes") == {"refresh_minutes": 45}
     assert defaults(result, "thermostat")["hysteresis"] == "0_8"
-    assert suggested_values(result, "thermostat")["frost_temperature"] == 9.0
+    assert suggested_values(result, "thermostat") == {"frost_temperature": 9.0}
+
+
+async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> None:
+    submitted = options_input()
+    for key in WRITES:
+        del submitted["writes"][key]
+    del submitted["writes"]["sensor_timeout_minutes"]
+    del submitted["thermostat"]["frost_temperature"]
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], submitted
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert set(entry.options) == {"window_detection", "hysteresis", "adaptive_mode"}
+
+    # Opening and saving the form again does not turn the defaults into options.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert suggested_values(result, "writes") == {}
+    assert suggested_values(result, "thermostat") == {}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], submitted
+    )
+    assert set(entry.options) == {"window_detection", "hysteresis", "adaptive_mode"}
 
 
 async def test_options_form_ranges_units_and_select_options(hass, entry) -> None:

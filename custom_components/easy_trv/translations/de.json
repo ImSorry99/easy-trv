@@ -165,11 +165,11 @@
               "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)"
             },
             "data_description": {
-              "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 1 bis 120 Minuten.",
-              "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden.",
-              "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10.",
-              "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K.",
-              "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten."
+              "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 1 bis 120 Minuten. Leer = {default_refresh_minutes}.",
+              "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden. Leer = {default_verify_delay_seconds}.",
+              "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10. Leer = {default_max_attempts}.",
+              "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Leer = {default_min_delta_kelvin}.",
+              "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten. Leer = {default_sensor_timeout_minutes}."
             }
           },
           "thermostat": {
@@ -185,7 +185,7 @@
               "window_detection": "Schaltet die eigene Fenster-offen-Erkennung des Thermostats ein oder aus. Sie löst aus, wenn die Temperatur innerhalb von 4,5 Minuten um etwa 1,5 K fällt, und beendet die Heizpause spätestens nach 30 Minuten. Mit Fensterkontakten in Home Assistant hat sie nichts zu tun.",
               "hysteresis": "Temperatur-Hysterese der Thermostate. Sie wird ignoriert, solange der adaptive Modus an ist.",
               "adaptive_mode": "Das Thermostat stellt sich selbst auf den Raum ein. Solange er an ist, wird die Hysterese ignoriert. Braucht Firmware 1.4.4 oder neuer.",
-              "frost_temperature": "Die Temperatur, die das Thermostat als Frostschutz hält. 4,0 bis 16,0 °C. Leer = 7,0 °C."
+              "frost_temperature": "Die Temperatur, die das Thermostat als Frostschutz hält. 4,0 bis 16,0 °C. Leer = {default_frost_temperature}."
             }
           }
         }
@@ -226,6 +226,11 @@
         "on": "Adaptiven Modus einschalten",
         "off": "Adaptiven Modus ausschalten",
         "leave": "Im Thermostat unverändert lassen"
+      }
+    },
+    "sensor_timeout": {
+      "options": {
+        "off": "Aus"
       }
     }
   }

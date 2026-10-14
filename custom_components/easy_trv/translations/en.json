@@ -165,11 +165,11 @@
               "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)"
             },
             "data_description": {
-              "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes.",
-              "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds.",
-              "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10.",
-              "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K.",
-              "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes."
+              "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Empty = {default_refresh_minutes}.",
+              "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds. Empty = {default_verify_delay_seconds}.",
+              "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Empty = {default_max_attempts}.",
+              "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Empty = {default_min_delta_kelvin}.",
+              "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes. Empty = {default_sensor_timeout_minutes}."
             }
           },
           "thermostat": {
@@ -185,7 +185,7 @@
               "window_detection": "Switches the thermostat's own open-window detection on or off. It triggers when the temperature falls by about 1.5 K within 4.5 minutes and ends the heating pause after 30 minutes at the latest. It has nothing to do with window contacts in Home Assistant.",
               "hysteresis": "Temperature hysteresis of the thermostats. It is ignored while the adaptive mode is on.",
               "adaptive_mode": "The thermostat adapts to the room itself. While it is on, the hysteresis is ignored. Needs firmware 1.4.4 or newer.",
-              "frost_temperature": "The temperature the thermostat keeps as frost protection. 4.0 to 16.0 °C. Empty = 7.0 °C."
+              "frost_temperature": "The temperature the thermostat keeps as frost protection. 4.0 to 16.0 °C. Empty = {default_frost_temperature}."
             }
           }
         }
@@ -226,6 +226,11 @@
         "on": "Turn adaptive mode on",
         "off": "Turn adaptive mode off",
         "leave": "Leave as set in the thermostat"
+      }
+    },
+    "sensor_timeout": {
+      "options": {
+        "off": "Off"
       }
     }
   }

@@ -33,6 +33,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
     TextSelector,
 )
+from homeassistant.helpers.translation import async_get_translations
 
 from custom_components.easy_trv.adapters.zha_gateway import (
     ZHA_DOMAIN,
@@ -357,20 +358,52 @@ def _timeout_error(values: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
-def _global_placeholders(options: Mapping[str, Any]) -> dict[str, str]:
-    """Return the current global value of every setting as plain text."""
-    settings = resolve_settings(options, {})
-    texts: dict[str, str] = {
-        CONF_PROFILE: settings.profile,
-        CONF_WINDOW_DETECTION: settings.window_detection,
-        CONF_ADAPTIVE_MODE: settings.adaptive_mode,
-        CONF_HYSTERESIS: f"{settings.hysteresis:.1f} {UnitOfTemperature.KELVIN}",
+async def async_option_labels(hass: HomeAssistant, key: str) -> dict[str, str]:
+    """Return the translated option labels of the selector ``key``, by option value."""
+    translations = await async_get_translations(
+        hass, hass.config.language, "selector", {DOMAIN}
+    )
+    prefix = f"component.{DOMAIN}.selector.{key}.options."
+    return {
+        name.removeprefix(prefix): text
+        for name, text in translations.items()
+        if name.startswith(prefix)
     }
-    for key, spec in _NUMBERS.items():
-        value = getattr(settings, key)
-        text = f"{value:.1f}" if isinstance(value, float) else str(value)
-        texts[key] = text if spec.unit is None else f"{text} {spec.unit}"
-    return {f"global_{key}": text for key, text in texts.items()}
+
+
+async def _setting_texts(
+    hass: HomeAssistant, values: Mapping[str, Any]
+) -> dict[str, str]:
+    """Render setting values as plain text in the language of Home Assistant.
+
+    Selects use the labels of their selector, numbers get their unit and, in
+    German, a decimal comma. A sensor timeout of 0 reads as "off".
+    """
+    comma = hass.config.language.startswith("de")
+    texts: dict[str, str] = {}
+    for key, value in values.items():
+        if key in _NUMBERS and not (key == CONF_SENSOR_TIMEOUT and value == 0):
+            text = f"{value:.1f}" if isinstance(value, float) else str(value)
+            if comma:
+                text = text.replace(".", ",")
+            unit = _NUMBERS[key].unit
+            texts[key] = text if unit is None else f"{text} {unit}"
+        else:
+            name = "sensor_timeout" if key == CONF_SENSOR_TIMEOUT else key
+            option = "off" if key == CONF_SENSOR_TIMEOUT else str(value)
+            texts[key] = (await async_option_labels(hass, name)).get(option, option)
+    return texts
+
+
+def _effective_settings(
+    options: Mapping[str, Any], keys: Sequence[str]
+) -> dict[str, Any]:
+    """Return the saved global value of each setting, else its built-in default."""
+    values = {**DEFAULTS, **overrides(options)}
+    return {
+        key: _stored_number(key, values[key]) if key in _NUMBERS else values[key]
+        for key in keys
+    }
 
 
 def _room_settings_schema(profiles: Mapping[str, Profile]) -> vol.Schema:
@@ -601,6 +634,9 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                     title=self._name,
                     unique_id=self._name.casefold(),
                 )
+        global_texts = await _setting_texts(
+            self.hass, _effective_settings(entry.options, _ROOM_SETTING_KEYS)
+        )
         suggested = user_input
         if user_input is None and subentry is not None:
             suggested = dict(subentry.data)
@@ -610,7 +646,9 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                 _room_settings_schema(profiles), suggested
             ),
             errors=errors,
-            description_placeholders=_global_placeholders(entry.options),
+            description_placeholders={
+                f"global_{key}": text for key, text in global_texts.items()
+            },
         )
 
     def _profile_errors(
@@ -668,7 +706,8 @@ def _options_schema(current: Mapping[str, Any]) -> vol.Schema:
     """Return the form of the global options in two sections.
 
     The selects default to what is saved (else the built-in default). The
-    numbers have no default: an empty number is not stored.
+    numbers have neither a default nor a suggestion unless they are saved: an
+    empty number is not stored, and the built-in default applies.
     """
     effective = {**DEFAULTS, **overrides(current)}
 
@@ -689,10 +728,10 @@ def _options_schema(current: Mapping[str, Any]) -> vol.Schema:
 
 
 def _options_suggestions(current: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """Return the numbers the options form shows: saved, else built-in default."""
-    effective = {**DEFAULTS, **overrides(current)}
+    """Return the numbers the options form shows: only those that are saved."""
+    saved = overrides(current)
     return {
-        name: {key: effective[key] for key in keys if key in _NUMBERS}
+        name: {key: saved[key] for key in keys if key in _NUMBERS and key in saved}
         for name, keys in _SECTIONS.items()
     }
 
@@ -719,6 +758,10 @@ class EasyTrvOptionsFlow(OptionsFlow):
             errors = _timeout_error(options)
             if not errors:
                 return self.async_create_entry(data=options)
+        # Each number says what an empty field means: the built-in default.
+        default_texts = await _setting_texts(
+            self.hass, _effective_settings({}, list(_NUMBERS))
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
@@ -728,4 +771,7 @@ class EasyTrvOptionsFlow(OptionsFlow):
                 else user_input,
             ),
             errors=errors,
+            description_placeholders={
+                f"default_{key}": text for key, text in default_texts.items()
+            },
         )
