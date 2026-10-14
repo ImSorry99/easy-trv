@@ -21,6 +21,7 @@ ROOM_ERRORS = {
     "trv_in_other_room",
     "name_exists",
     "name_required",
+    "timeout_range",
 }
 
 
@@ -85,40 +86,66 @@ def test_room_subentry_has_no_title_string(path: Path) -> None:
 def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     data = load(path)
     room = data["config_subentries"]["room"]
-    entity_fields = {
-        "trvs",
-        "temp_sensors",
-        "humidity_sensors",
+    settings_fields = {
         "profile",
         "window_detection",
         "hysteresis",
-    }
-    assert set(room["step"]["entities"]["data"]) == entity_fields
-    assert set(room["step"]["reconfigure"]["data"]) == {"name", *entity_fields}
-    assert set(room["step"]["from_area"]["data"]) == {"area_id"}
-    assert set(room["step"]["custom"]["data"]) == {"name"}
-    assert set(room["step"]["user"]["menu_options"]) == {"from_area", "custom"}
-    assert set(room["initiate_flow"]) == {"user", "reconfigure"}
-    assert set(data["options"]["step"]["init"]["data"]) == {
+        "adaptive_mode",
+        "frost_temperature",
         "refresh_minutes",
         "verify_delay_seconds",
         "max_attempts",
         "min_delta_kelvin",
         "sensor_timeout_minutes",
     }
+    entity_fields = {"trvs", "temp_sensors", "humidity_sensors"}
+    assert set(room["step"]["entities"]["data"]) == entity_fields
+    assert set(room["step"]["reconfigure"]["data"]) == {"name", *entity_fields}
+    assert set(room["step"]["settings"]["data"]) == settings_fields
+    assert set(room["step"]["settings"]["data_description"]) == settings_fields
+    assert set(room["step"]["from_area"]["data"]) == {"area_id"}
+    assert set(room["step"]["custom"]["data"]) == {"name"}
+    assert set(room["step"]["user"]["menu_options"]) == {"from_area", "custom"}
+    assert set(room["initiate_flow"]) == {"user", "reconfigure"}
+    options = data["options"]["step"]["init"]["sections"]
+    assert set(options) == {"writes", "thermostat"}
+    for section in options.values():
+        assert set(section) == {"name", "description", "data", "data_description"}
+        assert set(section["data"]) == set(section["data_description"])
+    assert set(options["writes"]["data"]) == {
+        "refresh_minutes",
+        "verify_delay_seconds",
+        "max_attempts",
+        "min_delta_kelvin",
+        "sensor_timeout_minutes",
+    }
+    assert set(options["thermostat"]["data"]) == {
+        "window_detection",
+        "hysteresis",
+        "adaptive_mode",
+        "frost_temperature",
+    }
     assert set(data["selector"]["window_detection"]["options"]) == {
+        "global",
+        "on",
+        "off",
+        "leave",
+    }
+    assert set(data["selector"]["adaptive_mode"]["options"]) == {
+        "global",
         "on",
         "off",
         "leave",
     }
     assert set(data["selector"]["hysteresis"]["options"]) == {
-        "leave",
+        "global",
         "0_2",
         "0_4",
         "0_6",
         "0_8",
         "1_0",
     }
+    assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
     # Existing sections of the earlier tasks stay in place.
     assert set(data["entity"]["sensor"]["room_status"]["state"]) == {
         "ok",
@@ -144,7 +171,7 @@ def test_translation_keys_pass_the_hassfest_rule(path: Path) -> None:
     for platform in data["entity"].values():
         for entity in platform.values():
             keys.extend(entity.get("state", {}))
-    assert {"leave", "0_2", "1_0", "ok", "trv_unreachable"} <= set(keys)
+    assert {"global", "leave", "0_2", "1_0", "ok", "trv_unreachable"} <= set(keys)
     assert [key for key in keys if not TRANSLATION_KEY.match(key)] == []
 
 

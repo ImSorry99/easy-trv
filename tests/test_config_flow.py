@@ -188,17 +188,34 @@ async def open_entities_step(hass, entry, name="Bedroom"):
     return result
 
 
+async def open_settings_step(hass, entry, name="Bedroom", **entities):
+    """Walk the custom path through the entities form up to the settings form."""
+    result = await open_entities_step(hass, entry, name)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(**{"trvs": ["climate.a"], **entities})
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "settings"
+    return result
+
+
 def entities_input(**overrides: Any) -> dict[str, Any]:
     data = {
         "trvs": ["climate.a", "climate.b"],
         "temp_sensors": ["sensor.t1"],
         "humidity_sensors": [],
-        "profile": "auto",
-        "window_detection": "on",
-        "hysteresis": "leave",
     }
     data.update(overrides)
     return data
+
+
+# What a room stores when nothing is overridden: the selects say "global".
+ALL_GLOBAL = {
+    "profile": "global",
+    "window_detection": "global",
+    "hysteresis": "global",
+    "adaptive_mode": "global",
+}
 
 
 def fields(result) -> dict[str, Any]:
@@ -206,20 +223,31 @@ def fields(result) -> dict[str, Any]:
     return {str(key): value for key, value in result["data_schema"].schema.items()}
 
 
-def suggested_values(result) -> dict[str, Any]:
+def section_fields(result, name) -> dict[str, Any]:
+    """Map the field names inside the section ``name`` to their selectors."""
+    group = fields(result)[name]
+    return {str(key): value for key, value in group.schema.schema.items()}
+
+
+def _schema(result, group):
+    schema = result["data_schema"].schema
+    return schema if group is None else schema[group].schema.schema
+
+
+def suggested_values(result, group=None) -> dict[str, Any]:
     return {
         str(key): key.description["suggested_value"]
-        for key in result["data_schema"].schema
+        for key in _schema(result, group)
         if isinstance(key, vol.Marker)
         and key.description
         and "suggested_value" in key.description
     }
 
 
-def defaults(result) -> dict[str, Any]:
+def defaults(result, group=None) -> dict[str, Any]:
     return {
         str(key): key.default()
-        for key in result["data_schema"].schema
+        for key in _schema(result, group)
         if isinstance(key, vol.Marker) and key.default is not vol.UNDEFINED
     }
 
@@ -299,10 +327,14 @@ async def test_room_from_area_prefills_and_creates(hass, entry, area_with_trvs) 
             "trvs": ["climate.a", "climate.b"],
             "temp_sensors": ["sensor.t1"],
             "humidity_sensors": [],
-            "profile": "auto",
-            "window_detection": "on",
-            "hysteresis": "0_4",
         },
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "settings"
+    assert not entry.subentries
+
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"hysteresis": "0_4"}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Living"
@@ -311,16 +343,13 @@ async def test_room_from_area_prefills_and_creates(hass, entry, area_with_trvs) 
     assert sub.subentry_type == SUBENTRY_ROOM
     assert sub.title == "Living"
     assert sub.unique_id == "living"
-    assert sub.data["trvs"] == ["climate.a", "climate.b"]
-    assert sub.data["hysteresis"] == "0_4"
     assert dict(sub.data) == {
         "name": "Living",
         "area_id": area_with_trvs.id,
         "trvs": ["climate.a", "climate.b"],
         "temp_sensors": ["sensor.t1"],
         "humidity_sensors": [],
-        "profile": "auto",
-        "window_detection": "on",
+        **ALL_GLOBAL,
         "hysteresis": "0_4",
     }
 
@@ -342,6 +371,8 @@ async def test_custom_room_is_stored_with_defaults(hass, entry) -> None:
     result = await room_flows(hass).async_configure(
         result["flow_id"], {"trvs": ["climate.a"]}
     )
+    assert result["step_id"] == "settings"
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Bedroom"
     sub = next(iter(entry.subentries.values()))
@@ -352,9 +383,7 @@ async def test_custom_room_is_stored_with_defaults(hass, entry) -> None:
         "trvs": ["climate.a"],
         "temp_sensors": [],
         "humidity_sensors": [],
-        "profile": "auto",
-        "window_detection": "on",
-        "hysteresis": "leave",
+        **ALL_GLOBAL,
     }
 
 
@@ -363,14 +392,7 @@ async def test_entities_form_fields_and_defaults(hass, entry) -> None:
     result = await open_entities_step(hass, entry)
 
     selectors = fields(result)
-    assert list(selectors) == [
-        "trvs",
-        "temp_sensors",
-        "humidity_sensors",
-        "profile",
-        "window_detection",
-        "hysteresis",
-    ]
+    assert list(selectors) == ["trvs", "temp_sensors", "humidity_sensors"]
     assert selectors["trvs"].config["multiple"] is True
     assert selectors["trvs"].config["filter"] == [
         {"integration": "zha", "domain": ["climate"]}
@@ -383,29 +405,10 @@ async def test_entities_form_fields_and_defaults(hass, entry) -> None:
     assert selectors["humidity_sensors"].config["filter"] == [
         {"domain": ["sensor"], "device_class": ["humidity"]}
     ]
-    assert option_values(selectors["window_detection"]) == ["on", "off", "leave"]
-    assert selectors["window_detection"].config["translation_key"] == (
-        "window_detection"
-    )
-    assert option_values(selectors["hysteresis"]) == [
-        "leave",
-        "0_2",
-        "0_4",
-        "0_6",
-        "0_8",
-        "1_0",
-    ]
-    assert selectors["hysteresis"].config["translation_key"] == "hysteresis"
-    assert selectors["profile"].config["mode"] == "dropdown"
-    assert defaults(result) == {
-        "humidity_sensors": [],
-        "temp_sensors": [],
-        "profile": "auto",
-        "window_detection": "on",
-        "hysteresis": "leave",
-    }
+    assert defaults(result) == {"humidity_sensors": [], "temp_sensors": []}
 
 
+@pytest.mark.usefixtures("area_with_trvs")
 async def test_profile_options_list_built_in_and_user_profiles(
     hass, tmp_path, entry
 ) -> None:
@@ -413,20 +416,24 @@ async def test_profile_options_list_built_in_and_user_profiles(
     text = text.replace("name: Sonoff TRVZB (native)", "name: My ZBT", 1)
     use_config_dir(hass, tmp_path).joinpath("zbt.yaml").write_text(text)
 
-    result = await open_entities_step(hass, entry)
+    result = await open_settings_step(hass, entry)
 
     profile = fields(result)["profile"]
     assert profile.config["options"] == [
+        {"value": "global", "label": "Global"},
         {"value": "auto", "label": "Auto"},
         {"value": "sonoff_trvzb_native", "label": "Sonoff TRVZB (native)"},
         {"value": "user_zbt", "label": "My ZBT"},
     ]
+    assert profile.config["translation_key"] == "profile"
 
 
 @pytest.mark.usefixtures("gateway")
 async def test_loaded_entry_profiles_come_from_runtime_data(
-    hass, entry_with_room
+    hass, device_owner, entry_with_room
 ) -> None:
+    free = add_device(hass, device_owner, ("zha", "00:44"))
+    add_entity(hass, "climate.c", "zha", device=free)
     await start(hass, entry_with_room)
     assert entry_with_room.state is ConfigEntryState.LOADED
 
@@ -434,9 +441,10 @@ async def test_loaded_entry_profiles_come_from_runtime_data(
         "custom_components.easy_trv.config_flow.async_load_profiles",
         side_effect=AssertionError("profiles are already loaded"),
     ):
-        result = await open_entities_step(hass, entry_with_room)
+        result = await open_settings_step(hass, entry_with_room, trvs=["climate.c"])
 
     assert option_values(fields(result)["profile"]) == [
+        "global",
         "auto",
         "sonoff_trvzb_native",
     ]
@@ -468,7 +476,9 @@ async def test_room_rejects_trv_from_other_room(hass, entry_with_room) -> None:
 
 
 @pytest.mark.usefixtures("area_with_trvs", "foreign_trvs")
-async def test_room_rejects_non_zha_and_unmatched_profile(hass, entry) -> None:
+async def test_room_rejects_non_zha_and_thermostats_without_a_profile(
+    hass, entry
+) -> None:
     result = await open_entities_step(hass, entry)
     flow_id = result["flow_id"]
 
@@ -493,17 +503,38 @@ async def test_room_rejects_non_zha_and_unmatched_profile(hass, entry) -> None:
     )
     assert result["errors"] == {"profile": "no_profile"}
 
-    result = await room_flows(hass).async_configure(
-        flow_id,
-        entities_input(trvs=["climate.zbt"], profile="sonoff_trvzb_native"),
-    )
-    assert result["errors"] == {"profile": "profile_mismatch"}
-
     assert not entry.subentries
     result = await room_flows(hass).async_configure(
         flow_id, entities_input(trvs=["climate.a", "climate.b"])
     )
+    assert result["step_id"] == "settings"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_reject_a_profile_that_does_not_match(
+    hass, tmp_path, entry
+) -> None:
+    text = BUILTIN_TEXT.replace("id: sonoff_trvzb_native", "id: user_zbt", 1)
+    text = text.replace("model: TRVZB", "model: TRV-ZBT", 1)
+    use_config_dir(hass, tmp_path).joinpath("zbt.yaml").write_text(text)
+
+    result = await open_settings_step(hass, entry)
+    flow_id = result["flow_id"]
+    result = await room_flows(hass).async_configure(flow_id, {"profile": "user_zbt"})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "settings"
+    assert result["errors"] == {"profile": "profile_mismatch"}
+    # What the user entered stays in the form.
+    assert suggested_values(result)["profile"] == "user_zbt"
+    assert not entry.subentries
+
+    result = await room_flows(hass).async_configure(
+        flow_id, {"profile": "sonoff_trvzb_native"}
+    )
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert next(iter(entry.subentries.values())).data["profile"] == (
+        "sonoff_trvzb_native"
+    )
 
 
 @pytest.mark.usefixtures("area_with_trvs")
@@ -538,9 +569,9 @@ async def test_room_with_a_user_profile_for_a_foreign_model(
     text = text.replace("model: TRVZB", "model: TRV-ZBT", 1)
     use_config_dir(hass, tmp_path).joinpath("zbt.yaml").write_text(text)
 
-    result = await open_entities_step(hass, entry)
+    result = await open_settings_step(hass, entry, trvs=["climate.zbt"])
     result = await room_flows(hass).async_configure(
-        result["flow_id"], entities_input(trvs=["climate.zbt"], profile="user_zbt")
+        result["flow_id"], {"profile": "user_zbt"}
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -678,6 +709,200 @@ async def test_validate_room_treats_an_unknown_profile_as_a_mismatch(
     assert validate_room(hass, entry, None, trvs, {}) == {"profile": "no_profile"}
 
 
+# --- Room flow: settings step ------------------------------------------------
+
+SETTINGS_FIELDS = [
+    "profile",
+    "window_detection",
+    "hysteresis",
+    "adaptive_mode",
+    "frost_temperature",
+    "refresh_minutes",
+    "verify_delay_seconds",
+    "max_attempts",
+    "min_delta_kelvin",
+    "sensor_timeout_minutes",
+]
+SETTING_NUMBERS = {
+    "frost_temperature": (4.0, 16.0, 0.5, "°C"),
+    "refresh_minutes": (1, 120, 1, "min"),
+    "verify_delay_seconds": (2, 60, 1, "s"),
+    "max_attempts": (1, 10, 1, None),
+    "min_delta_kelvin": (0.0, 1.0, 0.1, "K"),
+    "sensor_timeout_minutes": (0, 1440, 1, "min"),
+}
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+
+    assert list(fields(result)) == SETTINGS_FIELDS
+    # Every select starts at "global"; the numbers start empty (= global).
+    assert defaults(result) == ALL_GLOBAL
+    assert suggested_values(result) == {}
+    assert result["description_placeholders"] == {
+        "global_profile": "auto",
+        "global_window_detection": "on",
+        "global_hysteresis": "0.4 K",
+        "global_adaptive_mode": "on",
+        "global_frost_temperature": "7.0 °C",
+        "global_refresh_minutes": "20 min",
+        "global_verify_delay_seconds": "10 s",
+        "global_max_attempts": "3",
+        "global_min_delta_kelvin": "0.1 K",
+        "global_sensor_timeout_minutes": "120 min",
+    }
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_placeholders_follow_the_global_options(hass) -> None:
+    entry = make_entry(
+        hass,
+        [],
+        {
+            "hysteresis": "0_6",
+            "adaptive_mode": "off",
+            "frost_temperature": 9.5,
+            "refresh_minutes": 45,
+            "sensor_timeout_minutes": 0,
+        },
+    )
+    result = await open_settings_step(hass, entry)
+
+    placeholders = result["description_placeholders"]
+    assert placeholders["global_hysteresis"] == "0.6 K"
+    assert placeholders["global_adaptive_mode"] == "off"
+    assert placeholders["global_frost_temperature"] == "9.5 °C"
+    assert placeholders["global_refresh_minutes"] == "45 min"
+    assert placeholders["global_sensor_timeout_minutes"] == "0 min"
+    assert placeholders["global_max_attempts"] == "3"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_selects_start_with_global(hass, entry) -> None:
+    selectors = fields(await open_settings_step(hass, entry))
+
+    assert option_values(selectors["window_detection"]) == [
+        "global",
+        "on",
+        "off",
+        "leave",
+    ]
+    assert option_values(selectors["adaptive_mode"]) == [
+        "global",
+        "on",
+        "off",
+        "leave",
+    ]
+    for key in ("profile", "window_detection", "hysteresis", "adaptive_mode"):
+        assert selectors[key].config["translation_key"] == key
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_hysteresis_select_has_no_leave_option(hass, entry) -> None:
+    room = fields(await open_settings_step(hass, entry))["hysteresis"]
+    assert option_values(room) == ["global", "0_2", "0_4", "0_6", "0_8", "1_0"]
+
+    options = await hass.config_entries.options.async_init(entry.entry_id)
+    thermostat = section_fields(options, "thermostat")["hysteresis"]
+    assert option_values(thermostat) == ["0_2", "0_4", "0_6", "0_8", "1_0"]
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_numbers_are_optional_boxes(hass, entry) -> None:
+    selectors = fields(await open_settings_step(hass, entry))
+
+    for key, (minimum, maximum, step, unit) in SETTING_NUMBERS.items():
+        config = selectors[key].config
+        assert (config["min"], config["max"], config["step"]) == (
+            minimum,
+            maximum,
+            step,
+        ), key
+        assert config["mode"] == "box"
+        assert config.get("unit_of_measurement") == unit
+    # No default: an empty field means "global".
+    result = await open_settings_step(hass, entry, name="Study")
+    assert not set(defaults(result)) & set(SETTING_NUMBERS)
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_store_only_overrides(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"hysteresis": "0_2"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    data = next(iter(entry.subentries.values())).data
+    assert data["hysteresis"] == "0_2"
+    assert data["adaptive_mode"] == "global"
+    assert data["window_detection"] == "global"
+    assert data["profile"] == "global"
+    for key in SETTING_NUMBERS:
+        assert key not in data
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_store_numbers_with_their_types(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"],
+        {
+            "window_detection": "off",
+            "adaptive_mode": "leave",
+            "frost_temperature": 9.5,
+            "refresh_minutes": 30.0,
+            "verify_delay_seconds": 5.0,
+            "max_attempts": 4.0,
+            "min_delta_kelvin": 0.3,
+            "sensor_timeout_minutes": 0.0,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    data = next(iter(entry.subentries.values())).data
+    assert data["window_detection"] == "off"
+    assert data["adaptive_mode"] == "leave"
+    assert data["frost_temperature"] == 9.5
+    assert type(data["frost_temperature"]) is float
+    assert type(data["min_delta_kelvin"]) is float
+    assert data["min_delta_kelvin"] == 0.3
+    # Whole numbers are stored as integers, not as the selector's floats.
+    for key, value in (
+        ("refresh_minutes", 30),
+        ("verify_delay_seconds", 5),
+        ("max_attempts", 4),
+        ("sensor_timeout_minutes", 0),
+    ):
+        assert data[key] == value
+        assert type(data[key]) is int
+    # The overrides resolve on top of the global layer.
+    settings = resolve_settings({}, data)
+    assert (settings.window_detection, settings.refresh_minutes) == ("off", 30)
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+@pytest.mark.parametrize(
+    ("minutes", "valid"), [(0, True), (5, False), (10, True), (1440, True)]
+)
+async def test_room_sensor_timeout_is_off_or_ten_to_1440(
+    hass, entry, minutes, valid
+) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"sensor_timeout_minutes": minutes}
+    )
+    if valid:
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+    else:
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {"sensor_timeout_minutes": "timeout_range"}
+        assert suggested_values(result)["sensor_timeout_minutes"] == minutes
+        assert not entry.subentries
+
+
 # --- Reconfigure ------------------------------------------------------------
 
 
@@ -702,9 +927,6 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
         "trvs",
         "temp_sensors",
         "humidity_sensors",
-        "profile",
-        "window_detection",
-        "hysteresis",
     ]
     # The form shows what is stored, not what the area would suggest.
     assert suggested_values(result) == {
@@ -712,9 +934,6 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
         "trvs": ["climate.a", "climate.b"],
         "temp_sensors": ["sensor.t1", "sensor.t2"],
         "humidity_sensors": [],
-        "profile": "auto",
-        "window_detection": "on",
-        "hysteresis": "0_4",
     }
 
     result = await room_flows(hass).async_configure(
@@ -724,11 +943,17 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
             "trvs": ["climate.a", "climate.b"],
             "temp_sensors": ["sensor.t2", "sensor.t1"],
             "humidity_sensors": [],
-            "profile": "auto",
-            "window_detection": "on",
-            "hysteresis": "0_4",
         },
     )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "settings"
+    # Nothing is stored before the settings are confirmed too.
+    assert entry_with_room.subentries[sub.subentry_id].data["temp_sensors"] == [
+        "sensor.t1",
+        "sensor.t2",
+    ]
+
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
 
@@ -740,16 +965,79 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
     assert entry_with_room.runtime_data is not runtime_data
 
 
-async def test_reconfigure_renames_and_keeps_the_area(hass, area_with_trvs) -> None:
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_shows_current_overrides(hass) -> None:
     entry = make_entry(
-        hass, [room_data(area_id=area_with_trvs.id, hysteresis="leave")], {}
+        hass,
+        [
+            room_data(
+                hysteresis="0_8",
+                window_detection="global",
+                refresh_minutes=45,
+                frost_temperature=9.5,
+            )
+        ],
+        {},
     )
+    sub = next(iter(entry.subentries.values()))
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living")
+    )
+    assert result["step_id"] == "settings"
+    assert list(fields(result)) == SETTINGS_FIELDS
+    assert suggested_values(result) == {
+        "profile": "auto",
+        "window_detection": "global",
+        "hysteresis": "0_8",
+        "frost_temperature": 9.5,
+        "refresh_minutes": 45,
+    }
+    # A key the room never stored falls back to "global" in the form.
+    assert defaults(result)["adaptive_mode"] == "global"
+    assert result["description_placeholders"]["global_hysteresis"] == "0.4 K"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_replaces_the_stored_settings(hass) -> None:
+    entry = make_entry(
+        hass,
+        [room_data(refresh_minutes=45, frost_temperature=9.5, hysteresis="0_8")],
+        {},
+    )
+    sub = next(iter(entry.subentries.values()))
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living")
+    )
+    # The user empties the refresh field and keeps the frost temperature.
+    result = await room_flows(hass).async_configure(
+        result["flow_id"],
+        {"hysteresis": "global", "frost_temperature": 9.5, "adaptive_mode": "off"},
+    )
+    assert result["reason"] == "reconfigure_successful"
+
+    data = dict(entry.subentries[sub.subentry_id].data)
+    assert "refresh_minutes" not in data
+    assert data["frost_temperature"] == 9.5
+    assert data["hysteresis"] == "global"
+    assert data["adaptive_mode"] == "off"
+
+
+async def test_reconfigure_renames_and_keeps_the_area(hass, area_with_trvs) -> None:
+    entry = make_entry(hass, [room_data(area_id=area_with_trvs.id)], {})
     sub = next(iter(entry.subentries.values()))
 
     result = await start_reconfigure(hass, entry, sub.subentry_id)
     result = await room_flows(hass).async_configure(
         result["flow_id"],
         entities_input(name="  Lounge ", trvs=["climate.a"], temp_sensors=[]),
+    )
+    assert result["step_id"] == "settings"
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"window_detection": "leave"}
     )
     assert result["reason"] == "reconfigure_successful"
 
@@ -762,9 +1050,8 @@ async def test_reconfigure_renames_and_keeps_the_area(hass, area_with_trvs) -> N
         "trvs": ["climate.a"],
         "temp_sensors": [],
         "humidity_sensors": [],
-        "profile": "auto",
-        "window_detection": "on",
-        "hysteresis": "leave",
+        **ALL_GLOBAL,
+        "window_detection": "leave",
     }
 
     # The old name is free again.
@@ -811,6 +1098,28 @@ async def test_reconfigure_rejects_errors_and_keeps_the_room(hass) -> None:
     assert entry.subentries[living.subentry_id].title == "Living"
 
 
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_settings_reject_a_profile_that_does_not_match(
+    hass, tmp_path
+) -> None:
+    text = BUILTIN_TEXT.replace("id: sonoff_trvzb_native", "id: user_zbt", 1)
+    text = text.replace("model: TRVZB", "model: TRV-ZBT", 1)
+    use_config_dir(hass, tmp_path).joinpath("zbt.yaml").write_text(text)
+    entry = make_entry(hass, [room_data()], {})
+    sub = next(iter(entry.subentries.values()))
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living")
+    )
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"profile": "user_zbt"}
+    )
+    assert result["step_id"] == "settings"
+    assert result["errors"] == {"profile": "profile_mismatch"}
+    assert entry.subentries[sub.subentry_id].data["profile"] == "auto"
+
+
 # --- Options flow -----------------------------------------------------------
 
 
@@ -835,74 +1144,139 @@ def test_params_read_the_keys_the_options_flow_writes() -> None:
     assert RoomParams.from_settings(resolve_settings({}, {})) == RoomParams.defaults()
 
 
+WRITES = ["refresh_minutes", "verify_delay_seconds", "max_attempts", "min_delta_kelvin"]
+
+
+def options_input(writes=None, thermostat=None) -> dict[str, Any]:
+    """Return what the options form submits: two sections."""
+    return {
+        "writes": {
+            "refresh_minutes": 20,
+            "verify_delay_seconds": 10,
+            "max_attempts": 3,
+            "min_delta_kelvin": 0.1,
+            "sensor_timeout_minutes": 120,
+            **(writes or {}),
+        },
+        "thermostat": {
+            "window_detection": "on",
+            "hysteresis": "0_4",
+            "adaptive_mode": "on",
+            "frost_temperature": 7.0,
+            **(thermostat or {}),
+        },
+    }
+
+
+async def test_options_form_is_grouped_in_two_sections(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+    assert list(fields(result)) == ["writes", "thermostat"]
+    for group in fields(result).values():
+        assert group.options == {"collapsed": False}
+    assert list(section_fields(result, "writes")) == [
+        *WRITES,
+        "sensor_timeout_minutes",
+    ]
+    assert list(section_fields(result, "thermostat")) == [
+        "window_detection",
+        "hysteresis",
+        "adaptive_mode",
+        "frost_temperature",
+    ]
+
+
 async def test_options_form_defaults_come_from_options_then_constants(
     hass, entry
 ) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "init"
-    assert list(fields(result)) == [
-        const.CONF_REFRESH_MINUTES,
-        const.CONF_VERIFY_DELAY,
-        const.CONF_MAX_ATTEMPTS,
-        const.CONF_MIN_DELTA,
-        const.CONF_SENSOR_TIMEOUT,
-    ]
-    assert defaults(result) == {
+    assert suggested_values(result, "writes") == {
         "refresh_minutes": const.DEFAULT_REFRESH_MINUTES,
         "verify_delay_seconds": const.DEFAULT_VERIFY_DELAY,
         "max_attempts": const.DEFAULT_MAX_ATTEMPTS,
         "min_delta_kelvin": const.DEFAULT_MIN_DELTA,
         "sensor_timeout_minutes": const.DEFAULT_SENSOR_TIMEOUT,
     }
-    ranges = {
-        name: (selector.config["min"], selector.config["max"], selector.config["step"])
-        for name, selector in fields(result).items()
+    assert defaults(result, "thermostat") == {
+        "window_detection": const.DEFAULT_WINDOW_DETECTION,
+        "hysteresis": const.DEFAULT_HYSTERESIS,
+        "adaptive_mode": const.DEFAULT_ADAPTIVE_MODE,
     }
-    assert ranges == {
-        "refresh_minutes": (5, 90, 1),
-        "verify_delay_seconds": (2, 60, 1),
-        "max_attempts": (1, 10, 1),
-        "min_delta_kelvin": (0.1, 1.0, 0.1),
-        "sensor_timeout_minutes": (0, 720, 1),
+    assert suggested_values(result, "thermostat") == {
+        "frost_temperature": const.DEFAULT_FROST_TEMPERATURE
     }
-    assert {s.config["mode"] for s in fields(result).values()} == {"box"}
+
+    saved = make_entry(
+        hass,
+        [],
+        {"refresh_minutes": 45, "hysteresis": "0_8", "frost_temperature": 9.0},
+    )
+    result = await hass.config_entries.options.async_init(saved.entry_id)
+    assert suggested_values(result, "writes")["refresh_minutes"] == 45
+    assert suggested_values(result, "writes")["max_attempts"] == (
+        const.DEFAULT_MAX_ATTEMPTS
+    )
+    assert defaults(result, "thermostat")["hysteresis"] == "0_8"
+    assert suggested_values(result, "thermostat")["frost_temperature"] == 9.0
+
+
+async def test_options_form_ranges_units_and_select_options(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    numbers = {
+        **section_fields(result, "writes"),
+        "frost_temperature": section_fields(result, "thermostat")["frost_temperature"],
+    }
     assert {
-        name: selector.config.get("unit_of_measurement")
-        for name, selector in fields(result).items()
-    } == {
-        "refresh_minutes": "min",
-        "verify_delay_seconds": "s",
-        "max_attempts": None,
-        "min_delta_kelvin": "K",
-        "sensor_timeout_minutes": "min",
-    }
+        name: (
+            selector.config["min"],
+            selector.config["max"],
+            selector.config["step"],
+            selector.config.get("unit_of_measurement"),
+        )
+        for name, selector in numbers.items()
+    } == {key: SETTING_NUMBERS[key] for key in numbers}
+    assert {s.config["mode"] for s in numbers.values()} == {"box"}
 
-    entry_with_options = make_entry(hass, [], {"refresh_minutes": 45})
-    result = await hass.config_entries.options.async_init(entry_with_options.entry_id)
-    assert defaults(result)["refresh_minutes"] == 45
-    assert defaults(result)["max_attempts"] == const.DEFAULT_MAX_ATTEMPTS
+    thermostat = section_fields(result, "thermostat")
+    assert option_values(thermostat["window_detection"]) == ["on", "off", "leave"]
+    assert option_values(thermostat["adaptive_mode"]) == ["on", "off", "leave"]
+    for key in ("window_detection", "hysteresis", "adaptive_mode"):
+        assert thermostat[key].config["translation_key"] == key
 
 
-async def test_options_flow_sets_values(hass, entry) -> None:
+async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {
-            "refresh_minutes": 30,
-            "verify_delay_seconds": 5,
-            "max_attempts": 4,
-            "min_delta_kelvin": 0.3,
-            "sensor_timeout_minutes": 0,
-        },
+        options_input(
+            writes={
+                "refresh_minutes": 30,
+                "verify_delay_seconds": 5,
+                "max_attempts": 4,
+                "min_delta_kelvin": 0.3,
+                "sensor_timeout_minutes": 0,
+            },
+            thermostat={
+                "window_detection": "off",
+                "hysteresis": "0_6",
+                "adaptive_mode": "off",
+                "frost_temperature": 8.5,
+            },
+        ),
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    # Flat, as in Phase 1: the sections are only a layout.
     assert dict(entry.options) == {
         "refresh_minutes": 30,
         "verify_delay_seconds": 5,
         "max_attempts": 4,
         "min_delta_kelvin": 0.3,
         "sensor_timeout_minutes": 0,
+        "window_detection": "off",
+        "hysteresis": "0_6",
+        "adaptive_mode": "off",
+        "frost_temperature": 8.5,
     }
     # Whole numbers are stored as integers, not as the selector's floats.
     assert all(
@@ -914,27 +1288,53 @@ async def test_options_flow_sets_values(hass, entry) -> None:
             "sensor_timeout_minutes",
         )
     )
-    params = RoomParams.from_settings(resolve_settings(entry.options, {}))
-    assert params.sensor_timeout is None
+    assert type(entry.options["frost_temperature"]) is float
+    settings = resolve_settings(entry.options, {})
+    assert (settings.hysteresis, settings.adaptive_mode) == (0.6, "off")
+    assert RoomParams.from_settings(settings).sensor_timeout is None
+
+
+async def test_options_empty_number_falls_back_to_default(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    submitted = options_input()
+    del submitted["writes"]["refresh_minutes"]
+    del submitted["thermostat"]["frost_temperature"]
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], submitted
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert "refresh_minutes" not in entry.options
+    assert "frost_temperature" not in entry.options
+    assert entry.options["max_attempts"] == 3
+    settings = resolve_settings(entry.options, {})
+    assert settings.refresh_minutes == const.DEFAULT_REFRESH_MINUTES
+    assert settings.frost_temperature == const.DEFAULT_FROST_TEMPERATURE
+
+
+async def test_options_flow_edits_the_saved_options(hass) -> None:
+    saved = make_entry(hass, [], {"refresh_minutes": 45, "adaptive_mode": "leave"})
+    result = await hass.config_entries.options.async_init(saved.entry_id)
+    # Submitting what the form shows keeps the saved values.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        options_input(
+            writes={"refresh_minutes": 45}, thermostat={"adaptive_mode": "leave"}
+        ),
+    )
+    assert saved.options["refresh_minutes"] == 45
+    assert saved.options["adaptive_mode"] == "leave"
 
 
 @pytest.mark.parametrize(
     ("minutes", "valid"),
-    [(0, True), (5, False), (9, False), (10, True), (720, True)],
+    [(0, True), (5, False), (9, False), (10, True), (1440, True)],
 )
-async def test_options_flow_sensor_timeout_is_off_or_ten_to_720(
+async def test_options_flow_sensor_timeout_is_off_or_ten_to_1440(
     hass, entry, minutes, valid
 ) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "refresh_minutes": 20,
-            "verify_delay_seconds": 10,
-            "max_attempts": 3,
-            "min_delta_kelvin": 0.1,
-            "sensor_timeout_minutes": minutes,
-        },
+        result["flow_id"], options_input(writes={"sensor_timeout_minutes": minutes})
     )
     if valid:
         assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -942,5 +1342,5 @@ async def test_options_flow_sensor_timeout_is_off_or_ten_to_720(
     else:
         assert result["type"] is FlowResultType.FORM
         assert result["errors"] == {"sensor_timeout_minutes": "timeout_range"}
-        assert suggested_values(result)["sensor_timeout_minutes"] == minutes
+        assert suggested_values(result, "writes")["sensor_timeout_minutes"] == minutes
         assert not entry.options

@@ -1,9 +1,11 @@
 """Config flow of Easy TRV: the entry, its room subentries and its options."""
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol
 from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
     ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
@@ -13,6 +15,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import UnitOfTemperature, UnitOfTime
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -38,7 +41,9 @@ from custom_components.easy_trv.adapters.zha_gateway import (
     resolve_device,
 )
 from custom_components.easy_trv.const import (
+    CONF_ADAPTIVE_MODE,
     CONF_AREA,
+    CONF_FROST_TEMPERATURE,
     CONF_HUMIDITY_SENSORS,
     CONF_HYSTERESIS,
     CONF_MAX_ATTEMPTS,
@@ -51,35 +56,97 @@ from custom_components.easy_trv.const import (
     CONF_TRVS,
     CONF_VERIFY_DELAY,
     CONF_WINDOW_DETECTION,
-    DEFAULT_MAX_ATTEMPTS,
-    DEFAULT_MIN_DELTA,
-    DEFAULT_REFRESH_MINUTES,
-    DEFAULT_SENSOR_TIMEOUT,
-    DEFAULT_VERIFY_DELAY,
     DOMAIN,
     PROFILE_AUTO,
+    SETTING_GLOBAL,
     SUBENTRY_ROOM,
+)
+from custom_components.easy_trv.core.settings import (
+    DEFAULTS,
+    overrides,
+    resolve_settings,
 )
 from custom_components.easy_trv.profiles.loader import async_load_profiles
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
-    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.config_entries import ConfigEntry, ConfigSubentry
     from homeassistant.core import HomeAssistant
 
     from custom_components.easy_trv.profiles.engine import Profile
 
 CLIMATE_DOMAIN: Final = "climate"
 
-WINDOW_DETECTION_OPTIONS: Final = ("on", "off", "leave")
 # The values double as translation keys, which must not contain a dot: 0_4 = 0.4 K.
-HYSTERESIS_OPTIONS: Final = ("leave", "0_2", "0_4", "0_6", "0_8", "1_0")
+_SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
+    CONF_WINDOW_DETECTION: ("on", "off", "leave"),
+    CONF_HYSTERESIS: ("0_2", "0_4", "0_6", "0_8", "1_0"),
+    CONF_ADAPTIVE_MODE: ("on", "off", "leave"),
+}
+
+
+@dataclass(frozen=True)
+class _NumberSpec:
+    """The bounds and unit of a numeric setting."""
+
+    minimum: float
+    maximum: float
+    step: float = 1
+    unit: str | None = None
+
+
+_NUMBERS: Final[Mapping[str, _NumberSpec]] = {
+    CONF_REFRESH_MINUTES: _NumberSpec(1, 120, unit=UnitOfTime.MINUTES),
+    CONF_VERIFY_DELAY: _NumberSpec(2, 60, unit=UnitOfTime.SECONDS),
+    CONF_MAX_ATTEMPTS: _NumberSpec(1, 10),
+    CONF_MIN_DELTA: _NumberSpec(0.0, 1.0, 0.1, UnitOfTemperature.KELVIN),
+    CONF_SENSOR_TIMEOUT: _NumberSpec(0, 1440, unit=UnitOfTime.MINUTES),
+    CONF_FROST_TEMPERATURE: _NumberSpec(4.0, 16.0, 0.5, UnitOfTemperature.CELSIUS),
+}
+
+# How the options form groups its fields (the stored options stay flat).
+_SECTION_WRITES: Final = "writes"
+_SECTION_THERMOSTAT: Final = "thermostat"
+_SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
+    _SECTION_WRITES: (
+        CONF_REFRESH_MINUTES,
+        CONF_VERIFY_DELAY,
+        CONF_MAX_ATTEMPTS,
+        CONF_MIN_DELTA,
+        CONF_SENSOR_TIMEOUT,
+    ),
+    _SECTION_THERMOSTAT: (
+        CONF_WINDOW_DETECTION,
+        CONF_HYSTERESIS,
+        CONF_ADAPTIVE_MODE,
+        CONF_FROST_TEMPERATURE,
+    ),
+}
+# The order of the room's settings form.
+_ROOM_SETTING_KEYS: Final = (
+    CONF_PROFILE,
+    CONF_WINDOW_DETECTION,
+    CONF_HYSTERESIS,
+    CONF_ADAPTIVE_MODE,
+    CONF_FROST_TEMPERATURE,
+    CONF_REFRESH_MINUTES,
+    CONF_VERIFY_DELAY,
+    CONF_MAX_ATTEMPTS,
+    CONF_MIN_DELTA,
+    CONF_SENSOR_TIMEOUT,
+)
+_ROOM_SELECT_KEYS: Final = (
+    CONF_PROFILE,
+    *(key for key in _ROOM_SETTING_KEYS if key in _SELECT_VALUES),
+)
+_ROOM_NUMBER_KEYS: Final = tuple(key for key in _ROOM_SETTING_KEYS if key in _NUMBERS)
 
 _STEP_USER: Final = "user"
 _STEP_FROM_AREA: Final = "from_area"
 _STEP_CUSTOM: Final = "custom"
 _STEP_ENTITIES: Final = "entities"
+_STEP_SETTINGS: Final = "settings"
 _STEP_RECONFIGURE: Final = "reconfigure"
 
 _ERR_NO_TRV: Final = "no_trv"
@@ -93,17 +160,10 @@ _ERR_TIMEOUT_RANGE: Final = "timeout_range"
 
 # The sensor timeout is either off (0) or within these bounds (minutes).
 _TIMEOUT_MIN: Final = 10
-_TIMEOUT_MAX: Final = 720
+_TIMEOUT_MAX: Final = 1440
 
-# What a room form submits, besides the name.
-_ENTITY_KEYS: Final = (
-    CONF_TRVS,
-    CONF_TEMP_SENSORS,
-    CONF_HUMIDITY_SENSORS,
-    CONF_PROFILE,
-    CONF_WINDOW_DETECTION,
-    CONF_HYSTERESIS,
-)
+# What the room's entities form submits, besides the name.
+_ENTITY_KEYS: Final = (CONF_TRVS, CONF_TEMP_SENSORS, CONF_HUMIDITY_SENSORS)
 
 
 # --- Room helpers -----------------------------------------------------------
@@ -216,13 +276,8 @@ def validate_room(
     return _profile_error(profiles, user_input.get(CONF_PROFILE, PROFILE_AUTO), refs)
 
 
-def _entity_fields(profiles: Mapping[str, Profile]) -> dict[Any, Any]:
-    """Return the schema fields of a room's devices and behaviour."""
-    profile_options = [SelectOptionDict(value=PROFILE_AUTO, label="Auto")]
-    profile_options.extend(
-        SelectOptionDict(value=profile_id, label=profile.name)
-        for profile_id, profile in profiles.items()
-    )
+def _entity_fields() -> dict[Any, Any]:
+    """Return the schema fields of a room's thermostats and sensors."""
     return {
         vol.Required(CONF_TRVS): EntitySelector(
             EntitySelectorConfig(
@@ -243,24 +298,111 @@ def _entity_fields(profiles: Mapping[str, Profile]) -> dict[Any, Any]:
                 filter=[{"domain": "sensor", "device_class": "humidity"}],
             )
         ),
-        vol.Optional(CONF_PROFILE, default=PROFILE_AUTO): SelectSelector(
-            SelectSelectorConfig(
-                options=profile_options, mode=SelectSelectorMode.DROPDOWN
-            )
+    }
+
+
+# --- Settings fields (shared by the options flow and the room's settings step) ---
+
+
+def _number_selector(key: str) -> NumberSelector:
+    """Return the box input of a numeric setting."""
+    spec = _NUMBERS[key]
+    config = NumberSelectorConfig(
+        min=spec.minimum,
+        max=spec.maximum,
+        step=spec.step,
+        mode=NumberSelectorMode.BOX,
+    )
+    if spec.unit is not None:
+        config["unit_of_measurement"] = spec.unit
+    return NumberSelector(config)
+
+
+def _select_selector(
+    key: str, options: list[str] | list[SelectOptionDict]
+) -> SelectSelector:
+    """Return the dropdown of a choice setting, translated by the setting's key."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=options,
+            mode=SelectSelectorMode.DROPDOWN,
+            translation_key=key,
+        )
+    )
+
+
+def _stored_number(key: str, value: float) -> float:
+    """Return a number as it is stored: the selector's floats become ints if whole."""
+    if isinstance(DEFAULTS[key], int):
+        return round(value)
+    return round(value, 1)
+
+
+def _stored_numbers(
+    user_input: Mapping[str, Any], keys: Sequence[str]
+) -> dict[str, Any]:
+    """Return the filled numbers among ``keys``; an empty field is not stored."""
+    return {
+        key: _stored_number(key, user_input[key])
+        for key in keys
+        if user_input.get(key) is not None
+    }
+
+
+def _timeout_error(values: Mapping[str, Any]) -> dict[str, str]:
+    """Return the form error of a sensor timeout that is neither 0 nor in bounds."""
+    timeout = values.get(CONF_SENSOR_TIMEOUT)
+    if timeout and not _TIMEOUT_MIN <= timeout <= _TIMEOUT_MAX:
+        return {CONF_SENSOR_TIMEOUT: _ERR_TIMEOUT_RANGE}
+    return {}
+
+
+def _global_placeholders(options: Mapping[str, Any]) -> dict[str, str]:
+    """Return the current global value of every setting as plain text."""
+    settings = resolve_settings(options, {})
+    texts: dict[str, str] = {
+        CONF_PROFILE: settings.profile,
+        CONF_WINDOW_DETECTION: settings.window_detection,
+        CONF_ADAPTIVE_MODE: settings.adaptive_mode,
+        CONF_HYSTERESIS: f"{settings.hysteresis:.1f} {UnitOfTemperature.KELVIN}",
+    }
+    for key, spec in _NUMBERS.items():
+        value = getattr(settings, key)
+        text = f"{value:.1f}" if isinstance(value, float) else str(value)
+        texts[key] = text if spec.unit is None else f"{text} {spec.unit}"
+    return {f"global_{key}": text for key, text in texts.items()}
+
+
+def _room_settings_schema(profiles: Mapping[str, Profile]) -> vol.Schema:
+    """Return the room's settings form: "global" or a value, empty = global."""
+    profile_options = [
+        SelectOptionDict(value=SETTING_GLOBAL, label="Global"),
+        SelectOptionDict(value=PROFILE_AUTO, label="Auto"),
+        *(
+            SelectOptionDict(value=profile_id, label=profile.name)
+            for profile_id, profile in profiles.items()
         ),
-        vol.Optional(CONF_WINDOW_DETECTION, default="on"): SelectSelector(
-            SelectSelectorConfig(
-                options=list(WINDOW_DETECTION_OPTIONS),
-                translation_key=CONF_WINDOW_DETECTION,
+    ]
+    schema: dict[Any, Any] = {}
+    for key in _ROOM_SETTING_KEYS:
+        if key == CONF_PROFILE:
+            schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
+                key, profile_options
             )
-        ),
-        vol.Optional(CONF_HYSTERESIS, default="leave"): SelectSelector(
-            SelectSelectorConfig(
-                options=list(HYSTERESIS_OPTIONS),
-                mode=SelectSelectorMode.DROPDOWN,
-                translation_key=CONF_HYSTERESIS,
+        elif key in _SELECT_VALUES:
+            schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
+                key, [SETTING_GLOBAL, *_SELECT_VALUES[key]]
             )
-        ),
+        else:
+            schema[vol.Optional(key)] = _number_selector(key)
+    return vol.Schema(schema)
+
+
+def _room_settings(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Return what a room stores of its settings: the selects and filled numbers."""
+    return {
+        **{key: user_input[key] for key in _ROOM_SELECT_KEYS},
+        **_stored_numbers(user_input, _ROOM_NUMBER_KEYS),
     }
 
 
@@ -306,6 +448,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
         self._name: str = ""
         self._area_id: str | None = None
         self._suggested: dict[str, list[str]] = {}
+        self._entities: dict[str, Any] = {}
         self._profiles: Mapping[str, Profile] | None = None
 
     async def async_step_user(
@@ -368,7 +511,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
     async def async_step_entities(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        """Choose the thermostats, sensors and behaviour of the new room."""
+        """Choose the thermostats and sensors of the new room."""
         profiles = await self._async_profiles()
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -376,16 +519,9 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                 self.hass, self._get_entry(), None, user_input, profiles
             )
             if not errors:
-                return self.async_create_entry(
-                    title=self._name,
-                    data={
-                        CONF_NAME: self._name,
-                        CONF_AREA: self._area_id,
-                        **{key: user_input[key] for key in _ENTITY_KEYS},
-                    },
-                    unique_id=self._name.casefold(),
-                )
-        schema = vol.Schema(_entity_fields(profiles))
+                self._entities = {key: user_input[key] for key in _ENTITY_KEYS}
+                return await self.async_step_settings()
+        schema = vol.Schema(_entity_fields())
         return self.async_show_form(
             step_id=_STEP_ENTITIES,
             data_schema=self.add_suggested_values_to_schema(
@@ -397,7 +533,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        """Edit the name, thermostats, sensors and behaviour of a room."""
+        """Edit the name, thermostats and sensors of a room, then its settings."""
         subentry = self._get_reconfigure_subentry()
         entry = self._get_entry()
         profiles = await self._async_profiles()
@@ -413,16 +549,11 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                     self.hass, entry, subentry.subentry_id, user_input, profiles
                 )
             if not errors:
-                # The update listener of the entry reloads it.
-                return self.async_update_and_abort(
-                    entry,
-                    subentry,
-                    data_updates={**user_input, CONF_NAME: name},
-                    title=name,
-                    unique_id=name.casefold(),
-                )
+                self._name = name
+                self._entities = {key: user_input[key] for key in _ENTITY_KEYS}
+                return await self.async_step_settings()
         schema = vol.Schema(
-            {vol.Required(CONF_NAME): TextSelector(), **_entity_fields(profiles)}
+            {vol.Required(CONF_NAME): TextSelector(), **_entity_fields()}
         )
         return self.async_show_form(
             step_id=_STEP_RECONFIGURE,
@@ -431,6 +562,83 @@ class RoomSubentryFlow(ConfigSubentryFlow):
             ),
             errors=errors,
         )
+
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Override the global settings for this room; ``global`` keeps them."""
+        entry = self._get_entry()
+        reconfiguring = self.source == SOURCE_RECONFIGURE
+        subentry = self._get_reconfigure_subentry() if reconfiguring else None
+        profiles = await self._async_profiles()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            settings = _room_settings(user_input)
+            errors = _timeout_error(settings) or self._profile_errors(
+                entry, subentry, settings[CONF_PROFILE], profiles
+            )
+            if not errors:
+                data = {
+                    CONF_NAME: self._name,
+                    CONF_AREA: subentry.data.get(CONF_AREA)
+                    if subentry
+                    else self._area_id,
+                    **self._entities,
+                    **settings,
+                }
+                if subentry is None:
+                    return self.async_create_entry(
+                        title=self._name,
+                        data=data,
+                        unique_id=self._name.casefold(),
+                    )
+                # The update listener of the entry reloads it. The data is
+                # replaced, not merged: a number the user emptied must go.
+                return self.async_update_and_abort(
+                    entry,
+                    subentry,
+                    data=data,
+                    title=self._name,
+                    unique_id=self._name.casefold(),
+                )
+        suggested = user_input
+        if user_input is None and subentry is not None:
+            suggested = dict(subentry.data)
+        return self.async_show_form(
+            step_id=_STEP_SETTINGS,
+            data_schema=self.add_suggested_values_to_schema(
+                _room_settings_schema(profiles), suggested
+            ),
+            errors=errors,
+            description_placeholders=_global_placeholders(entry.options),
+        )
+
+    def _profile_errors(
+        self,
+        entry: ConfigEntry,
+        subentry: ConfigSubentry | None,
+        choice: str,
+        profiles: Mapping[str, Profile],
+    ) -> dict[str, str]:
+        """Check the chosen profile against the thermostats of the room.
+
+        ``global`` stands for the profile of the options. A problem with the
+        thermostats themselves (they changed while the form was open) is shown
+        as a general error, because their field is on another page.
+        """
+        if choice == SETTING_GLOBAL:
+            choice = resolve_settings(entry.options, {}).profile
+        errors = validate_room(
+            self.hass,
+            entry,
+            subentry.subentry_id if subentry else None,
+            {**self._entities, CONF_PROFILE: choice},
+            profiles,
+        )
+        return {
+            (key if key == CONF_PROFILE else "base"): error
+            for key, error in errors.items()
+        }
 
     def _name_taken(self, name: str, own_subentry_id: str | None) -> bool:
         """Return whether another room already has this name (any letter case)."""
@@ -457,69 +665,36 @@ class RoomSubentryFlow(ConfigSubentryFlow):
 
 
 def _options_schema(current: Mapping[str, Any]) -> vol.Schema:
-    """Return the form of the global options, defaulting to what is saved."""
+    """Return the form of the global options in two sections.
 
-    def number(  # noqa: PLR0913 - one call per option, all keyword options
-        key: str,
-        default: float,
-        *,
-        minimum: float,
-        maximum: float,
-        step: float,
-        unit: str | None = None,
-    ) -> dict[Any, Any]:
-        config = NumberSelectorConfig(
-            min=minimum, max=maximum, step=step, mode=NumberSelectorMode.BOX
-        )
-        if unit is not None:
-            config["unit_of_measurement"] = unit
-        return {
-            vol.Required(key, default=current.get(key, default)): NumberSelector(config)
-        }
+    The selects default to what is saved (else the built-in default). The
+    numbers have no default: an empty number is not stored.
+    """
+    effective = {**DEFAULTS, **overrides(current)}
+
+    def group(keys: Sequence[str]) -> section:
+        fields: dict[Any, Any] = {}
+        for key in keys:
+            if key in _SELECT_VALUES:
+                fields[vol.Required(key, default=effective[key])] = _select_selector(
+                    key, list(_SELECT_VALUES[key])
+                )
+            else:
+                fields[vol.Optional(key)] = _number_selector(key)
+        return section(vol.Schema(fields), {"collapsed": False})
 
     return vol.Schema(
-        {
-            **number(
-                CONF_REFRESH_MINUTES,
-                DEFAULT_REFRESH_MINUTES,
-                minimum=5,
-                maximum=90,
-                step=1,
-                unit=UnitOfTime.MINUTES,
-            ),
-            **number(
-                CONF_VERIFY_DELAY,
-                DEFAULT_VERIFY_DELAY,
-                minimum=2,
-                maximum=60,
-                step=1,
-                unit=UnitOfTime.SECONDS,
-            ),
-            **number(
-                CONF_MAX_ATTEMPTS,
-                DEFAULT_MAX_ATTEMPTS,
-                minimum=1,
-                maximum=10,
-                step=1,
-            ),
-            **number(
-                CONF_MIN_DELTA,
-                DEFAULT_MIN_DELTA,
-                minimum=0.1,
-                maximum=1.0,
-                step=0.1,
-                unit=UnitOfTemperature.KELVIN,
-            ),
-            **number(
-                CONF_SENSOR_TIMEOUT,
-                DEFAULT_SENSOR_TIMEOUT,
-                minimum=0,
-                maximum=_TIMEOUT_MAX,
-                step=1,
-                unit=UnitOfTime.MINUTES,
-            ),
-        }
+        {vol.Required(name): group(keys) for name, keys in _SECTIONS.items()}
     )
+
+
+def _options_suggestions(current: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return the numbers the options form shows: saved, else built-in default."""
+    effective = {**DEFAULTS, **overrides(current)}
+    return {
+        name: {key: effective[key] for key in keys if key in _NUMBERS}
+        for name, keys in _SECTIONS.items()
+    }
 
 
 class EasyTrvOptionsFlow(OptionsFlow):
@@ -531,26 +706,26 @@ class EasyTrvOptionsFlow(OptionsFlow):
         """Show and store the global options."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            # The selectors return floats; whole-number options are stored as ints.
-            options: dict[str, float] = {
-                CONF_REFRESH_MINUTES: round(user_input[CONF_REFRESH_MINUTES]),
-                CONF_VERIFY_DELAY: round(user_input[CONF_VERIFY_DELAY]),
-                CONF_MAX_ATTEMPTS: round(user_input[CONF_MAX_ATTEMPTS]),
-                CONF_MIN_DELTA: round(user_input[CONF_MIN_DELTA], 1),
-                CONF_SENSOR_TIMEOUT: round(user_input[CONF_SENSOR_TIMEOUT]),
+            # The sections only lay the form out; the options are stored flat.
+            flat = {
+                key: value
+                for name in _SECTIONS
+                for key, value in user_input[name].items()
             }
-            timeout = options[CONF_SENSOR_TIMEOUT]
-            if timeout and not _TIMEOUT_MIN <= timeout <= _TIMEOUT_MAX:
-                errors[CONF_SENSOR_TIMEOUT] = _ERR_TIMEOUT_RANGE
-            else:
+            options = {
+                **{key: flat[key] for key in _SELECT_VALUES},
+                **_stored_numbers(flat, list(_NUMBERS)),
+            }
+            errors = _timeout_error(options)
+            if not errors:
                 return self.async_create_entry(data=options)
-        schema = _options_schema(self.config_entry.options)
         return self.async_show_form(
             step_id="init",
-            data_schema=(
-                schema
+            data_schema=self.add_suggested_values_to_schema(
+                _options_schema(self.config_entry.options),
+                _options_suggestions(self.config_entry.options)
                 if user_input is None
-                else self.add_suggested_values_to_schema(schema, user_input)
+                else user_input,
             ),
             errors=errors,
         )

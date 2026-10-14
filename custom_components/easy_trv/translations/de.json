@@ -43,18 +43,12 @@
           "data": {
             "trvs": "Thermostate (ZHA)",
             "temp_sensors": "Temperatursensoren",
-            "humidity_sensors": "Feuchtesensoren",
-            "profile": "Profil",
-            "window_detection": "Fenstererkennung",
-            "hysteresis": "Hysterese"
+            "humidity_sensors": "Feuchtesensoren"
           },
           "data_description": {
             "trvs": "Die ZHA-Thermostate, die diesen Raum heizen. Ein Thermostat kann nur zu einem Raum gehören.",
             "temp_sensors": "Reihenfolge = Priorität; der erste brauchbare Sensor wird verwendet.",
-            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet.",
-            "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt.",
-            "window_detection": "Die Fenster-offen-Erkennung der Thermostate ein- oder ausschalten oder unverändert lassen.",
-            "hysteresis": "Temperatur-Hysterese der Thermostate in Kelvin oder unverändert lassen."
+            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet."
           }
         },
         "reconfigure": {
@@ -63,18 +57,40 @@
             "name": "Raumname",
             "trvs": "Thermostate (ZHA)",
             "temp_sensors": "Temperatursensoren",
-            "humidity_sensors": "Feuchtesensoren",
-            "profile": "Profil",
-            "window_detection": "Fenstererkennung",
-            "hysteresis": "Hysterese"
+            "humidity_sensors": "Feuchtesensoren"
           },
           "data_description": {
             "trvs": "Die ZHA-Thermostate, die diesen Raum heizen. Ein Thermostat kann nur zu einem Raum gehören.",
             "temp_sensors": "Reihenfolge = Priorität; der erste brauchbare Sensor wird verwendet.",
-            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet.",
-            "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt.",
-            "window_detection": "Die Fenster-offen-Erkennung der Thermostate ein- oder ausschalten oder unverändert lassen.",
-            "hysteresis": "Temperatur-Hysterese der Thermostate in Kelvin oder unverändert lassen."
+            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet."
+          }
+        },
+        "settings": {
+          "title": "Einstellungen des Raums",
+          "description": "Jede Einstellung folgt den Integrationsoptionen (Global), solange du sie nicht für diesen Raum festlegst. Ein leeres Zahlenfeld bedeutet ebenfalls Global.",
+          "data": {
+            "profile": "Profil",
+            "window_detection": "Fenster-offen-Erkennung des Thermostats",
+            "hysteresis": "Hysterese",
+            "adaptive_mode": "Adaptiver Modus (ab Firmware 1.4.4)",
+            "frost_temperature": "Frostschutz-Temperatur",
+            "refresh_minutes": "Auffrischung (Minuten)",
+            "verify_delay_seconds": "Rücklese-Verzögerung (Sekunden)",
+            "max_attempts": "Versuche",
+            "min_delta_kelvin": "Mindeständerung (K)",
+            "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)"
+          },
+          "data_description": {
+            "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt. Global ist derzeit {global_profile}.",
+            "window_detection": "Schaltet die eigene Fenster-offen-Erkennung des Thermostats ein oder aus. Sie löst aus, wenn die Temperatur innerhalb von 4,5 Minuten um etwa 1,5 K fällt, und beendet die Heizpause spätestens nach 30 Minuten. Mit Fensterkontakten in Home Assistant hat sie nichts zu tun. Global ist derzeit {global_window_detection}.",
+            "hysteresis": "Temperatur-Hysterese der Thermostate. Sie wird ignoriert, solange der adaptive Modus an ist. Global ist derzeit {global_hysteresis}.",
+            "adaptive_mode": "Das Thermostat stellt sich selbst auf den Raum ein. Solange er an ist, wird die Hysterese ignoriert. Braucht Firmware 1.4.4 oder neuer. Global ist derzeit {global_adaptive_mode}.",
+            "frost_temperature": "Die Temperatur, die das Thermostat als Frostschutz hält. 4,0 bis 16,0 °C. Global ist derzeit {global_frost_temperature}.",
+            "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 1 bis 120 Minuten. Global ist derzeit {global_refresh_minutes}.",
+            "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden. Global ist derzeit {global_verify_delay_seconds}.",
+            "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10. Global ist derzeit {global_max_attempts}.",
+            "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Global ist derzeit {global_min_delta_kelvin}.",
+            "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}."
           }
         }
       },
@@ -85,7 +101,8 @@
         "profile_mismatch": "Das gewählte Profil passt nicht zu allen gewählten Thermostaten.",
         "trv_in_other_room": "Mindestens eines der gewählten Thermostate gehört bereits zu einem anderen Raum.",
         "name_exists": "Ein Raum mit diesem Namen existiert bereits.",
-        "name_required": "Gib einen Namen für den Raum ein."
+        "name_required": "Gib einen Namen für den Raum ein.",
+        "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein."
       },
       "abort": {
         "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
@@ -135,43 +152,80 @@
     "step": {
       "init": {
         "title": "Easy-TRV-Einstellungen",
-        "description": "Diese Einstellungen gelten für alle Räume.",
-        "data": {
-          "refresh_minutes": "Auffrischung (Minuten)",
-          "verify_delay_seconds": "Rücklese-Verzögerung (Sekunden)",
-          "max_attempts": "Versuche",
-          "min_delta_kelvin": "Mindeständerung (K)",
-          "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)"
-        },
-        "data_description": {
-          "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 5 bis 90 Minuten.",
-          "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden.",
-          "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10.",
-          "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,1 bis 1,0 K.",
-          "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 720 Minuten."
+        "description": "Diese Einstellungen gelten für alle Räume. Jeder Raum kann sie überschreiben. Leere Zahlenfelder verwenden den eingebauten Standardwert.",
+        "sections": {
+          "writes": {
+            "name": "Schreibvorgänge",
+            "description": "Wie oft und wie sorgfältig die Raumtemperatur an die Thermostate geschrieben wird.",
+            "data": {
+              "refresh_minutes": "Auffrischung (Minuten)",
+              "verify_delay_seconds": "Rücklese-Verzögerung (Sekunden)",
+              "max_attempts": "Versuche",
+              "min_delta_kelvin": "Mindeständerung (K)",
+              "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)"
+            },
+            "data_description": {
+              "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 1 bis 120 Minuten.",
+              "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden.",
+              "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10.",
+              "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K.",
+              "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten."
+            }
+          },
+          "thermostat": {
+            "name": "Thermostat-Einstellungen",
+            "description": "Diese Einstellungen werden in die Thermostate geschrieben.",
+            "data": {
+              "window_detection": "Fenster-offen-Erkennung des Thermostats",
+              "hysteresis": "Hysterese",
+              "adaptive_mode": "Adaptiver Modus (ab Firmware 1.4.4)",
+              "frost_temperature": "Frostschutz-Temperatur"
+            },
+            "data_description": {
+              "window_detection": "Schaltet die eigene Fenster-offen-Erkennung des Thermostats ein oder aus. Sie löst aus, wenn die Temperatur innerhalb von 4,5 Minuten um etwa 1,5 K fällt, und beendet die Heizpause spätestens nach 30 Minuten. Mit Fensterkontakten in Home Assistant hat sie nichts zu tun.",
+              "hysteresis": "Temperatur-Hysterese der Thermostate. Sie wird ignoriert, solange der adaptive Modus an ist.",
+              "adaptive_mode": "Das Thermostat stellt sich selbst auf den Raum ein. Solange er an ist, wird die Hysterese ignoriert. Braucht Firmware 1.4.4 oder neuer.",
+              "frost_temperature": "Die Temperatur, die das Thermostat als Frostschutz hält. 4,0 bis 16,0 °C. Leer = 7,0 °C."
+            }
+          }
         }
       }
     },
     "error": {
-      "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 720 Minuten ein."
+      "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein."
     }
   },
   "selector": {
+    "profile": {
+      "options": {
+        "global": "Global",
+        "auto": "Auto"
+      }
+    },
     "window_detection": {
       "options": {
-        "on": "An",
-        "off": "Aus",
-        "leave": "Unverändert lassen"
+        "global": "Global",
+        "on": "Erkennung einschalten",
+        "off": "Erkennung ausschalten",
+        "leave": "Im Thermostat unverändert lassen"
       }
     },
     "hysteresis": {
       "options": {
-        "leave": "Unverändert lassen",
+        "global": "Global",
         "0_2": "0,2 K",
         "0_4": "0,4 K",
         "0_6": "0,6 K",
         "0_8": "0,8 K",
         "1_0": "1,0 K"
+      }
+    },
+    "adaptive_mode": {
+      "options": {
+        "global": "Global",
+        "on": "Adaptiven Modus einschalten",
+        "off": "Adaptiven Modus ausschalten",
+        "leave": "Im Thermostat unverändert lassen"
       }
     }
   }

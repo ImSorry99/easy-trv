@@ -43,18 +43,12 @@
           "data": {
             "trvs": "Thermostats (ZHA)",
             "temp_sensors": "Temperature sensors",
-            "humidity_sensors": "Humidity sensors",
-            "profile": "Profile",
-            "window_detection": "Window detection",
-            "hysteresis": "Hysteresis"
+            "humidity_sensors": "Humidity sensors"
           },
           "data_description": {
             "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
-            "humidity_sensors": "Stored for later use; not evaluated yet.",
-            "profile": "Auto picks the first profile that matches all thermostats of the room.",
-            "window_detection": "Switch the open-window detection of the thermostats on or off, or leave it as it is.",
-            "hysteresis": "Temperature hysteresis of the thermostats in kelvin, or leave it as it is."
+            "humidity_sensors": "Stored for later use; not evaluated yet."
           }
         },
         "reconfigure": {
@@ -63,18 +57,40 @@
             "name": "Room name",
             "trvs": "Thermostats (ZHA)",
             "temp_sensors": "Temperature sensors",
-            "humidity_sensors": "Humidity sensors",
-            "profile": "Profile",
-            "window_detection": "Window detection",
-            "hysteresis": "Hysteresis"
+            "humidity_sensors": "Humidity sensors"
           },
           "data_description": {
             "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
-            "humidity_sensors": "Stored for later use; not evaluated yet.",
-            "profile": "Auto picks the first profile that matches all thermostats of the room.",
-            "window_detection": "Switch the open-window detection of the thermostats on or off, or leave it as it is.",
-            "hysteresis": "Temperature hysteresis of the thermostats in kelvin, or leave it as it is."
+            "humidity_sensors": "Stored for later use; not evaluated yet."
+          }
+        },
+        "settings": {
+          "title": "Room settings",
+          "description": "Every setting follows the integration options (Global) unless you set it for this room. A number field left empty also means Global.",
+          "data": {
+            "profile": "Profile",
+            "window_detection": "Thermostat's open-window detection",
+            "hysteresis": "Hysteresis",
+            "adaptive_mode": "Adaptive mode (firmware 1.4.4 and newer)",
+            "frost_temperature": "Frost protection temperature",
+            "refresh_minutes": "Refresh interval (minutes)",
+            "verify_delay_seconds": "Read-back delay (seconds)",
+            "max_attempts": "Attempts",
+            "min_delta_kelvin": "Minimum change (K)",
+            "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)"
+          },
+          "data_description": {
+            "profile": "Auto picks the first profile that matches all thermostats of the room. Global is currently {global_profile}.",
+            "window_detection": "Switches the thermostat's own open-window detection on or off. It triggers when the temperature falls by about 1.5 K within 4.5 minutes and ends the heating pause after 30 minutes at the latest. It has nothing to do with window contacts in Home Assistant. Global is currently {global_window_detection}.",
+            "hysteresis": "Temperature hysteresis of the thermostats. It is ignored while the adaptive mode is on. Global is currently {global_hysteresis}.",
+            "adaptive_mode": "The thermostat adapts to the room itself. While it is on, the hysteresis is ignored. Needs firmware 1.4.4 or newer. Global is currently {global_adaptive_mode}.",
+            "frost_temperature": "The temperature the thermostat keeps as frost protection. 4.0 to 16.0 °C. Global is currently {global_frost_temperature}.",
+            "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Global is currently {global_refresh_minutes}.",
+            "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds. Global is currently {global_verify_delay_seconds}.",
+            "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Global is currently {global_max_attempts}.",
+            "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Global is currently {global_min_delta_kelvin}.",
+            "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}."
           }
         }
       },
@@ -85,7 +101,8 @@
         "profile_mismatch": "The selected profile does not match all selected thermostats.",
         "trv_in_other_room": "At least one of the selected thermostats already belongs to another room.",
         "name_exists": "A room with this name already exists.",
-        "name_required": "Enter a name for the room."
+        "name_required": "Enter a name for the room.",
+        "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes."
       },
       "abort": {
         "reconfigure_successful": "Re-configuration was successful",
@@ -135,43 +152,80 @@
     "step": {
       "init": {
         "title": "Easy TRV settings",
-        "description": "These settings apply to all rooms.",
-        "data": {
-          "refresh_minutes": "Refresh interval (minutes)",
-          "verify_delay_seconds": "Read-back delay (seconds)",
-          "max_attempts": "Attempts",
-          "min_delta_kelvin": "Minimum change (K)",
-          "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)"
-        },
-        "data_description": {
-          "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 5 to 90 minutes.",
-          "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds.",
-          "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10.",
-          "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.1 to 1.0 K.",
-          "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 720 minutes."
+        "description": "These settings apply to all rooms. Each room can override them. Number fields left empty use the built-in default.",
+        "sections": {
+          "writes": {
+            "name": "Writes",
+            "description": "How often and how carefully the room temperature is written to the thermostats.",
+            "data": {
+              "refresh_minutes": "Refresh interval (minutes)",
+              "verify_delay_seconds": "Read-back delay (seconds)",
+              "max_attempts": "Attempts",
+              "min_delta_kelvin": "Minimum change (K)",
+              "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)"
+            },
+            "data_description": {
+              "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes.",
+              "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds.",
+              "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10.",
+              "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K.",
+              "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes."
+            }
+          },
+          "thermostat": {
+            "name": "Thermostat settings",
+            "description": "These settings are written to the thermostats.",
+            "data": {
+              "window_detection": "Thermostat's open-window detection",
+              "hysteresis": "Hysteresis",
+              "adaptive_mode": "Adaptive mode (firmware 1.4.4 and newer)",
+              "frost_temperature": "Frost protection temperature"
+            },
+            "data_description": {
+              "window_detection": "Switches the thermostat's own open-window detection on or off. It triggers when the temperature falls by about 1.5 K within 4.5 minutes and ends the heating pause after 30 minutes at the latest. It has nothing to do with window contacts in Home Assistant.",
+              "hysteresis": "Temperature hysteresis of the thermostats. It is ignored while the adaptive mode is on.",
+              "adaptive_mode": "The thermostat adapts to the room itself. While it is on, the hysteresis is ignored. Needs firmware 1.4.4 or newer.",
+              "frost_temperature": "The temperature the thermostat keeps as frost protection. 4.0 to 16.0 °C. Empty = 7.0 °C."
+            }
+          }
         }
       }
     },
     "error": {
-      "timeout_range": "Enter 0 (off) or a value between 10 and 720 minutes."
+      "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes."
     }
   },
   "selector": {
+    "profile": {
+      "options": {
+        "global": "Global",
+        "auto": "Auto"
+      }
+    },
     "window_detection": {
       "options": {
-        "on": "On",
-        "off": "Off",
-        "leave": "Leave unchanged"
+        "global": "Global",
+        "on": "Turn detection on",
+        "off": "Turn detection off",
+        "leave": "Leave as set in the thermostat"
       }
     },
     "hysteresis": {
       "options": {
-        "leave": "Leave unchanged",
+        "global": "Global",
         "0_2": "0.2 K",
         "0_4": "0.4 K",
         "0_6": "0.6 K",
         "0_8": "0.8 K",
         "1_0": "1.0 K"
+      }
+    },
+    "adaptive_mode": {
+      "options": {
+        "global": "Global",
+        "on": "Turn adaptive mode on",
+        "off": "Turn adaptive mode off",
+        "leave": "Leave as set in the thermostat"
       }
     }
   }
