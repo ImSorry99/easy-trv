@@ -462,10 +462,10 @@ class RoomController:
                 issues.raise_unreachable(
                     self._hass,
                     ref.ieee,
-                    room=found["room"],
+                    room=self._config.name,
                     setting=self._setting_name(found["attribute"]),
                     thermostat=thermostat,
-                    attempts=int(found["attempts"]),
+                    attempts=found["attempts"],
                     error=found["error"],
                 )
             case "firmware":
@@ -482,8 +482,15 @@ class RoomController:
                 assert_never(command.kind)
 
     def _setting_name(self, capability: str) -> str:
-        """Return the plain-language name of a capability (its key if unlabelled)."""
-        return self._labels.get(capability, capability)
+        """Return the plain-language name of a capability (its key if unlabelled).
+
+        The labels are keyed by intent. A profile names its capabilities freely,
+        so the capability is mapped to its intent first; where the profile has no
+        such capability the core already reports the intent name.
+        """
+        spec = self._profile.capabilities.get(capability)
+        intent = capability if spec is None else spec.intent
+        return self._labels.get(intent, capability)
 
     def _clear_issue(self, command: ClearIssue) -> None:
         """Delete the repairs issue of a thermostat."""

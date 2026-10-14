@@ -69,7 +69,7 @@ def raise_unreachable(  # noqa: PLR0913 - one argument per placeholder of the te
     room: str,
     setting: str,
     thermostat: str,
-    attempts: int,
+    attempts: str,
     error: str,
 ) -> None:
     """Report a thermostat that keeps failing to accept writes.

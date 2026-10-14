@@ -13,13 +13,15 @@ PLACEHOLDER = re.compile(r"\{[^{}]*\}")
 # hassfest's rule for the keys of selector options, entity states and issues.
 TRANSLATION_KEY = re.compile(r"^(?!.+[_-]{2})(?![_-])[a-z0-9-_]+(?<![_-])$")
 
-CAPABILITIES = {
-    "external_temperature",
-    "source_select",
-    "window_detection_flag",
-    "hysteresis",
-    "adaptive_mode",
-    "frost_protection",
+# The labels are keyed by the fixed vocabulary of intents, not by the names a
+# profile gives its capabilities.
+INTENTS = {
+    "set_room_temperature",
+    "set_source",
+    "set_window_detection",
+    "set_hysteresis",
+    "set_adaptive_mode",
+    "set_frost_temperature",
 }
 
 ROOM_ERRORS = {
@@ -154,7 +156,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "0_8",
         "1_0",
     }
-    assert set(data["selector"]["capability"]["options"]) == CAPABILITIES
+    assert set(data["selector"]["capability"]["options"]) == INTENTS
     assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
     assert set(data["selector"]["sensor_timeout"]["options"]) == {"off"}
     # Existing sections of the earlier tasks stay in place.
@@ -241,23 +243,23 @@ def test_thermostat_issues_name_the_setting_and_the_thermostat(path: Path) -> No
 
 def test_capability_labels_en() -> None:
     assert load(EN)["selector"]["capability"]["options"] == {
-        "external_temperature": "Room temperature",
-        "source_select": "Temperature source",
-        "window_detection_flag": "Thermostat's open-window detection",
-        "hysteresis": "Hysteresis",
-        "adaptive_mode": "Adaptive mode",
-        "frost_protection": "Frost protection temperature",
+        "set_room_temperature": "Room temperature",
+        "set_source": "Temperature source",
+        "set_window_detection": "Thermostat's open-window detection",
+        "set_hysteresis": "Hysteresis",
+        "set_adaptive_mode": "Adaptive mode",
+        "set_frost_temperature": "Frost protection temperature",
     }
 
 
 def test_capability_labels_de() -> None:
     assert load(DE)["selector"]["capability"]["options"] == {
-        "external_temperature": "Raumtemperatur",
-        "source_select": "Temperaturquelle",
-        "window_detection_flag": "Fenster-offen-Erkennung des Thermostats",
-        "hysteresis": "Hysterese",
-        "adaptive_mode": "Adaptiver Modus",
-        "frost_protection": "Frostschutztemperatur",
+        "set_room_temperature": "Raumtemperatur",
+        "set_source": "Temperaturquelle",
+        "set_window_detection": "Fenster-offen-Erkennung des Thermostats",
+        "set_hysteresis": "Hysterese",
+        "set_adaptive_mode": "Adaptiver Modus",
+        "set_frost_temperature": "Frostschutztemperatur",
     }
 
 

@@ -44,10 +44,11 @@ PARAMS = replace(RoomParams.defaults(), verify_delay=0.0)
 # Enough loop iterations for the worker to run a queue of fake-gateway
 # operations (each one yields about once) to completion.
 SETTLE_ITERATIONS = 50
+# Keyed by intent, like the translations: profiles name capabilities as they like.
 LABELS = {
-    "hysteresis": "Hysteresis",
-    "external_temperature": "Room temperature",
-    "window_detection_flag": "Thermostat's open-window detection",
+    "set_hysteresis": "Hysteresis",
+    "set_room_temperature": "Room temperature",
+    "set_window_detection": "Thermostat's open-window detection",
 }
 
 
@@ -384,7 +385,7 @@ async def test_unreachable_issue_names_setting_and_thermostat(
         "setting": "Thermostat's open-window detection",
         "thermostat": "Living TRV",
         "attempts": "3",
-        "error": raised.translation_placeholders["error"],
+        "error": "mismatch: expected [1] got 0",
     }
 
 
@@ -399,6 +400,22 @@ async def test_labels_fall_back_to_keys_and_entity_ids(
     assert raised is not None
     assert raised.translation_placeholders["setting"] == "window_detection_flag"
     assert raised.translation_placeholders["thermostat"] == "climate.a"
+
+
+async def test_setting_name_follows_the_intent_of_a_custom_capability(
+    hass, freezer, make_controller, gateway, profile
+) -> None:
+    capabilities = {
+        ("ext_temp" if name == "external_temperature" else name): spec
+        for name, spec in profile.capabilities.items()
+    }
+    gateway.read_override[(IEEE_A, VALUE)] = 2000
+    controller = make_controller(prof=replace(profile, capabilities=capabilities))
+    await controller.async_start()
+    await advance(hass, freezer, 25)
+    raised = issue(hass, "trv_unreachable_0011")
+    assert raised is not None
+    assert raised.translation_placeholders["setting"] == "Room temperature"
 
 
 async def test_write_error_is_retried_and_recovers(
@@ -444,7 +461,7 @@ async def test_start_clears_stale_thermostat_issues(hass, controller, gateway) -
             room="Living",
             setting="x",
             thermostat="y",
-            attempts=3,
+            attempts="3",
             error="z",
         )
         issues.raise_firmware(
@@ -647,8 +664,8 @@ async def test_profile_without_capability_is_unsupported(
     for ieee in ("0011", "0022"):
         raised = issue(hass, f"trv_firmware_{ieee}")
         assert raised is not None
-        # No label for the intent name of a missing capability: it stays as is.
-        assert raised.translation_placeholders["setting"] == "set_hysteresis"
+        # The core names the intent of a capability the profile lacks: labelled too.
+        assert raised.translation_placeholders["setting"] == "Hysteresis"
         # The profile has no such capability, so no version is required.
         assert raised.translation_placeholders["required"] == "unknown"
         assert raised.translation_placeholders["current"] == "1.3.0"

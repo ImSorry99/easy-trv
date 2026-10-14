@@ -13,7 +13,7 @@ def get(hass, issue_id):
 
 def raise_unreachable(hass, ieee) -> None:
     issues.raise_unreachable(
-        hass, ieee, room="Old", setting="x", thermostat="y", attempts=3, error="z"
+        hass, ieee, room="Old", setting="x", thermostat="y", attempts="3", error="z"
     )
 
 
@@ -36,7 +36,7 @@ async def test_unreachable_issue_is_raised_and_cleared(hass) -> None:
         room="Living",
         setting="Hysteresis",
         thermostat="Living TRV",
-        attempts=3,
+        attempts="3",
         error="radio busy",
     )
     raised = get(hass, "trv_unreachable_00124b00aabb")

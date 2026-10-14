@@ -26,10 +26,10 @@ async def async_option_labels(hass: HomeAssistant, key: str) -> dict[str, str]:
 
 
 async def async_capability_labels(hass: HomeAssistant) -> dict[str, str]:
-    """Return the plain-language label of every profile capability.
+    """Return the plain-language setting name of every intent, by intent name.
 
-    A capability without a translation is simply missing: callers fall back to
-    the capability key.
+    The intents are the fixed vocabulary behind all profiles. An intent without
+    a translation is simply missing: callers fall back to the capability key.
     """
     return await async_option_labels(hass, "capability")
 

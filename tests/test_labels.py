@@ -8,28 +8,28 @@ from custom_components.easy_trv.labels import (
     thermostat_name,
 )
 
-CAPABILITIES = {
-    "external_temperature",
-    "source_select",
-    "window_detection_flag",
-    "hysteresis",
-    "adaptive_mode",
-    "frost_protection",
+INTENTS = {
+    "set_room_temperature",
+    "set_source",
+    "set_window_detection",
+    "set_hysteresis",
+    "set_adaptive_mode",
+    "set_frost_temperature",
 }
 
 
 async def test_capability_labels_come_from_translations(hass) -> None:
     labels = await async_capability_labels(hass)
-    assert set(labels) == CAPABILITIES
-    assert labels["window_detection_flag"] == "Thermostat's open-window detection"
-    assert labels["external_temperature"] == "Room temperature"
+    assert set(labels) == INTENTS
+    assert labels["set_window_detection"] == "Thermostat's open-window detection"
+    assert labels["set_room_temperature"] == "Room temperature"
 
 
 async def test_capability_labels_follow_the_language(hass) -> None:
     hass.config.language = "de"
     labels = await async_capability_labels(hass)
-    assert labels["window_detection_flag"] == "Fenster-offen-Erkennung des Thermostats"
-    assert labels["external_temperature"] == "Raumtemperatur"
+    assert labels["set_window_detection"] == "Fenster-offen-Erkennung des Thermostats"
+    assert labels["set_room_temperature"] == "Raumtemperatur"
 
 
 async def test_option_labels_are_read_by_option_value(hass) -> None:

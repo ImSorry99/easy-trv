@@ -240,12 +240,12 @@
     },
     "capability": {
       "options": {
-        "external_temperature": "Room temperature",
-        "source_select": "Temperature source",
-        "window_detection_flag": "Thermostat's open-window detection",
-        "hysteresis": "Hysteresis",
-        "adaptive_mode": "Adaptive mode",
-        "frost_protection": "Frost protection temperature"
+        "set_room_temperature": "Room temperature",
+        "set_source": "Temperature source",
+        "set_window_detection": "Thermostat's open-window detection",
+        "set_hysteresis": "Hysteresis",
+        "set_adaptive_mode": "Adaptive mode",
+        "set_frost_temperature": "Frost protection temperature"
       }
     }
   }

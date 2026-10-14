@@ -92,7 +92,7 @@ async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
     assert entry.runtime_data.rooms.keys() == {subentry_id}
     # The capability labels are loaded once per entry, for the Repairs texts.
     labels = entry.runtime_data.labels
-    assert labels["window_detection_flag"] == "Thermostat's open-window detection"
+    assert labels["set_window_detection"] == "Thermostat's open-window detection"
     assert zha_issue(hass) is None
 
 
@@ -485,7 +485,7 @@ async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
 async def test_setup_removes_issues_of_thermostats_in_no_room(hass, entry) -> None:
     for ieee in ("00:99", "00:11"):
         issues.raise_unreachable(
-            hass, ieee, room="Old", setting="x", thermostat="y", attempts=3, error="z"
+            hass, ieee, room="Old", setting="x", thermostat="y", attempts="3", error="z"
         )
         issues.raise_firmware(
             hass,
