@@ -2319,3 +2319,83 @@ def test_a_pending_frost_retry_is_reapplied_when_the_thermostat_is_away() -> Non
     st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
     st, _ = logic().handle(RetryDue("climate.a", "frost_temperature"), T0, st)
     assert not st.trvs["climate.a"].settings_applied
+
+
+# --- A capability the profile does not declare ----------------------------
+
+NOT_IN_PROFILE_ADAPTIVE = Unsupported(
+    "adaptive_mode", "unknown", "1.4.4", reason="profile"
+)
+
+
+def test_unsupported_reason_defaults_to_firmware() -> None:
+    assert Unsupported("hysteresis", "1.3.0", "1.2.1").reason == "firmware"
+
+
+def test_capability_missing_from_the_profile_is_not_a_firmware_problem() -> None:
+    cfg = replace(CFG, adaptive_mode="on", hysteresis=0.4)
+    room, st, _ = start_room(cfg)
+    st, cmds = room.handle(
+        result("climate.a", SetAdaptiveMode(enabled=True), NOT_IN_PROFILE_ADAPTIVE),
+        T0,
+        st,
+    )
+    assert of_type(cmds, RaiseIssue) == []
+    assert of_type(cmds, ClearIssue) == []
+    trv = st.trvs["climate.a"]
+    assert trv.health == TrvHealth.OK
+    assert trv.not_in_profile == frozenset(
+        {capability_of(SetAdaptiveMode(enabled=True))}
+    )
+    assert trv.unsupported == trv.not_in_profile
+    assert cmds[-1].status == RoomStatus.OK
+    logs = of_type(cmds, Log)
+    assert [log.level for log in logs] == ["debug"]
+    assert "Living" in logs[0].message
+    assert "climate.a" in logs[0].message
+    assert capability_of(SetAdaptiveMode(enabled=True)) in logs[0].message
+    # The adaptive -> hysteresis rule still applies.
+    assert executes(cmds) == [("climate.a", SetHysteresis(0.4))]
+
+
+def test_a_profile_gap_stays_healthy_when_the_thermostat_comes_back() -> None:
+    cfg = replace(CFG, adaptive_mode="on")
+    room, st, _ = start_room(cfg)
+    st, _ = room.handle(
+        result("climate.a", SetAdaptiveMode(enabled=True), NOT_IN_PROFILE_ADAPTIVE),
+        T0,
+        st,
+    )
+    st, _ = room.handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    st, cmds = room.handle(TrvAvailabilityChanged("climate.a", available=True), T0, st)
+    assert st.trvs["climate.a"].health == TrvHealth.OK
+    assert cmds[-1].status == RoomStatus.OK
+
+
+def test_a_profile_gap_is_logged_once_and_not_written_again() -> None:
+    cfg = replace(CFG, adaptive_mode="on", hysteresis=0.4)
+    room, st, _ = start_room(cfg)
+    st, _ = room.handle(
+        result("climate.a", SetAdaptiveMode(enabled=True), NOT_IN_PROFILE_ADAPTIVE),
+        T0,
+        st,
+    )
+    st = with_trv(st, "climate.a", settings_applied=False)
+    _, cmds = room.handle(Start(READINGS, BOTH_AVAILABLE), T0, st)
+    sent = intents_for(cmds)
+    assert SetAdaptiveMode(enabled=True) not in sent
+    assert sent.count(SetHysteresis(0.4)) == 1
+    assert of_type(cmds, Log) == []
+    assert of_type(cmds, RaiseIssue) == []
+
+
+def test_a_device_unsupported_outcome_still_raises_the_firmware_issue() -> None:
+    cfg = replace(CFG, adaptive_mode="on")
+    room, st, _ = start_room(cfg)
+    outcome = Unsupported("adaptive_mode", "unknown", "1.3.0", reason="device")
+    st, cmds = room.handle(
+        result("climate.a", SetAdaptiveMode(enabled=True), outcome), T0, st
+    )
+    assert [i.kind for i in of_type(cmds, RaiseIssue)] == ["firmware"]
+    assert st.trvs["climate.a"].health == TrvHealth.UNSUPPORTED
+    assert st.trvs["climate.a"].not_in_profile == frozenset()

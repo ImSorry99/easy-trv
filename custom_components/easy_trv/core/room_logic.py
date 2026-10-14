@@ -289,9 +289,10 @@ class RoomLogic:
             attempts=_without(current.attempts, capability),
             pending_retry=_without(current.pending_retry, capability),
             unsupported=current.unsupported - {capability},
+            not_in_profile=current.not_in_profile - {capability},
         )
         commands: list[Command] = []
-        if capability in current.unsupported:
+        if capability in current.unsupported - current.not_in_profile:
             commands.append(ClearIssue("firmware", trv))
         still_failing = False
         if self._reported(current):
@@ -387,33 +388,54 @@ class RoomLogic:
     def _on_unsupported(
         self, event: OperationResult, outcome: Unsupported, state: RoomState
     ) -> _Step:
-        """Flag the capability as missing in the firmware; it is never retried."""
+        """Flag the capability as missing; it is never retried.
+
+        A capability the profile does not declare (``reason == "profile"``) is
+        remembered so it is not written again, but is no firmware problem: no
+        issue, and the health stays as it was.
+        """
         trv, capability = event.trv, event.capability
         current = state.trvs[trv]
+        in_profile = outcome.reason != "profile"
         updated = replace(
             current,
             unsupported=current.unsupported | {capability},
+            not_in_profile=(
+                current.not_in_profile
+                if in_profile
+                else current.not_in_profile | {capability}
+            ),
             pending_retry=_without(current.pending_retry, capability),
         )
-        if current.health is not TrvHealth.ERROR:
-            updated = replace(updated, health=self._baseline(updated))
-        issue = RaiseIssue(
-            "firmware",
-            trv,
-            {
-                "trv": trv,
-                "capability": outcome.capability,
-                "required": outcome.required,
-                "installed": outcome.installed,
-            },
-        )
-        commands: list[Command] = [issue]
-        kelvin = self._cfg.hysteresis
-        if kelvin is not None and self._adaptive_was_in_charge(capability):
+        commands: list[Command] = []
+        if in_profile:
+            if current.health is not TrvHealth.ERROR:
+                updated = replace(updated, health=self._baseline(updated))
+            commands.append(
+                RaiseIssue(
+                    "firmware",
+                    trv,
+                    {
+                        "trv": trv,
+                        "capability": outcome.capability,
+                        "required": outcome.required,
+                        "installed": outcome.installed,
+                    },
+                )
+            )
+        elif capability not in current.not_in_profile:
+            commands.append(
+                Log(
+                    "debug",
+                    f"{self._cfg.name}: {trv} has no {capability} setting in its "
+                    "profile, leaving it alone",
+                )
+            )
+        if self._adaptive_was_in_charge(capability):
             # Adaptive mode is what suppressed the hysteresis write; without it
             # the thermostat needs the hysteresis (in the next apply if away).
             if trv in self._writable(state):
-                commands.append(Execute(trv, SetHysteresis(kelvin)))
+                commands.append(Execute(trv, SetHysteresis(self._cfg.hysteresis)))
             else:
                 updated = replace(updated, settings_applied=False)
         return self._with_trv(state, trv, updated), commands
@@ -708,7 +730,7 @@ class RoomLogic:
         """Return the health of a thermostat that has no error of its own."""
         if not trv_state.available:
             return TrvHealth.UNAVAILABLE
-        if trv_state.unsupported:
+        if trv_state.unsupported - trv_state.not_in_profile:
             return TrvHealth.UNSUPPORTED
         return TrvHealth.OK
 

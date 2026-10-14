@@ -200,6 +200,9 @@ class TrvState:
     last_error_retry: datetime | None = None
     failsafe_seen_at: datetime | None = None
     unsupported: frozenset[str] = frozenset()
+    # The part of ``unsupported`` the profile does not declare at all: those
+    # are no firmware problem and do not affect the health.
+    not_in_profile: frozenset[str] = frozenset()
     settings_applied: bool = False
 
 
@@ -247,11 +250,17 @@ class Failed:
 
 @dataclass(frozen=True)
 class Unsupported:
-    """The installed firmware lacks the capability."""
+    """The thermostat cannot do the capability.
+
+    ``reason`` tells why: ``"firmware"`` (below the minimum the profile names),
+    ``"device"`` (the device answers ``UNSUPPORTED_ATTRIBUTE``) or ``"profile"``
+    (the profile declares no such capability, which is no firmware problem).
+    """
 
     capability: str
     required: str
     installed: str
+    reason: Literal["firmware", "device", "profile"] = "firmware"
 
 
 @dataclass(frozen=True)

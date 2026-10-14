@@ -650,31 +650,57 @@ async def test_firmware_gated_capability_raises_issue_and_keeps_writing(
     assert controller.status == RoomStatus.DEGRADED
 
 
-async def test_profile_without_capability_is_unsupported(
-    hass, make_controller, gateway, profile
-) -> None:
+def without_capabilities(profile, *names):
+    """Return the profile minus capabilities, like a copied 0.1.0 user profile."""
     capabilities = {
-        name: spec
-        for name, spec in profile.capabilities.items()
-        if name != "hysteresis"
+        name: spec for name, spec in profile.capabilities.items() if name not in names
     }
-    controller = make_controller(prof=replace(profile, capabilities=capabilities))
+    return replace(profile, capabilities=capabilities)
+
+
+async def test_profile_without_capability_is_not_a_firmware_problem(
+    hass, make_controller, gateway, profile, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="custom_components.easy_trv.controller")
+    controller = make_controller(prof=without_capabilities(profile, "hysteresis"))
     await controller.async_start()
     await settle(hass)
-    for ieee in ("0011", "0022"):
-        raised = issue(hass, f"trv_firmware_{ieee}")
-        assert raised is not None
-        # The core names the intent of a capability the profile lacks: labelled too.
-        assert raised.translation_placeholders["setting"] == "Hysteresis"
-        # The profile has no such capability, so no version is required.
-        assert raised.translation_placeholders["required"] == "unknown"
-        assert raised.translation_placeholders["current"] == "1.3.0"
+    assert issue(hass, "trv_firmware_0011") is None
+    assert issue(hass, "trv_firmware_0022") is None
     assert writes_to(gateway, IEEE_A, HYSTERESIS) == []
     assert writes_to(gateway, IEEE_A, VALUE) == [2130]
-    assert health(controller) == {
-        "climate.a": "unsupported",
-        "climate.b": "unsupported",
+    assert health(controller) == {"climate.a": "ok", "climate.b": "ok"}
+    assert controller.status == RoomStatus.OK
+    lines = [
+        r.getMessage()
+        for r in caplog.records
+        if "no set_hysteresis setting" in r.getMessage()
+    ]
+    assert len(lines) == 2
+    assert all("Living" in line for line in lines)
+    assert any("climate.a" in line for line in lines)
+    assert controller.snapshot()["not_in_profile"] == {
+        "climate.a": ["set_hysteresis"],
+        "climate.b": ["set_hysteresis"],
     }
+
+
+async def test_profile_without_adaptive_mode_gets_the_hysteresis_once(
+    hass, make_controller, gateway, profile, config
+) -> None:
+    controller = make_controller(
+        cfg=replace(config, adaptive_mode="on"),
+        prof=without_capabilities(profile, "adaptive_mode", "frost_protection"),
+    )
+    await controller.async_start()
+    await settle(hass)
+    assert writes_to(gateway, IEEE_A, HYSTERESIS) == [-40]
+    assert writes_to(gateway, IEEE_B, HYSTERESIS) == [-40]
+    assert health(controller) == {"climate.a": "ok", "climate.b": "ok"}
+    assert controller.snapshot()["not_in_profile"]["climate.a"] == [
+        "set_adaptive_mode",
+        "set_frost_temperature",
+    ]
 
 
 async def test_unsupported_attribute_raises_a_firmware_issue_without_retrying(
@@ -975,7 +1001,7 @@ async def test_snapshot_is_json_able(hass, controller, gateway) -> None:
     await controller.async_start()
     await settle(hass)
     snapshot = json.loads(json.dumps(controller.snapshot()))
-    assert set(snapshot) == {"config", "params", "state"}
+    assert set(snapshot) == {"config", "params", "state", "not_in_profile"}
     assert snapshot["config"]["room_id"] == "room1"
     assert snapshot["config"]["trvs"][0] == {
         "entity_id": "climate.a",

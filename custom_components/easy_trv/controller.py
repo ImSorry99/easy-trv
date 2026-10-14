@@ -257,6 +257,11 @@ class RoomController:
             "config": _jsonable(self._config),
             "params": _jsonable(self._params),
             "state": _jsonable(self._state),
+            "not_in_profile": {
+                trv: sorted(state.not_in_profile)
+                for trv, state in self._state.trvs.items()
+                if state.not_in_profile
+            },
         }
 
     async def async_start(self) -> None:
@@ -547,9 +552,15 @@ class RoomController:
         except CapabilityUnsupported as exc:
             capability = self._profile.capability_for(intent) or exc.capability
             outcome: Outcome = Unsupported(
-                exc.capability, _fmt_version(exc.required), _fmt_version(exc.installed)
+                exc.capability,
+                _fmt_version(exc.required),
+                _fmt_version(exc.installed),
+                # No required version: the profile declares no such capability.
+                reason="firmware" if exc.required is not None else "profile",
             )
-            self._log_not_sent(trv, capability, outcome)
+            if exc.required is not None:
+                # The core logs a missing profile capability itself, once.
+                self._log_not_sent(trv, capability, outcome)
             return OperationResult(trv, intent, capability, outcome)
         except ValueError as exc:
             capability = self._capability_of(intent)
@@ -597,7 +608,7 @@ class RoomController:
             # The device lacks the attribute: no retry will help. What the
             # firmware needs is not known, only what is installed.
             installed = _fmt_version(self._firmware[trv])
-            return Unsupported(op.capability, "unknown", installed)
+            return Unsupported(op.capability, "unknown", installed, reason="device")
         except (GatewayError, TimeoutError) as err:
             return Failed(str(err) or type(err).__name__)
         return _judge(op, values)

@@ -663,3 +663,28 @@ async def test_a_version_2_entry_is_not_migrated_again(hass) -> None:
     assert entry.version == 2
     assert subentry_of(entry, "Living").data["hysteresis"] == "leave"
     assert migrated_issue(hass) is None
+
+
+async def test_user_profile_without_adaptive_and_frost_is_no_firmware_problem(
+    hass, tmp_path, fake_gateway
+) -> None:
+    """A profile copied from 0.1.0 has neither capability: a gap, not a defect."""
+    text = BUILTIN_TEXT.replace("id: sonoff_trvzb_native", "id: user_zbt", 1)
+    text = text.replace("model: TRVZB", "model: TRV-ZBT", 1)
+    text = text[: text.index("  adaptive_mode:")]
+    use_config_dir(hass, tmp_path).joinpath("zbt.yaml").write_text(text)
+    fake_gateway.add_device("climate.x", "00:33", model="TRV-ZBT", firmware=FIRMWARE)
+    hass.states.async_set("climate.x", "heat")
+    entry = make_entry(hass, [room_data(trvs=["climate.x"])], FAST_OPTIONS)
+
+    await start(hass, entry)
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "trv_firmware_0033") is None
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert attribute_writes(fake_gateway, ADAPTIVE) == []
+    assert attribute_writes(fake_gateway, 0x6002) == []
+    assert attribute_writes(fake_gateway, HYSTERESIS) == [-40]
+    (room,) = entry.runtime_data.rooms.values()
+    assert room.snapshot()["not_in_profile"] == {
+        "climate.x": ["set_adaptive_mode", "set_frost_temperature"]
+    }
