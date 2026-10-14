@@ -93,7 +93,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "window_detection": "on",
         "hysteresis": 0.4,
         "adaptive_mode": "on",
-        "frost_temperature": 7.0,
+        "frost_temperature": 5.0,
         "profile": "auto",
     }
 

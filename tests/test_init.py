@@ -686,7 +686,7 @@ async def test_upgrade_from_0_1_0_with_old_and_new_firmware(hass, fake_gateway) 
     # Firmware 1.3.0: adaptive mode is refused, then the hysteresis follows once.
     assert writes("00:11") == [
         (0x6000, 1),
-        (0x6002, 700),
+        (0x6002, 500),
         (0x600E, 1),
         (VALUE, 2130),
         (HYSTERESIS, -40),
@@ -695,7 +695,7 @@ async def test_upgrade_from_0_1_0_with_old_and_new_firmware(hass, fake_gateway) 
     assert writes("00:22") == [
         (0x6000, 1),
         (ADAPTIVE, 2),
-        (0x6002, 700),
+        (0x6002, 500),
         (0x600E, 1),
         (VALUE, 2130),
     ]

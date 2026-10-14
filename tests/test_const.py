@@ -14,7 +14,7 @@ def test_defaults_match_requirements() -> None:
     assert const.DEFAULT_HYSTERESIS == "0_4"
     assert const.DEFAULT_WINDOW_DETECTION == "on"
     assert const.DEFAULT_ADAPTIVE_MODE == "on"
-    assert const.DEFAULT_FROST_TEMPERATURE == 7.0
+    assert const.DEFAULT_FROST_TEMPERATURE == 5.0
     assert const.SETTING_GLOBAL == "global"
     assert const.CONF_ADAPTIVE_MODE == "adaptive_mode"
     assert const.CONF_FROST_TEMPERATURE == "frost_temperature"

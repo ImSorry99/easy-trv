@@ -37,7 +37,7 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
         window_detection="on",
         hysteresis=0.6,
         adaptive_mode="on",
-        frost_temperature=7.0,
+        frost_temperature=5.0,
     )
 
 

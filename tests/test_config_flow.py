@@ -747,7 +747,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_window_detection": "Detection on",
         "global_hysteresis": "0.4 K",
         "global_adaptive_mode": "Adaptive on",
-        "global_frost_temperature": "7.0 °C",
+        "global_frost_temperature": "5.0 °C",
         "global_refresh_minutes": "20 min",
         "global_verify_delay_seconds": "10 s",
         "global_max_attempts": "3",
@@ -794,7 +794,7 @@ async def test_room_settings_placeholders_are_german_in_a_german_instance(
     assert placeholders["global_window_detection"] == "Erkennung an"
     assert placeholders["global_adaptive_mode"] == "Adaptiv an"
     assert placeholders["global_profile"] == "Auto"
-    assert placeholders["global_frost_temperature"] == "7,0 °C"
+    assert placeholders["global_frost_temperature"] == "5,0 °C"
     assert placeholders["global_min_delta_kelvin"] == "0,1 K"
     assert placeholders["global_refresh_minutes"] == "20 min"
     assert placeholders["global_sensor_timeout_minutes"] == "Aus"
@@ -1183,7 +1183,7 @@ def options_input(writes=None, thermostat=None) -> dict[str, Any]:
             "window_detection": "on",
             "hysteresis": "0_4",
             "adaptive_mode": "on",
-            "frost_temperature": 7.0,
+            "frost_temperature": 5.0,
             **(thermostat or {}),
         },
     }
@@ -1225,7 +1225,7 @@ async def test_options_form_suggests_only_saved_numbers(hass, entry) -> None:
         "default_max_attempts": "3",
         "default_min_delta_kelvin": "0.1 K",
         "default_sensor_timeout_minutes": "120 min",
-        "default_frost_temperature": "7.0 °C",
+        "default_frost_temperature": "5.0 °C",
     }
 
     saved = make_entry(

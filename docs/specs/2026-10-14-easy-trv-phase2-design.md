@@ -44,7 +44,7 @@ Settings and their types (built-in default in brackets):
 | `window_detection` | `on` / `off` / `leave` | `on` | 0x6000 |
 | `hysteresis` | `0_2` … `1_0` (no `leave`) | `0_4` | 0x6011, only while adaptive is not `on` |
 | `adaptive_mode` | `on` / `off` / `leave` | `on` | 0x6017 (FW ≥ 1.4.4) |
-| `frost_temperature` | float 4.0–16.0 step 0.5 | 7.0 | 0x6002 and preset `frost` (2b) |
+| `frost_temperature` | float 4.0–16.0 step 0.5 | 5.0 | 0x6002 and preset `frost` (2b) |
 | `setpoint_min` / `setpoint_max` | float 4.0–35.0 step 0.5, min < max | 5.0 / 30.0 | 2b |
 | `profile` | `auto` / profile id | `auto` | — |
 | `window_warn_minutes` | int 0–1440 (0 = off) | 120 | 2c |

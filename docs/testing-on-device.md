@@ -47,7 +47,7 @@ After Home Assistant is fully started (or after **Reload** on the Easy TRV page)
 | window detection (unless "leave") | `0x6000` | `1` (on) or `0` (off) |
 | adaptive mode (firmware 1.4.4 or newer, unless "leave") | `0x6017` | `2` (on) or `0` (off) |
 | hysteresis (firmware 1.3.0 or newer; only while adaptive mode is not on, or when the thermostat cannot do adaptive mode) | `0x6011` | minus hundredths of a kelvin, `-40` for 0.4 K |
-| frost protection temperature | `0x6002` | hundredths of a degree Celsius, `700` for 7 °C |
+| frost protection temperature | `0x6002` | hundredths of a degree Celsius, `500` for 5 °C |
 | source: external | `0x600E` | `1`; reads back `1` or `3` |
 | room temperature | `0x600D` | the room temperature rounded to 0.1 °C, times 100: `2130` for 21.3 °C, `2140` for 21.35 °C |
 
@@ -66,7 +66,7 @@ For each thermostat: device page > three dots > **Manage Zigbee device** > **Clu
 | `external_temperature_sensor_enable` | `0x600E` (24590) | `1` or `3` (external); `0` internal; `2` fail-safe |
 | `open_window` | `0x6000` (24576) | `1` if window detection is on |
 | `smart_temperature_control` | `0x6017` (24599) | `2` if adaptive mode is on, `0` if off. The device also reports `1` as an alias of off, so a `1` after switching it off is fine (firmware 1.4.4 or newer) |
-| `frost_protection_temperature` | `0x6002` (24578) | `700` for 7 °C (hundredths of a degree) |
+| `frost_protection_temperature` | `0x6002` (24578) | `500` for 5 °C (hundredths of a degree) |
 | `temperature_control_accuracy` | `0x6011` (24593) | `-40` for 0.4 K (firmware 1.3.0 or newer). In a room with adaptive mode on it keeps whatever the thermostat had; Easy TRV does not write it |
 
 ### Hardware check: adaptive mode and hysteresis
@@ -77,7 +77,7 @@ The two rooms from section 2 cover both sides of the hysteresis rule. Needs firm
 2. **Adaptive mode off (Wohnzimmer).** Read `0x6017` of a living-room thermostat: expected `0` (a `1` also counts as off). `0x6011` reads `-40`, and the log has `adaptive_mode attr 0x6017 raw=0 -> ok` followed by `hysteresis attr 0x6011 raw=-40 -> ok`.
 3. **Switch the bedroom to adaptive off.** Edit the room, set Adaptive mode to "Adaptive off", save. Expected after the reload: `0x6017` reads `0` or `1`, and `0x6011` reads `-40` (written now). Switch it back to **Global** afterwards (for S10).
 4. **Firmware below 1.4.4** (only if one thermostat still runs 1.3.0): Repairs shows `trv_firmware` naming "Adaptive mode" and the thermostat, and the hysteresis is written to that thermostat anyway, even with adaptive mode on.
-5. **Frost protection.** `0x6002` reads `700`. Change the global frost protection temperature to 9 °C in the options: after the reload `0x6002` reads `900` on every room that has no value of its own. Set it back.
+5. **Frost protection.** `0x6002` reads `500`. Change the global frost protection temperature to 9 °C in the options: after the reload `0x6002` reads `900` on every room that has no value of its own. Set it back.
 
 ### Check
 
