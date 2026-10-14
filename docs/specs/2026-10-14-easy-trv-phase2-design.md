@@ -79,12 +79,12 @@ New intents, encoders stay as they are except one addition:
 |---|---|---|---|---|---|
 | `adaptive_mode` | `set_adaptive_mode(enabled)` | 0xFC11 / 0x6017 | `map` `true: 2, false: 0` | `one_of` `true: [2]`, `false: [0, 1]` | ≥ 1.4.4 |
 | `frost_protection` | `set_frost_temperature(celsius)` | 0xFC11 / 0x6002 | `temperature_centi` | `equals` | all |
-| `setpoint` (2b) | `set_setpoint(celsius)` | 0x0201 / 0x0012 | `temperature_centi` with `step: 0.5` | `equals` | all |
+| `setpoint` (2b) | `set_setpoint(celsius)` | 0x0201 / 0x0012 | `temperature_centi` with `step: 0.5`, `min: 4.0`, `max: 35.0` | `equals` | all |
 | `hvac_mode` (2b) | `set_hvac_mode(mode)` | 0x0201 / 0x001C | `map` `heat: 4, off: 0` | `one_of` `heat: [4]`, `off: [0]`; `auto` (1) is a *signal* `schedule` | all |
 
 `0x6017` reads back `1` as a read-only alias of "off" (Z2M PR #11466), hence `false: [0, 1]`.
 
-Schema additions: `write.step` (round the intent value to this step before encoding), `observe: true` on a capability (2b: the adapter subscribes to reports of this attribute), `signals` extended to the standard cluster. The built-in profile declares all of them; `tested_firmware` stays `["1.3.0", "1.4.4"]` until the owner's hardware run confirms.
+Schema additions: `write.step`, `write.min` / `write.max` (device limits of the capability, used for the room's effective range) (round the intent value to this step before encoding), `observe: true` on a capability (2b: the adapter subscribes to reports of this attribute), `signals` extended to the standard cluster. The built-in profile declares all of them; `tested_firmware` stays `["1.3.0", "1.4.4"]` until the owner's hardware run confirms.
 
 **Hysteresis rule.** The room logic applies `set_hysteresis` only when the resolved `adaptive_mode` is not `on`. With `adaptive_mode: leave` the hysteresis is written regardless (the device ignores it while adaptive is active, keeps it, and uses it once adaptive is switched off).
 
@@ -109,7 +109,7 @@ One `ClimateEntity` per room, attached to the room device, created only when the
 | `hvac_modes` | `[HEAT, OFF]` |
 | `preset_modes` | `["none", "frost"]` |
 | `supported_features` | `TARGET_TEMPERATURE | TURN_ON | TURN_OFF | PRESET_MODE` |
-| `min_temp` / `max_temp` / `target_temperature_step` | resolved `setpoint_min` / `setpoint_max` / 0.5 |
+| `min_temp` / `max_temp` / `target_temperature_step` | the *effective range*: the resolved `setpoint_min` / `setpoint_max` intersected with the device limits of every thermostat of the room (the `setpoint` capability declares `min`/`max`/`step` in the profile, 4.0 / 35.0 / 0.5 for the TRVZB); the narrowest limits win. The frost temperature is clamped into the same range. |
 | `current_temperature` | the value last sent to the thermostats (`state.last_written`), else the active sensor's value, else `None` |
 | `target_temperature` | the room setpoint |
 | `hvac_action` | not provided (TRVZB `running_state` is unreliable, wrong in adaptive mode) |
