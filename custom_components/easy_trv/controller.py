@@ -199,8 +199,8 @@ class RoomController:
     ) -> None:
         """Wire the room logic to Home Assistant, the profile and the gateway.
 
-        ``labels`` maps a capability to the plain-language name of the setting
-        for Repairs texts; a capability without a label is shown by its key.
+        ``labels`` maps an intent name to the plain-language name of the setting
+        for Repairs texts; a setting without a label is shown by its key.
         """
         self._hass = hass
         self._config = config

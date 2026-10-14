@@ -665,6 +665,63 @@ async def test_a_version_2_entry_is_not_migrated_again(hass) -> None:
     assert migrated_issue(hass) is None
 
 
+async def test_upgrade_from_0_1_0_with_old_and_new_firmware(hass, fake_gateway) -> None:
+    """A 0.1.0 entry: adaptive mode arrives on 1.4.4, 1.3.0 keeps the hysteresis."""
+    fake_gateway.add_device("climate.a", "00:11", firmware=(1, 3, 0))
+    fake_gateway.add_device("climate.b", "00:22", firmware=(1, 4, 4))
+    entry = make_entry(
+        hass,
+        [
+            room_data(name="Living", trvs=["climate.a"], hysteresis="leave"),
+            room_data(name="Bed", trvs=["climate.b"], hysteresis="0_2"),
+        ],
+        FAST_OPTIONS,
+        version=1,
+    )
+    await start(hass, entry)
+
+    def writes(ieee: str) -> list[tuple[int, int]]:
+        return [(w[3], w[4]) for w in fake_gateway.writes if w[0] == ieee]
+
+    # Firmware 1.3.0: adaptive mode is refused, then the hysteresis follows once.
+    assert writes("00:11") == [
+        (0x6000, 1),
+        (0x6002, 700),
+        (0x600E, 1),
+        (VALUE, 2130),
+        (HYSTERESIS, -40),
+    ]
+    # Firmware 1.4.4: adaptive mode manages the hysteresis, nothing is written.
+    assert writes("00:22") == [
+        (0x6000, 1),
+        (ADAPTIVE, 2),
+        (0x6002, 700),
+        (0x600E, 1),
+        (VALUE, 2130),
+    ]
+
+    issue = migrated_issue(hass)
+    assert issue is not None
+    assert issue.translation_placeholders == {"rooms": "Living", "hysteresis": "0.4 K"}
+    firmware = ir.async_get(hass).async_get_issue(DOMAIN, "trv_firmware_0011")
+    assert firmware is not None
+    assert firmware.translation_placeholders["setting"] == "Adaptive mode"
+    assert firmware.translation_placeholders["required"] == "1.4.4"
+    assert firmware.translation_placeholders["current"] == "1.3.0"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "trv_firmware_0022") is None
+    assert hass.states.get("sensor.living_heating_status").state == "degraded"
+    assert hass.states.get("sensor.bed_heating_status").state == "ok"
+
+
+async def test_migration_notice_uses_the_decimal_comma_in_german(hass) -> None:
+    hass.config.language = "de"
+    entry = make_entry(hass, [room_data(hysteresis="leave")], FAST_OPTIONS, version=1)
+    await start(hass, entry)
+    issue = migrated_issue(hass)
+    assert issue is not None
+    assert issue.translation_placeholders["hysteresis"] == "0,4 K"
+
+
 async def test_user_profile_without_adaptive_and_frost_is_no_firmware_problem(
     hass, tmp_path, fake_gateway
 ) -> None:

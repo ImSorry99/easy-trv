@@ -25,6 +25,11 @@ async def async_option_labels(hass: HomeAssistant, key: str) -> dict[str, str]:
     }
 
 
+def localized_number(hass: HomeAssistant, text: str) -> str:
+    """Return a number written with ``.`` with a decimal comma in German."""
+    return text.replace(".", ",") if hass.config.language.startswith("de") else text
+
+
 async def async_capability_labels(hass: HomeAssistant) -> dict[str, str]:
     """Return the plain-language setting name of every intent, by intent name.
 

@@ -66,7 +66,7 @@ from custom_components.easy_trv.core.settings import (
     overrides,
     resolve_settings,
 )
-from custom_components.easy_trv.labels import async_option_labels
+from custom_components.easy_trv.labels import async_option_labels, localized_number
 from custom_components.easy_trv.profiles.loader import async_load_profiles
 
 if TYPE_CHECKING:
@@ -366,13 +366,11 @@ async def _setting_texts(
     Selects use the labels of their selector, numbers get their unit and, in
     German, a decimal comma. A sensor timeout of 0 reads as "off".
     """
-    comma = hass.config.language.startswith("de")
     texts: dict[str, str] = {}
     for key, value in values.items():
         if key in _NUMBERS and not (key == CONF_SENSOR_TIMEOUT and value == 0):
             text = f"{value:.1f}" if isinstance(value, float) else str(value)
-            if comma:
-                text = text.replace(".", ",")
+            text = localized_number(hass, text)
             unit = _NUMBERS[key].unit
             texts[key] = text if unit is None else f"{text} {unit}"
         else:

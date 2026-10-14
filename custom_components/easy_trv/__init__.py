@@ -32,7 +32,10 @@ from custom_components.easy_trv.const import (
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.core.model import RoomConfig, RoomParams, TrvConfig
 from custom_components.easy_trv.core.settings import RoomSettings, resolve_settings
-from custom_components.easy_trv.labels import async_capability_labels
+from custom_components.easy_trv.labels import (
+    async_capability_labels,
+    localized_number,
+)
 from custom_components.easy_trv.profiles.loader import LoadResult, async_load_profiles
 
 if TYPE_CHECKING:
@@ -61,7 +64,7 @@ class EasyTrvRuntimeData:
     rooms: dict[str, RoomController]
     settings: dict[str, RoomSettings]  # resolved settings by subentry id
     areas: dict[str, str | None]  # area name by subentry id (None: no area)
-    labels: Mapping[str, str]  # plain-language setting name by capability
+    labels: Mapping[str, str]  # plain-language setting name by intent
 
 
 type EasyTrvConfigEntry = ConfigEntry[EasyTrvRuntimeData]
@@ -227,8 +230,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             migrated.append(subentry.title)
         hass.config_entries.async_update_entry(entry, version=2)
         if migrated:
-            hysteresis = resolve_settings(entry.options, {}).hysteresis
-            issues.raise_settings_migrated(hass, migrated, f"{hysteresis:.1f} K")
+            kelvin = f"{resolve_settings(entry.options, {}).hysteresis:.1f}"
+            issues.raise_settings_migrated(
+                hass, migrated, f"{localized_number(hass, kelvin)} K"
+            )
     return True
 
 
