@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check manifest version matches the tag
+        run: |
+          manifest_version="$(jq -r .version custom_components/easy_trv/manifest.json)"
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$manifest_version" != "$tag_version" ]; then
+            echo "manifest.json version ($manifest_version) does not match tag ($tag_version)" >&2
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 {flag=1; next} /^## \[/ {flag=0} flag' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "No changelog section found for $VERSION" >&2
+            exit 1
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
