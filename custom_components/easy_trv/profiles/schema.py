@@ -21,6 +21,9 @@ INTENTS = (
     "set_adaptive_mode",
     "set_frost_temperature",
 )
+# Without these a room could never write its temperature, and a missing
+# capability is otherwise skipped silently, so a profile must declare them.
+REQUIRED_INTENTS = ("set_room_temperature", "set_source")
 ENCODERS = ("temperature_centi", "kelvin_centi_negative", "bool")
 VERIFY_RULES = ("equals", "one_of")
 
@@ -159,8 +162,8 @@ def validate_profile_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Validate a parsed profile document and return it with defaults applied.
 
     Raises:
-        vol.Invalid: If the document violates the schema or two capabilities
-            declare the same intent.
+        vol.Invalid: If the document violates the schema, two capabilities
+            declare the same intent or a required intent has no capability.
 
     """
     validated: dict[str, Any] = PROFILE_SCHEMA(data)
@@ -174,4 +177,8 @@ def validate_profile_dict(data: dict[str, Any]) -> dict[str, Any]:
             )
             raise vol.Invalid(msg)
         seen[intent] = name
+    for intent in REQUIRED_INTENTS:
+        if intent not in seen:
+            msg = f"a profile needs a capability for {intent}"
+            raise vol.Invalid(msg)
     return validated

@@ -77,7 +77,12 @@ def test_invalid_documents_are_rejected_with_a_reason(
 
 def test_schema_accepts_the_two_new_intents() -> None:
     data = _load_builtin()
+    required = {
+        name: data["capabilities"][name]
+        for name in ("external_temperature", "source_select")
+    }
     data["capabilities"] = {
+        **required,
         "adaptive_mode": {
             "intent": "set_adaptive_mode",
             "min_firmware": "1.4.4",
@@ -107,3 +112,19 @@ def test_schema_accepts_the_two_new_intents() -> None:
         4.0,
         35.0,
     ]
+
+
+@pytest.mark.parametrize(
+    ("capability", "intent"),
+    [
+        ("external_temperature", "set_room_temperature"),
+        ("source_select", "set_source"),
+    ],
+)
+def test_profile_without_a_required_intent_is_rejected(
+    capability: str, intent: str
+) -> None:
+    data = _load_builtin()
+    del data["capabilities"][capability]
+    with pytest.raises(vol.Invalid, match=f"needs a capability for {intent}"):
+        schema.validate_profile_dict(data)

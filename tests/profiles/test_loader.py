@@ -27,6 +27,18 @@ def test_invalid_user_files_reported_and_skipped() -> None:
     ]
 
 
+def test_user_profile_without_set_source_is_a_load_error(tmp_path: Path) -> None:
+    text = BUILTIN_TEXT.replace("id: sonoff_trvzb_native", "id: user_nosource", 1)
+    start = text.index("  source_select:")
+    end = text.index("  window_detection_flag:")
+    (tmp_path / "nosource.yaml").write_text(text[:start] + text[end:])
+    result = loader.load_profiles_sync(tmp_path)
+    assert set(result.profiles) == {"sonoff_trvzb_native"}
+    [error] = result.errors
+    assert error.file == "nosource.yaml"
+    assert "set_source" in str(error)
+
+
 def test_user_id_collision_with_builtin_is_error() -> None:
     result = loader.load_profiles_sync(Path("tests/profiles/collision"))
     assert [e.file for e in result.errors] == ["sonoff_trvzb_native.yaml"]
