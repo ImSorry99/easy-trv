@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Hysteresis follows the global value (default 0.4 K) and is written whenever the adaptive mode is not on; rooms that had 'leave unchanged' are migrated and get a Repairs notice
+- Adaptive mode is on by default and is written to every thermostat with firmware 1.4.4 or newer; while it is on the thermostat ignores the hysteresis and Easy TRV does not write it. Thermostats below 1.4.4 get a firmware warning and the room shows degraded, unless adaptive mode is set to off or leave as set in the thermostat (globally or for that room)
 - Room devices are named 'Heizung {room}' / '{room} heating'; new room devices are assigned to their area, existing devices keep their area setting
 - Repairs messages name the setting and the thermostat; clearer texts for the thermostat's open-window detection and the adaptive mode
 

@@ -67,7 +67,9 @@ The thermostat settings (open-window detection, adaptive mode, hysteresis, frost
 
 **The thermostat's open-window detection.** This is a function of the TRVZB itself, not of Easy TRV, and it has nothing to do with window contacts in Home Assistant. The thermostat treats a temperature drop of more than 1.5 K within 4.5 minutes as an open window: it closes the valve and holds 12 °C, and it ends this pause after 30 minutes at the latest. Easy TRV only switches the detection on or off.
 
-**Adaptive mode and hysteresis.** With the adaptive mode on, the thermostat ignores the hysteresis, so Easy TRV does not write it. Easy TRV writes the hysteresis only while the room's adaptive mode is not on, and also to a thermostat whose firmware is too old for the adaptive mode (below 1.4.4), because the hysteresis is the only thing that takes effect there. With "adaptive mode: leave as set in the thermostat" the hysteresis is written as well. The hysteresis no longer has a "leave unchanged" choice; rooms that had it follow the global value now, and a Repairs notice (`settings_migrated`) lists them once after the update. You can dismiss it. "Leave as set in the thermostat" still exists for the open-window detection and the adaptive mode.
+**Adaptive mode and hysteresis.** With the adaptive mode on, the thermostat ignores the hysteresis, so Easy TRV does not write it; it writes the hysteresis only while the room's adaptive mode is not on ("off" or "leave as set in the thermostat"). The adaptive mode is on by default and written to every thermostat with firmware 1.4.4 or newer; a thermostat below 1.4.4 gets the hysteresis instead, but also a firmware warning and the room shows degraded, until you update the firmware or set the adaptive mode to off or leave (globally or for that room).
+
+**Update note.** The hysteresis no longer has a "leave unchanged" choice: rooms that had it follow the global value now, and a Repairs notice (`settings_migrated`) lists them once after the update, which you can dismiss. "Leave as set in the thermostat" still exists for the open-window detection and the adaptive mode.
 
 Once the room thermostat exists (Phase 2b, coming), hide the ZHA climate entities of the single thermostats so that only the room's entity is left to operate. Easy TRV never changes the entity registry itself, and until then the ZHA entities keep working as before.
 
@@ -149,7 +151,7 @@ To adapt one:
 
 An invalid file is ignored and raises a `profile_invalid` Repairs issue that names the file and the problem. The format is described in [`docs/concept/profiles.md`](docs/concept/profiles.md), the shipped profile in [`docs/profiles/sonoff-trvzb-native.md`](docs/profiles/sonoff-trvzb-native.md).
 
-Firmware minimums are part of a profile. Below the profile's minimum firmware nothing is written to a thermostat and a Repairs issue names the required version. A single capability can have a higher minimum (hysteresis needs 1.3.0, the adaptive mode 1.4.4): that capability is skipped and reported, while the temperature writes continue. The skip lasts until the integration is reloaded, for example after a firmware update.
+Firmware minimums are part of a profile. Below the profile's minimum firmware nothing is written to a thermostat and a Repairs issue names the required version. A single capability can have a higher minimum (hysteresis needs 1.3.0, the adaptive mode 1.4.4): that capability is skipped and reported, while the temperature writes continue. The skip lasts until the integration is reloaded, for example after a firmware update. A setting for which the profile declares no capability at all (for example a profile copied from 0.1.0 without the adaptive mode) is no firmware problem: it is skipped without a Repairs issue, logged once per room start at debug level and listed as `not_in_profile` in the diagnostics.
 
 ## Limitations
 

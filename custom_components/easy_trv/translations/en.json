@@ -134,7 +134,7 @@
     },
     "trv_firmware": {
       "title": "Thermostat {thermostat} in {room} lacks a firmware feature",
-      "description": "Easy TRV cannot use \"{setting}\" on {thermostat} in {room}. Required firmware: {required}. Installed firmware: {current}.\n\nEasy TRV skips this setting for this thermostat and keeps controlling it otherwise. Update the thermostat's firmware (for example through the ZHA over-the-air update) to enable it."
+      "description": "Easy TRV cannot use \"{setting}\" on {thermostat} in {room}. Required firmware: {required}. Installed firmware: {current}.\n\nEasy TRV skips this setting for this thermostat and keeps controlling it otherwise. Update the thermostat's firmware (for example through the ZHA over-the-air update) to enable it. Alternatively set this setting to 'leave as set in the thermostat' or off for this room."
     },
     "zha_api_incompatible": {
       "title": "Easy TRV cannot use the Zigbee integration",
@@ -150,7 +150,7 @@
     },
     "settings_migrated": {
       "title": "Thermostat settings changed by the update",
-      "description": "These rooms had \"Leave unchanged\" for the hysteresis: {rooms}.\n\nThey now follow the global hysteresis ({hysteresis}). While the adaptive mode is on, the thermostat manages the hysteresis itself and none is written. Check the global setting in the Easy TRV options, or set a hysteresis in the room itself.\n\nYou can dismiss this notice."
+      "description": "These rooms had \"Leave unchanged\" for the hysteresis: {rooms}.\n\nThey now follow the global hysteresis ({hysteresis}). While the adaptive mode is on, the thermostat manages the hysteresis itself and none is written, on thermostats with firmware 1.4.4 or newer. Check the global setting in the Easy TRV options, or set a hysteresis in the room itself.\n\nYou can dismiss this notice."
     }
   },
   "options": {

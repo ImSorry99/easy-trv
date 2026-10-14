@@ -134,7 +134,7 @@
     },
     "trv_firmware": {
       "title": "Dem Thermostat {thermostat} in {room} fehlt eine Firmware-Funktion",
-      "description": "Easy TRV kann „{setting}“ an {thermostat} in {room} nicht nutzen. Erforderliche Firmware: {required}. Installierte Firmware: {current}.\n\nEasy TRV überspringt diese Einstellung für dieses Thermostat und steuert es ansonsten weiter. Aktualisiere die Firmware des Thermostats (zum Beispiel über das OTA-Update von ZHA), um sie zu aktivieren."
+      "description": "Easy TRV kann „{setting}“ an {thermostat} in {room} nicht nutzen. Erforderliche Firmware: {required}. Installierte Firmware: {current}.\n\nEasy TRV überspringt diese Einstellung für dieses Thermostat und steuert es ansonsten weiter. Aktualisiere die Firmware des Thermostats (zum Beispiel über das OTA-Update von ZHA), um sie zu aktivieren. Alternativ stellst du die Einstellung für diesen Raum auf „im Thermostat unverändert lassen“ oder aus."
     },
     "zha_api_incompatible": {
       "title": "Easy TRV kann die Zigbee-Integration nicht nutzen",
@@ -150,7 +150,7 @@
     },
     "settings_migrated": {
       "title": "Thermostat-Einstellungen durch das Update geändert",
-      "description": "Diese Räume hatten bei der Hysterese „Unverändert lassen“ gewählt: {rooms}.\n\nSie folgen jetzt dem globalen Wert ({hysteresis}). Solange der adaptive Modus an ist, regelt das Thermostat die Hysterese selbst und es wird keine geschrieben. Prüfe die globale Einstellung in den Optionen von Easy TRV oder lege eine Hysterese im Raum selbst fest.\n\nDu kannst diesen Hinweis ausblenden."
+      "description": "Diese Räume hatten bei der Hysterese „Unverändert lassen“ gewählt: {rooms}.\n\nSie folgen jetzt dem globalen Wert ({hysteresis}). Solange der adaptive Modus an ist, regelt das Thermostat die Hysterese selbst und es wird keine geschrieben, bei Thermostaten mit Firmware 1.4.4 oder neuer. Prüfe die globale Einstellung in den Optionen von Easy TRV oder lege eine Hysterese im Raum selbst fest.\n\nDu kannst diesen Hinweis ausblenden."
     }
   },
   "options": {
