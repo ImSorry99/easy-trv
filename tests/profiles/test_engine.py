@@ -4,6 +4,8 @@ import pytest
 import yaml
 
 from custom_components.easy_trv.core.model import (
+    SetAdaptiveMode,
+    SetFrostTemperature,
     SetHysteresis,
     SetRoomTemperature,
     SetSource,
@@ -187,3 +189,30 @@ def test_numeric_encoder_on_non_numeric_value_is_a_plain_value_error() -> None:
     with pytest.raises(ValueError, match="window_detection_flag") as exc:
         profile.plan(SetWindowDetection(enabled=True), None)
     assert not isinstance(exc.value, engine.ValueOutOfRange)
+
+
+def test_builtin_profile_plans_adaptive_mode_on_and_off(
+    trvzb: engine.Profile,
+) -> None:
+    on = trvzb.plan(SetAdaptiveMode(enabled=True), (1, 4, 4))
+    off = trvzb.plan(SetAdaptiveMode(enabled=False), (1, 4, 4))
+    assert (on.cluster, on.endpoint, on.attribute) == (0xFC11, 1, 0x6017)
+    assert (on.raw_value, on.accept) == (2, frozenset({2}))
+    assert (off.raw_value, off.accept) == (0, frozenset({0, 1}))
+
+
+def test_adaptive_mode_needs_firmware_1_4_4(trvzb: engine.Profile) -> None:
+    with pytest.raises(engine.CapabilityUnsupported) as exc:
+        trvzb.plan(SetAdaptiveMode(enabled=True), (1, 4, 1))
+    assert exc.value.required == (1, 4, 4)
+
+
+def test_frost_temperature_encodes_centi_and_rejects_out_of_range(
+    trvzb: engine.Profile,
+) -> None:
+    op = trvzb.plan(SetFrostTemperature(7.0), (1, 3, 0))
+    assert (op.attribute, op.raw_value, op.accept) == (0x6002, 700, frozenset({700}))
+    with pytest.raises(engine.ValueOutOfRange):
+        trvzb.plan(SetFrostTemperature(3.0), (1, 3, 0))
+    with pytest.raises(engine.ValueOutOfRange):
+        trvzb.plan(SetFrostTemperature(35.5), (1, 3, 0))

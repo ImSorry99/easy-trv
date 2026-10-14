@@ -13,6 +13,8 @@ Cluster `0xFC11`, endpoint 1, **no manufacturer code** (the built-in ZHA quirk d
 | `SOURCE_SELECT` | `SetSource(internal)` | `0x600E` | `0` | equals 0 | ≥ 1.2.1 |
 | `WINDOW_DETECTION_FLAG` | `ApplySettings(window_detection=on/off)` | `0x6000 open_window` | `1` / `0` | equals | all |
 | `HYSTERESIS` | `ApplySettings(hysteresis=k)` | `0x6011 temperature_control_accuracy` | `int16s`, `−round(k × 100)`, allowed −100…−20 | equals | ≥ 1.3.0 |
+| `ADAPTIVE_MODE` | `SetAdaptiveMode(on/off)` | `0x6017 smart_temperature_control` (`bitmap8`) | on = `2`, off = `0` | on: read ∈ {2}; off: read ∈ {0, 1} (the device reports `1` as a read-only alias of off). While on, the device ignores hysteresis and valve degrees | ≥ 1.4.4 |
+| `FROST_PROTECTION` | `SetFrostTemperature(t)` | `0x6002 frost_protection_temperature` | `int16s`, `round(t, 1) × 100`, valid 400–3500 (4–35 °C) | equals written value | all |
 
 Read-back of `0x600D` always includes `0x600E` in the same read so the fail-safe is seen on every refresh.
 
@@ -36,13 +38,13 @@ Read-back of `0x600D` always includes `0x600E` in the same read so the fail-safe
 | 1.2.1 | external sensor, valve opening degree | profile minimum |
 | 1.3.0 | hysteresis (`0x6011`) | `HYSTERESIS` |
 | 1.4.0 / 1.4.1 | boost, timer (`0x6014–0x6016`), ±0.2 offset | roadmap (window via timer, boost preset) |
-| 1.4.4 | adaptive mode (`0x6017`) | not driven by Easy TRV; user toggles it in ZHA |
+| 1.4.4 | adaptive mode (`0x6017`) | `ADAPTIVE_MODE` |
 
 OTA to 1.4.4 works through the zigpy OTA index on HA ≥ 2026.3; Sonoff's own OTA server only offers up to 1.4.1.
 
 ## Not used by this profile (yet)
 
-`0x6014–0x6016` timer/boost, `0x6017` adaptive mode, `0x600B/0x600C` valve degrees, standard weekly schedule on cluster `0x0201` (`set_weekly_schedule`, `system_mode = auto`), `local_temperature_calibration`.
+`0x6014–0x6016` timer/boost, `0x600B/0x600C` valve degrees, standard weekly schedule on cluster `0x0201` (`set_weekly_schedule`, `system_mode = auto`), `local_temperature_calibration`.
 
 ## Spikes on real hardware
 

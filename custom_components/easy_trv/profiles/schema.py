@@ -18,6 +18,8 @@ INTENTS = (
     "set_source",
     "set_window_detection",
     "set_hysteresis",
+    "set_adaptive_mode",
+    "set_frost_temperature",
 )
 ENCODERS = ("temperature_centi", "kelvin_centi_negative", "bool")
 VERIFY_RULES = ("equals", "one_of")

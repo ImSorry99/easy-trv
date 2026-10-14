@@ -73,3 +73,37 @@ def test_invalid_documents_are_rejected_with_a_reason(
 ) -> None:
     with pytest.raises(vol.Invalid, match=message):
         schema.validate_profile_dict(_mutated(where, key, value))
+
+
+def test_schema_accepts_the_two_new_intents() -> None:
+    data = _load_builtin()
+    data["capabilities"] = {
+        "adaptive_mode": {
+            "intent": "set_adaptive_mode",
+            "min_firmware": "1.4.4",
+            "write": {
+                "endpoint": 1,
+                "cluster": 0xFC11,
+                "attribute": 0x6017,
+                "encode": {"map": {"true": 2, "false": 0}},
+            },
+            "verify": {"rule": "one_of", "true": [2], "false": [0, 1]},
+        },
+        "frost_protection": {
+            "intent": "set_frost_temperature",
+            "write": {
+                "endpoint": 1,
+                "cluster": 0xFC11,
+                "attribute": 0x6002,
+                "encode": "temperature_centi",
+                "range": [4, 35],
+            },
+            "verify": {"rule": "equals"},
+        },
+    }
+    validated = schema.validate_profile_dict(data)
+    assert validated["capabilities"]["adaptive_mode"]["verify"]["false"] == [0, 1]
+    assert validated["capabilities"]["frost_protection"]["write"]["range"] == [
+        4.0,
+        35.0,
+    ]
