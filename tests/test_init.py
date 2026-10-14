@@ -73,7 +73,7 @@ async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
     await settle(hass)
 
     assert entry.state is ConfigEntryState.LOADED
-    state = hass.states.get("sensor.living_status")
+    state = hass.states.get("sensor.living_heating_status")
     assert state is not None
     assert state.state == "ok"
     assert state.attributes["source"] == "external"
@@ -83,10 +83,10 @@ async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
         (DOMAIN, subentry_id), entry.entry_id
     )
     assert device is not None
-    assert device.name == "Living"
+    assert device.name == "Living heating"
     # Exactly one entity per room, attached to the room's subentry.
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert [e.entity_id for e in entities] == ["sensor.living_status"]
+    assert [e.entity_id for e in entities] == ["sensor.living_heating_status"]
     assert entities[0].unique_id == f"{subentry_id}_status"
     assert entities[0].config_subentry_id == subentry_id
     assert entry.runtime_data.rooms.keys() == {subentry_id}
@@ -99,7 +99,7 @@ async def test_rooms_start_only_when_home_assistant_has_started(
     hass.set_state(CoreState.starting)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await settle(hass)
-    state = hass.states.get("sensor.living_status")
+    state = hass.states.get("sensor.living_heating_status")
     assert state is not None
     assert "source" not in state.attributes
     assert fake_gateway.writes == []
@@ -107,7 +107,7 @@ async def test_rooms_start_only_when_home_assistant_has_started(
     hass.set_state(CoreState.running)
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
     await settle(hass)
-    state = hass.states.get("sensor.living_status")
+    state = hass.states.get("sensor.living_heating_status")
     assert state.attributes["source"] == "external"
     assert fake_gateway.writes
 
@@ -143,7 +143,7 @@ async def test_setup_zha_unavailable_retries_and_clears_issue(hass, entry) -> No
     await settle(hass)
     assert entry.state is ConfigEntryState.LOADED
     assert zha_issue(hass) is None
-    assert hass.states.get("sensor.living_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
 
 
 async def test_profile_auto_selects_builtin_and_rejects_unmatched(
@@ -161,7 +161,7 @@ async def test_profile_auto_selects_builtin_and_rejects_unmatched(
     issue = room_issue(hass, subentry_of(foreign, "Living").subentry_id)
     assert issue is not None
     assert "climate.x (SONOFF TRV-ZBT)" in issue.translation_placeholders["error"]
-    assert hass.states.get("sensor.living_status") is None
+    assert hass.states.get("sensor.living_heating_status") is None
 
 
 async def test_non_zha_thermostat_invalidates_only_its_room(hass) -> None:
@@ -183,7 +183,7 @@ async def test_explicit_profile_is_used(hass) -> None:
     entry = make_entry(hass, [room_data(profile="sonoff_trvzb_native")], FAST_OPTIONS)
     await start(hass, entry)
     assert entry.state is ConfigEntryState.LOADED
-    assert hass.states.get("sensor.living_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
 
 
 async def test_unknown_explicit_profile_invalidates_only_its_room(hass) -> None:
@@ -217,8 +217,8 @@ async def test_one_unresolvable_room_leaves_the_other_rooms_running(
     assert entry.state is ConfigEntryState.LOADED
     living, bedroom = subentry_of(entry, "Living"), subentry_of(entry, "Bedroom")
     assert entry.runtime_data.rooms.keys() == {living.subentry_id}
-    assert hass.states.get("sensor.living_status").state == "ok"
-    assert hass.states.get("sensor.bedroom_status") is None
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.bedroom_heating_status") is None
     assert room_issue(hass, living.subentry_id) is None
     issue = room_issue(hass, bedroom.subentry_id)
     assert issue is not None
@@ -244,7 +244,7 @@ async def test_one_unresolvable_room_leaves_the_other_rooms_running(
     assert entry.state is ConfigEntryState.LOADED
     assert room_issue(hass, bedroom.subentry_id) is None
     assert entry.runtime_data.rooms.keys() == {living.subentry_id, bedroom.subentry_id}
-    assert hass.states.get("sensor.bedroom_status").state == "ok"
+    assert hass.states.get("sensor.bedroom_heating_status").state == "ok"
 
 
 @pytest.mark.parametrize(
@@ -273,8 +273,8 @@ async def test_a_room_with_corrupt_data_is_skipped_like_an_unresolvable_one(
     assert entry.state is ConfigEntryState.LOADED
     living, broken = subentry_of(entry, "Living"), subentry_of(entry, "Bedroom")
     assert entry.runtime_data.rooms.keys() == {living.subentry_id}
-    assert hass.states.get("sensor.living_status").state == "ok"
-    assert hass.states.get("sensor.bedroom_status") is None
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.bedroom_heating_status") is None
     issue = room_issue(hass, broken.subentry_id)
     assert issue is not None
     assert issue.translation_placeholders["room"] == "Bedroom"
@@ -378,8 +378,11 @@ async def test_start_is_logged_and_one_failing_room_does_not_block_the_others(
     assert "Started room Bedroom (1 thermostat(s), profile sonoff_trvzb_native)" in (
         caplog.text
     )
-    assert hass.states.get("sensor.bedroom_status").attributes["source"] == "external"
-    assert "source" not in hass.states.get("sensor.living_status").attributes
+    assert (
+        hass.states.get("sensor.bedroom_heating_status").attributes["source"]
+        == "external"
+    )
+    assert "source" not in hass.states.get("sensor.living_heating_status").attributes
 
 
 async def test_subentries_of_other_types_are_ignored(hass) -> None:
@@ -398,7 +401,7 @@ async def test_subentries_of_other_types_are_ignored(hass) -> None:
 
     assert entry.state is ConfigEntryState.LOADED
     assert len(entry.runtime_data.rooms) == 1
-    assert hass.states.get("sensor.living_status") is not None
+    assert hass.states.get("sensor.living_heating_status") is not None
     assert hass.states.get("sensor.other_status") is None
 
 
@@ -420,7 +423,10 @@ async def test_options_change_reloads(hass, entry) -> None:
     assert entry.runtime_data is not before
     new_room = entry.runtime_data.rooms[subentry_id]
     assert new_room.snapshot()["params"]["refresh"] == 1800.0
-    assert hass.states.get("sensor.living_status").attributes["source"] == "external"
+    assert (
+        hass.states.get("sensor.living_heating_status").attributes["source"]
+        == "external"
+    )
 
 
 async def test_adding_a_room_reloads_and_adds_its_status_sensor(
@@ -445,8 +451,8 @@ async def test_adding_a_room_reloads_and_adds_its_status_sensor(
 
     assert entry.state is ConfigEntryState.LOADED
     assert len(entry.runtime_data.rooms) == 2
-    assert hass.states.get("sensor.living_status").state == "ok"
-    assert hass.states.get("sensor.bedroom_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.bedroom_heating_status").state == "ok"
 
 
 # --- Unload ---------------------------------------------------------------
@@ -461,7 +467,7 @@ async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
     await advance(hass, freezer, 25)
     issues_registry = ir.async_get(hass)
     assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is not None
-    assert hass.states.get("sensor.living_status").state == "error"
+    assert hass.states.get("sensor.living_heating_status").state == "error"
 
     # Re-paired or fixed: the thermostat answers again, the entry is reloaded.
     del fake_gateway.read_override[("00:11", VALUE)]
@@ -470,7 +476,7 @@ async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
 
     assert entry.state is ConfigEntryState.LOADED
     assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is None
-    assert hass.states.get("sensor.living_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
 
 
 async def test_setup_removes_issues_of_thermostats_in_no_room(hass, entry) -> None:
@@ -509,7 +515,7 @@ async def test_unload_stops_the_controllers(hass, freezer, entry, fake_gateway) 
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert entry.state is ConfigEntryState.NOT_LOADED
-    assert hass.states.get("sensor.living_status").state == "unavailable"
+    assert hass.states.get("sensor.living_heating_status").state == "unavailable"
 
     fake_gateway.writes.clear()
     fake_gateway.reads.clear()

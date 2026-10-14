@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers.start import async_at_started
 
 from custom_components.easy_trv import issues
@@ -18,6 +19,7 @@ from custom_components.easy_trv.adapters.zha_gateway import (
     ZhaUnavailable,
 )
 from custom_components.easy_trv.const import (
+    CONF_AREA,
     CONF_HYSTERESIS,
     CONF_PROFILE,
     CONF_TEMP_SENSORS,
@@ -57,6 +59,7 @@ class EasyTrvRuntimeData:
     profiles: LoadResult
     rooms: dict[str, RoomController]
     settings: dict[str, RoomSettings]  # resolved settings by subentry id
+    areas: dict[str, str | None]  # area name by subentry id (None: no area)
 
 
 type EasyTrvConfigEntry = ConfigEntry[EasyTrvRuntimeData]
@@ -189,6 +192,15 @@ def _build_room(
     return controller, profile, settings
 
 
+def _area_name(hass: HomeAssistant, subentry: ConfigSubentry) -> str | None:
+    """Return the name of the area a room was created from, if it still exists."""
+    area_id = subentry.data.get(CONF_AREA)
+    if not area_id:
+        return None
+    area = ar.async_get(hass).async_get_area(area_id)
+    return area.name if area is not None else None
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate an entry to the current version.
 
@@ -234,6 +246,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
 
     rooms: dict[str, RoomController] = {}
     resolved: dict[str, RoomSettings] = {}
+    areas: dict[str, str | None] = {}
     summaries: dict[str, str] = {}
     invalid: set[str] = set()
     for subentry in entry.subentries.values():
@@ -261,6 +274,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
             continue
         rooms[subentry.subentry_id] = controller
         resolved[subentry.subentry_id] = settings
+        areas[subentry.subentry_id] = _area_name(hass, subentry)
         summaries[subentry.subentry_id] = (
             f"{subentry.title} ({len(subentry.data[CONF_TRVS])} thermostat(s), "
             f"profile {profile.id})"
@@ -269,7 +283,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     issues.clear_thermostat_issues_except(
         hass, {ieee for controller in rooms.values() for ieee in controller.ieees}
     )
-    entry.runtime_data = EasyTrvRuntimeData(gateway, profiles, rooms, resolved)
+    entry.runtime_data = EasyTrvRuntimeData(gateway, profiles, rooms, resolved, areas)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

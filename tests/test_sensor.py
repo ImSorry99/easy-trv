@@ -4,10 +4,11 @@ from pathlib import Path
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import EntityCategory
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.easy_trv.const import DOMAIN
+from custom_components.easy_trv.const import CONF_AREA, DOMAIN
 from tests.helpers_entry import (
     FAST_OPTIONS,
     IEEE_A,
@@ -37,39 +38,111 @@ def entry(hass):
 async def test_status_sensor_describes_itself(hass, entry) -> None:
     await start(hass, entry)
 
-    state = hass.states.get("sensor.living_status")
+    state = hass.states.get("sensor.living_heating_status")
     assert state is not None
     assert state.state == "ok"
-    assert state.attributes["friendly_name"] == "Living Status"
+    assert state.attributes["friendly_name"] == "Living heating Status"
     assert state.attributes["device_class"] == SensorDeviceClass.ENUM
     assert state.attributes["options"] == ["ok", "degraded", "error"]
     assert state.attributes["source"] == "external"
     assert state.attributes["active_sensor"] == "sensor.t1"
     assert state.attributes["trv_health"] == {"climate.a": "ok", "climate.b": "ok"}
 
-    registry_entry = er.async_get(hass).async_get("sensor.living_status")
+    registry_entry = er.async_get(hass).async_get("sensor.living_heating_status")
     assert registry_entry is not None
     assert registry_entry.entity_category is EntityCategory.DIAGNOSTIC
     assert registry_entry.translation_key == "room_status"
     device = dr.async_get(hass).async_get(registry_entry.device_id)
     assert device is not None
     assert device.manufacturer == "Easy TRV"
-    assert device.name == "Living"
+    assert device.name == "Living heating"
+
+
+async def test_room_device_is_named_heating_and_sits_in_its_area(hass) -> None:
+    area = ar.async_get(hass).async_get_or_create("Wohnzimmer")
+    entry = make_entry(
+        hass, [room_data(name="Wohnzimmer", **{CONF_AREA: area.id})], FAST_OPTIONS
+    )
+    await start(hass, entry)
+
+    subentry_id = next(iter(entry.subentries))
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, subentry_id), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Wohnzimmer heating"
+    assert device.area_id == area.id
+    assert entry.runtime_data.areas == {subentry_id: "Wohnzimmer"}
+    # Home Assistant puts the area in front of the device name in the entity id
+    # (sensor.wohnzimmer_wohnzimmer_heating_status), so look the entity up by
+    # its unique id rather than hard-coding that rule.
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{subentry_id}_status"
+    )
+    assert entity_id is not None
+    assert hass.states.get(entity_id) is not None
+    assert hass.states.get(entity_id).attributes["friendly_name"] == (
+        "Wohnzimmer heating Status"
+    )
+
+
+async def test_custom_room_without_area_has_no_area(hass, entry) -> None:
+    await start(hass, entry)
+
+    subentry_id = next(iter(entry.subentries))
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, subentry_id), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Living heating"
+    assert device.area_id is None
+    assert entry.runtime_data.areas == {subentry_id: None}
+
+
+async def test_device_name_follows_room_name_unless_renamed_by_user(
+    hass, entry
+) -> None:
+    await start(hass, entry)
+    subentry_id = next(iter(entry.subentries))
+    devices = dr.async_get(hass)
+
+    def device() -> dr.DeviceEntry:
+        found = devices.async_get_device_by_identifier(
+            (DOMAIN, subentry_id), entry.entry_id
+        )
+        assert found is not None
+        return found
+
+    hass.config_entries.async_update_subentry(
+        entry, entry.subentries[subentry_id], title="Salon"
+    )
+    await settle(hass)
+    assert device().name == "Salon heating"
+    assert device().name_by_user is None
+
+    devices.async_update_device(device().id, name_by_user="My radiator")
+    hass.config_entries.async_update_subentry(
+        entry, entry.subentries[subentry_id], title="Lounge"
+    )
+    await settle(hass)
+    assert device().name == "Lounge heating"
+    assert device().name_by_user == "My radiator"
+    assert (device().name_by_user or device().name) == "My radiator"
 
 
 async def test_status_sensor_follows_the_room_status(hass, entry) -> None:
     await start(hass, entry)
-    assert hass.states.get("sensor.living_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
 
     hass.states.async_set("climate.a", "unavailable")
     await settle(hass)
-    state = hass.states.get("sensor.living_status")
+    state = hass.states.get("sensor.living_heating_status")
     assert state.state == "degraded"
     assert state.attributes["trv_health"]["climate.a"] == "unavailable"
 
     hass.states.async_set("climate.a", "heat")
     await settle(hass)
-    assert hass.states.get("sensor.living_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
 
 
 async def test_status_sensor_reports_error_after_failed_retries(
@@ -82,7 +155,7 @@ async def test_status_sensor_reports_error_after_failed_retries(
     hass.states.async_set("sensor.t1", "22.0", {"unit_of_measurement": "°C"})
     await advance(hass, freezer, 70)
 
-    state = hass.states.get("sensor.living_status")
+    state = hass.states.get("sensor.living_heating_status")
     assert state.state == "error"
     assert state.attributes["trv_health"]["climate.a"] == "error"
     assert state.attributes["last_error"]
@@ -101,13 +174,13 @@ async def test_each_room_gets_exactly_one_sensor_and_device(hass) -> None:
 
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     assert sorted(e.entity_id for e in entities) == [
-        "sensor.bedroom_status",
-        "sensor.living_status",
+        "sensor.bedroom_heating_status",
+        "sensor.living_heating_status",
     ]
     by_name = {sub.title: sub_id for sub_id, sub in entry.subentries.items()}
     for name, entity_id in (
-        ("Living", "sensor.living_status"),
-        ("Bedroom", "sensor.bedroom_status"),
+        ("Living", "sensor.living_heating_status"),
+        ("Bedroom", "sensor.bedroom_heating_status"),
     ):
         registry_entry = er.async_get(hass).async_get(entity_id)
         assert registry_entry.config_subentry_id == by_name[name]
@@ -116,7 +189,7 @@ async def test_each_room_gets_exactly_one_sensor_and_device(hass) -> None:
             (DOMAIN, by_name[name]), entry.entry_id
         )
         assert device is not None
-        assert device.name == name
+        assert device.name == f"{name} heating"
 
 
 async def test_removed_sensor_stops_listening(hass, entry) -> None:
@@ -139,6 +212,7 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
     status = strings["entity"]["sensor"]["room_status"]
     assert status["name"] == "Status"
     assert set(status["state"]) == {"ok", "degraded", "error"}
+    assert strings["device"]["room"]["name"] == "{room} heating"
     assert set(strings["issues"]) == {
         "trv_unreachable",
         "trv_firmware",

@@ -110,6 +110,11 @@
       }
     }
   },
+  "device": {
+    "room": {
+      "name": "{room} heating"
+    }
+  },
   "entity": {
     "sensor": {
       "room_status": {

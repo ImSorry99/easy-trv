@@ -28,7 +28,11 @@ async def async_setup_entry(
     for subentry_id, controller in entry.runtime_data.rooms.items():
         subentry = entry.subentries[subentry_id]
         async_add_entities(
-            [RoomStatusSensor(controller, subentry)],
+            [
+                RoomStatusSensor(
+                    controller, subentry, entry.runtime_data.areas[subentry_id]
+                )
+            ],
             config_subentry_id=subentry_id,
         )
 
@@ -46,15 +50,26 @@ class RoomStatusSensor(SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_should_poll = False
 
-    def __init__(self, controller: RoomController, subentry: ConfigSubentry) -> None:
-        """Link the sensor to the room's controller and device."""
+    def __init__(
+        self,
+        controller: RoomController,
+        subentry: ConfigSubentry,
+        area_name: str | None,
+    ) -> None:
+        """Link the sensor to the room's controller and device.
+
+        ``area_name`` is the area the device is suggested to sit in; a user's
+        choice of area for the device is kept.
+        """
         self._controller = controller
         self._attr_options = ["ok", "degraded", "error"]
         self._attr_unique_id = f"{subentry.subentry_id}_status"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, subentry.subentry_id)},
-            name=subentry.title,
             manufacturer="Easy TRV",
+            translation_key="room",
+            translation_placeholders={"room": subentry.title},
+            suggested_area=area_name,
         )
 
     @property

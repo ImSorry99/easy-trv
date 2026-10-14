@@ -199,3 +199,8 @@ def test_german_translation_is_actually_german() -> None:
         "degraded": "Eingeschränkt",
         "error": "Fehler",
     }
+
+
+def test_room_device_name_is_translated() -> None:
+    assert load(EN)["device"]["room"]["name"] == "{room} heating"
+    assert load(DE)["device"]["room"]["name"] == "Heizung {room}"
