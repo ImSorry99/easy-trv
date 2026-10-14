@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Adaptive mode and frost protection temperature as profile capabilities
 - Every setting has a global default and can be overridden per room
+- Diagnostics list the resolved settings of every room
 
 ### Changed
 

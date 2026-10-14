@@ -46,6 +46,9 @@ async def test_diagnostics_contains_rooms(hass, hass_client, entry) -> None:
     assert diag["profiles"] == ["sonoff_trvzb_native"]
     assert diag["profile_errors"] == []
     assert diag["options"] == OPTIONS
+    settings = diag["rooms"][next(iter(entry.subentries))]["settings"]
+    assert settings["hysteresis"] == 0.4
+    assert settings["adaptive_mode"] == "on"
 
 
 async def test_diagnostics_room_snapshot_has_config_params_and_state(
@@ -62,13 +65,35 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
     assert diag["profile_errors"] == []
     assert set(diag["rooms"]) == {subentry_id}
     room = diag["rooms"][subentry_id]
-    assert set(room) == {"config", "params", "state"}
+    assert set(room) == {"config", "params", "state", "settings"}
     assert room["config"]["name"] == "Living"
     assert room["config"]["trvs"][0]["ieee"] == IEEE_A
     assert room["params"]["refresh"] == 1800.0
     assert room["state"]["source"] == "external"
     # Plain data that Home Assistant can serialise for the download.
     json.dumps(diag, cls=ExtendedJSONEncoder)
+
+
+async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
+    await start(hass, entry)
+    subentry_id = next(iter(entry.subentries))
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    # Built-in default for hysteresis and adaptive mode, the global option for
+    # the refresh interval, the room's own window detection.
+    assert diag["rooms"][subentry_id]["settings"] == {
+        "refresh_minutes": 30,
+        "verify_delay_seconds": 0,
+        "max_attempts": 3,
+        "min_delta_kelvin": 0.1,
+        "sensor_timeout_minutes": 120,
+        "window_detection": "on",
+        "hysteresis": 0.4,
+        "adaptive_mode": "on",
+        "frost_temperature": 7.0,
+        "profile": "auto",
+    }
 
 
 async def test_diagnostics_lists_profile_errors(hass, tmp_path, entry) -> None:

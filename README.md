@@ -4,13 +4,13 @@ Easy TRV is a Home Assistant integration that lets Sonoff TRVZB radiator thermos
 
 It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no `climate` entity, no regulator and no entity per setting. Each room gets one status sensor.
 
-Status: Phase 1, version 0.1.0. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
+Status: version 0.1.0 is released; Phase 2a (settings, adaptive mode, frost protection) is listed under Unreleased in the [`CHANGELOG`](CHANGELOG.md). See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
 
 ## Supported devices
 
 | Device | Integration | Firmware | Notes |
 |---|---|---|---|
-| Sonoff TRVZB (Gen 1) | ZHA | 1.2.1 or newer | Hysteresis needs 1.3.0 or newer. Targeted firmware: 1.3.0 and 1.4.4. The first hardware run is pending (see [`docs/testing-on-device.md`](docs/testing-on-device.md)). |
+| Sonoff TRVZB (Gen 1) | ZHA | 1.2.1 or newer | Hysteresis needs 1.3.0 or newer, the adaptive mode 1.4.4 or newer. Targeted firmware: 1.3.0 and 1.4.4. The first hardware run is pending (see [`docs/testing-on-device.md`](docs/testing-on-device.md)). |
 
 Home Assistant 2026.8 or newer is required. The thermostats must already be paired with ZHA. Use ZHA's built-in quirk for the TRVZB; do not add a custom quirk for the same model, the two conflict.
 
@@ -37,23 +37,39 @@ The room form asks for:
 | Thermostats (ZHA) | One or more ZHA thermostats of a supported model. A thermostat can belong to one room only. |
 | Temperature sensors | The room's sensors in priority order (drag to reorder). The first usable one is used. Without any sensor Easy TRV does not touch the thermostats' temperature source. |
 | Humidity sensors | Stored for later use. Not evaluated yet. |
-| Profile | `auto` takes the first profile that matches all thermostats of the room. Or choose a shipped or [user profile](#profiles). |
-| Window detection | `on` (default), `off` or `leave unchanged`. Switches the thermostat's own open-window detection. |
-| Hysteresis | `leave unchanged` (default) or 0.2, 0.4, 0.6, 0.8, 1.0 K. Needs firmware 1.3.0 or newer. |
 
-Window detection and hysteresis are applied once when the room starts. To change a room later, or to remove it, open the room's menu on the integration page (edit or delete). Saving a change reloads the integration.
+A further page, **Room settings**, lets the room deviate from the global settings (see below). To change a room later, or to remove it, open the room's menu on the integration page (edit or delete). Saving a change reloads the integration.
 
-### Global options
+A room is a device named **Heizung <room>** in German and **<room> heating** in English, for example "Heizung Wohnzimmer" or "Living room heating". A room created from an area is placed in that area; for custom rooms, or to move an existing device, set the area on the device page. A name you gave the device yourself is kept. The status sensor's entity id is suggested as `sensor.<room>_heating_status`, for example `sensor.living_room_heating_status` (an existing entity keeps its id).
 
-Choose **Configure** on the integration page. The options apply to all rooms.
+### Settings
 
-| Option | Default | Range | Meaning |
+Every setting exists in three layers, and the most specific one that is set wins:
+
+1. **Built-in default**, the value in the table below.
+2. **Global**: the integration's options (**Configure** on the integration page). They apply to all rooms. A number field left empty uses the built-in default.
+3. **Room**: the **Room settings** page of a room. Every choice there has the first option **Global**, and a number field left empty means global too. Only what you change is stored for the room, so a later change of the global value reaches every room that does not set its own.
+
+| Setting | Range | Built-in default | Meaning |
 |---|---|---|---|
-| `refresh_minutes` (Refresh interval) | 20 | 5 to 90 minutes | The room temperature is written again at least this often, even if it has not changed. The TRVZB drops the external value after about two hours without a write. |
-| `verify_delay_seconds` (Read-back delay) | 10 | 2 to 60 seconds | Wait this long after a write before reading the value back. The thermostat is a sleepy device and may need a moment. |
-| `max_attempts` (Attempts) | 3 | 1 to 10 | How often a failing write is tried before the thermostat is reported as not responding. |
-| `min_delta_kelvin` (Minimum change) | 0.1 | 0.1 to 1.0 K | A new room temperature is written only if it differs from the last written value by at least this much. |
-| `sensor_timeout_minutes` (Sensor timeout) | 120 | 0 (off), or 10 to 720 minutes | A sensor that has not reported for this long is ignored although Home Assistant still shows it as available. `0` switches the timeout off. |
+| Refresh interval | 1 to 120 minutes | 20 | The room temperature is written again at least this often, even if it has not changed. The TRVZB drops the external value after about two hours without a write. |
+| Read-back delay | 2 to 60 seconds | 10 | Wait this long after a write before reading the value back. The thermostat is a sleepy device and may need a moment. |
+| Attempts | 1 to 10 | 3 | How often a failing write is tried before the thermostat is reported as not responding. |
+| Minimum change | 0.0 to 1.0 K | 0.1 | A new room temperature is written only if it differs from the last written value by at least this much. |
+| Sensor timeout | 0 (off), or 10 to 1440 minutes | 120 | A sensor that has not reported for this long is ignored although Home Assistant still shows it as available. `0` switches the timeout off. |
+| Thermostat's open-window detection | detection on, detection off, leave as set in the thermostat | on | Switches the thermostat's own detection (see below). |
+| Hysteresis | 0.2, 0.4, 0.6, 0.8 or 1.0 K | 0.4 K | The thermostat's temperature hysteresis. Needs firmware 1.3.0 or newer. Written only while the adaptive mode is not on (see below). |
+| Adaptive mode | adaptive on, adaptive off, leave as set in the thermostat | on | The thermostat adapts to the room itself. Needs firmware 1.4.4 or newer. |
+| Frost protection temperature | 4 to 16 °C | 7 | The temperature the thermostat keeps as its own frost protection. |
+| Profile (rooms only) | `auto` or a profile id | `auto` | `auto` takes the first profile that matches all thermostats of the room. Or choose a shipped or [user profile](#profiles). The profile is not part of the integration options. |
+
+The thermostat settings (open-window detection, adaptive mode, hysteresis, frost protection temperature) are written once when a room starts, which includes every start after you saved a change. The "leave as set in the thermostat" choices write nothing.
+
+**The thermostat's open-window detection.** This is a function of the TRVZB itself, not of Easy TRV, and it has nothing to do with window contacts in Home Assistant. The thermostat treats a temperature drop of more than 1.5 K within 4.5 minutes as an open window: it closes the valve and holds 12 °C, and it ends this pause after 30 minutes at the latest. Easy TRV only switches the detection on or off.
+
+**Adaptive mode and hysteresis.** With the adaptive mode on, the thermostat ignores the hysteresis, so Easy TRV does not write it. Easy TRV writes the hysteresis only while the room's adaptive mode is not on, and also to a thermostat whose firmware is too old for the adaptive mode (below 1.4.4), because the hysteresis is the only thing that takes effect there. With "adaptive mode: leave as set in the thermostat" the hysteresis is written as well. The hysteresis no longer has a "leave unchanged" choice; rooms that had it follow the global value now, and a Repairs notice (`settings_migrated`) lists them once after the update. You can dismiss it. "Leave as set in the thermostat" still exists for the open-window detection and the adaptive mode.
+
+Once the room thermostat exists (Phase 2b, coming), hide the ZHA climate entities of the single thermostats so that only the room's entity is left to operate. Easy TRV never changes the entity registry itself, and until then the ZHA entities keep working as before.
 
 ## How it behaves
 
@@ -70,7 +86,7 @@ Rooms start once Home Assistant has fully started.
 
 ### Status sensor
 
-Each room is a device with one diagnostic sensor, for example `sensor.living_room_status`.
+Each room is a device ("Heizung Wohnzimmer", see above) with one diagnostic sensor, for example `sensor.living_room_heating_status`.
 
 | State | Meaning |
 |---|---|
@@ -91,8 +107,9 @@ Attributes:
 
 | Issue | Severity | Raised when | Cleared |
 |---|---|---|---|
-| `trv_unreachable` | Error | A thermostat did not accept a write after all attempts. Check battery and Zigbee signal. | When the write that failed is verified (Easy TRV sends it again at every refresh interval, and also when the thermostat returns after being unavailable), or on a reload of the integration (raised again if the problem persists). |
-| `trv_firmware` | Warning | The thermostat's firmware is too old for a capability (for example hysteresis below 1.3.0), or the thermostat reports the setting as unsupported. Easy TRV does not retry it. | On a reload of the integration, for example after a firmware update (raised again if the problem persists). |
+| `trv_unreachable` | Error | A thermostat did not accept a write after all attempts. The message names the setting (for example "Hysteresis") and the thermostat as you know it from the device page. Check battery and Zigbee signal. | When the write that failed is verified (Easy TRV sends it again at every refresh interval, and also when the thermostat returns after being unavailable), or on a reload of the integration (raised again if the problem persists). |
+| `trv_firmware` | Warning | The thermostat's firmware is too old for a setting (hysteresis below 1.3.0, adaptive mode below 1.4.4), or the thermostat reports the setting as unsupported. The message names the setting, the thermostat and the required and installed firmware. Easy TRV does not retry it. | On a reload of the integration, for example after a firmware update (raised again if the problem persists). |
+| `settings_migrated` | Warning | After the update to Phase 2a: rooms that had "leave unchanged" for the hysteresis now follow the global hysteresis. The notice lists them. | When you dismiss it. |
 | `zha_api_incompatible` | Error | Easy TRV cannot use the installed ZHA's internal API. Setup is retried. | When setup works. |
 | `profile_invalid` | Warning | A user profile file is invalid and is ignored. The issue names the file and the problem. | When the file loads cleanly after you fix it and reload the integration. |
 | `room_invalid` | Warning | A room could not be set up (for example a thermostat that is not a ZHA device, no profile that fits it, or room data that cannot be read). The other rooms keep running. | When the room sets up cleanly after you fix it and reload the integration. |
@@ -117,7 +134,7 @@ With debug logging on for `custom_components.easy_trv` (Settings > Devices & ser
 
 ### Diagnostics
 
-**Settings > Devices & services > Easy TRV > Download diagnostics** contains the options, the loaded profiles and skipped profile files, and for every room its configuration and full state (including timestamps and attempt counters). It includes the thermostats' IEEE addresses and entity ids, so look through it before posting it publicly.
+**Settings > Devices & services > Easy TRV > Download diagnostics** contains the options, the loaded profiles and skipped profile files, and for every room its configuration, the resolved settings (what the room runs with after the three layers) and its full state (including timestamps and attempt counters). It includes the thermostats' IEEE addresses and entity ids, so look through it before posting it publicly.
 
 ## Profiles
 
@@ -132,11 +149,11 @@ To adapt one:
 
 An invalid file is ignored and raises a `profile_invalid` Repairs issue that names the file and the problem. The format is described in [`docs/concept/profiles.md`](docs/concept/profiles.md), the shipped profile in [`docs/profiles/sonoff-trvzb-native.md`](docs/profiles/sonoff-trvzb-native.md).
 
-Firmware minimums are part of a profile. Below the profile's minimum firmware nothing is written to a thermostat and a Repairs issue names the required version. A single capability can have a higher minimum (hysteresis needs 1.3.0): that capability is skipped and reported, while the temperature writes continue. The skip lasts until the integration is reloaded, for example after a firmware update.
+Firmware minimums are part of a profile. Below the profile's minimum firmware nothing is written to a thermostat and a Repairs issue names the required version. A single capability can have a higher minimum (hysteresis needs 1.3.0, the adaptive mode 1.4.4): that capability is skipped and reported, while the temperature writes continue. The skip lasts until the integration is reloaded, for example after a firmware update.
 
 ## Limitations
 
-- **No window contacts in Phase 1.** The TRVZB has no input for them. The window setting only switches the thermostat's built-in detection, which reacts to a fast temperature drop.
+- **No window contacts yet.** The TRVZB has no input for them. The window setting only switches the thermostat's built-in detection, which reacts to a fast temperature drop (see above).
 - **Writes continue while a thermostat is off.** Easy TRV keeps the external value in sync regardless of the HVAC mode. Whether a write can wake an `off` thermostat is one of the open checks in [`docs/testing-on-device.md`](docs/testing-on-device.md).
 - **ZHA and the Sonoff TRVZB only.** Other models need their own profile.
 - **ZHA's internal API.** Writing and verifying attributes needs ZHA's internal API. Easy TRV keeps all of it in one adapter module, so a future Home Assistant change is fixed in one place. If the API breaks, the `zha_api_incompatible` issue says so.
