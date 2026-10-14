@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.util import slugify
 
 from custom_components.easy_trv.const import DOMAIN
 
@@ -64,6 +65,10 @@ class RoomStatusSensor(SensorEntity):
         self._controller = controller
         self._attr_options = ["ok", "degraded", "error"]
         self._attr_unique_id = f"{subentry.subentry_id}_status"
+        # Suggest the entity id: HA would put the area in front of the device
+        # name, which repeats the area for a room created from it. Only used
+        # while the unique id is not registered, so existing ids stay.
+        self.entity_id = f"sensor.{slugify(subentry.title)}_heating_status"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, subentry.subentry_id)},
             manufacturer="Easy TRV",

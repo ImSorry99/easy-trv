@@ -73,17 +73,16 @@ async def test_room_device_is_named_heating_and_sits_in_its_area(hass) -> None:
     assert device.name == "Wohnzimmer heating"
     assert device.area_id == area.id
     assert entry.runtime_data.areas == {subentry_id: "Wohnzimmer"}
-    # Home Assistant puts the area in front of the device name in the entity id
-    # (sensor.wohnzimmer_wohnzimmer_heating_status), so look the entity up by
-    # its unique id rather than hard-coding that rule.
+    # The sensor suggests its entity id, so HA does not prefix the area to the
+    # device name (which would double it: sensor.wohnzimmer_wohnzimmer_...).
     entity_id = er.async_get(hass).async_get_entity_id(
         "sensor", DOMAIN, f"{subentry_id}_status"
     )
-    assert entity_id is not None
-    assert hass.states.get(entity_id) is not None
-    assert hass.states.get(entity_id).attributes["friendly_name"] == (
-        "Wohnzimmer heating Status"
-    )
+    assert entity_id == "sensor.wohnzimmer_heating_status"
+    state = hass.states.get("sensor.wohnzimmer_heating_status")
+    assert state is not None
+    assert state.attributes["friendly_name"] == "Wohnzimmer heating Status"
+    assert hass.states.get("sensor.wohnzimmer_wohnzimmer_heating_status") is None
 
 
 async def test_custom_room_without_area_has_no_area(hass, entry) -> None:
@@ -127,7 +126,9 @@ async def test_device_name_follows_room_name_unless_renamed_by_user(
     await settle(hass)
     assert device().name == "Lounge heating"
     assert device().name_by_user == "My radiator"
-    assert (device().name_by_user or device().name) == "My radiator"
+    state = hass.states.get("sensor.living_heating_status")
+    assert state is not None
+    assert state.attributes["friendly_name"] == "My radiator Status"
 
 
 async def test_status_sensor_follows_the_room_status(hass, entry) -> None:

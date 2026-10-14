@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Hysteresis follows the global value (default 0.4 K) and is written whenever the adaptive mode is not on; rooms that had 'leave unchanged' are migrated and get a Repairs notice
-- Room devices are named 'Heizung {room}' / '{room} heating' and are assigned to their area
+- Room devices are named 'Heizung {room}' / '{room} heating'; new room devices are assigned to their area, existing devices keep their area setting
 
 ## [0.1.0] - 2026-10-13
 
