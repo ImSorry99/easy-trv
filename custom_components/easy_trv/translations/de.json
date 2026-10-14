@@ -128,7 +128,7 @@
     },
     "settings_migrated": {
       "title": "Thermostat-Einstellungen durch das Update geändert",
-      "description": "Diese Räume hatten bei der Hysterese „Unverändert lassen“ gewählt: {rooms}.\n\nDie Hysterese wird jetzt immer auf die Thermostate geschrieben, deshalb gilt für diese Räume stattdessen der globale Wert {hysteresis}. Prüfe die globale Einstellung in den Optionen von Easy TRV oder lege eine Hysterese im Raum selbst fest.\n\nDu kannst diesen Hinweis ausblenden."
+      "description": "Diese Räume hatten bei der Hysterese „Unverändert lassen“ gewählt: {rooms}.\n\nSie folgen jetzt dem globalen Wert ({hysteresis}). Solange der adaptive Modus an ist, regelt das Thermostat die Hysterese selbst und es wird keine geschrieben. Prüfe die globale Einstellung in den Optionen von Easy TRV oder lege eine Hysterese im Raum selbst fest.\n\nDu kannst diesen Hinweis ausblenden."
     }
   },
   "options": {
