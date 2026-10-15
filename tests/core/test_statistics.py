@@ -3,11 +3,9 @@ from datetime import UTC, datetime, timedelta
 
 from custom_components.easy_trv.core.model import (
     Preset,
-    RoomConfig,
     RoomMode,
     RoomState,
     SensorReading,
-    TrvConfig,
 )
 from custom_components.easy_trv.core.statistics import (
     Duration,
@@ -19,17 +17,6 @@ from custom_components.easy_trv.core.statistics import (
 )
 
 T0 = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
-
-CFG = RoomConfig(
-    "room1",
-    "Living",
-    (TrvConfig("climate.a", "00:11", (1, 3, 0)),),
-    ("sensor.t1",),
-    "on",
-    0.4,
-    "leave",
-    7.0,
-)
 
 
 def after(minutes: float) -> datetime:
@@ -115,42 +102,42 @@ def room(
 
 
 def test_deviation_is_sensor_minus_setpoint_while_heating() -> None:
-    assert deviation(room(20.4, 21.0), CFG, T0) == -0.6
-    assert deviation(room(22.0, 21.0), CFG, T0) == 1.0
+    assert deviation(room(20.4, 21.0)) == -0.6
+    assert deviation(room(22.0, 21.0)) == 1.0
 
 
 def test_deviation_is_rounded_to_a_tenth() -> None:
-    assert deviation(room(20.44, 21.0), CFG, T0) == -0.6
-    assert deviation(room(21.26, 21.0), CFG, T0) == 0.3
+    assert deviation(room(20.44, 21.0)) == -0.6
+    assert deviation(room(21.26, 21.0)) == 0.3
 
 
 def test_deviation_none_when_off() -> None:
-    assert deviation(room(mode=RoomMode.OFF), CFG, T0) is None
+    assert deviation(room(mode=RoomMode.OFF)) is None
 
 
 def test_deviation_none_on_frost_protection() -> None:
-    assert deviation(room(preset=Preset.FROST), CFG, T0) is None
+    assert deviation(room(preset=Preset.FROST)) is None
 
 
 def test_deviation_none_during_window_hold() -> None:
-    assert deviation(room(window_open=True), CFG, T0) is None
+    assert deviation(room(window_open=True)) is None
 
 
 def test_deviation_none_during_outdoor_hold() -> None:
-    assert deviation(room(outdoor_hold=True), CFG, T0) is None
+    assert deviation(room(outdoor_hold=True)) is None
 
 
 def test_deviation_none_without_active_sensor() -> None:
-    assert deviation(room(active_sensor=None), CFG, T0) is None
+    assert deviation(room(active_sensor=None)) is None
 
 
 def test_deviation_none_when_the_reading_is_missing() -> None:
-    assert deviation(room(active_sensor="sensor.other"), CFG, T0) is None
+    assert deviation(room(active_sensor="sensor.other")) is None
 
 
 def test_deviation_none_when_the_sensor_has_no_value() -> None:
-    assert deviation(room(value=None), CFG, T0) is None
+    assert deviation(room(value=None)) is None
 
 
 def test_deviation_none_without_setpoint() -> None:
-    assert deviation(room(setpoint=None), CFG, T0) is None
+    assert deviation(room(setpoint=None)) is None

@@ -3,7 +3,8 @@
 A ``Duration`` adds up the time a condition held: the finished periods in
 ``total`` and the start of the one that is running in ``since``. The functions
 return a new value and never mutate, in the shape of the other core modules.
-``deviation`` is the control deviation of a room while it heats.
+``deviation`` is the control deviation of a room while it heats; it needs only
+the room state.
 """
 
 from dataclasses import dataclass, replace
@@ -15,7 +16,7 @@ from custom_components.easy_trv.core.setpoint import operation as room_operation
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from custom_components.easy_trv.core.model import RoomConfig, RoomState
+    from custom_components.easy_trv.core.model import RoomState
 
 
 @dataclass(frozen=True)
@@ -55,11 +56,7 @@ def restored(duration: Duration, stored: float) -> Duration:
     return replace(duration, total=max(duration.total, stored))
 
 
-def deviation(
-    state: RoomState,
-    config: RoomConfig,  # noqa: ARG001 - the shape of the other room functions
-    now: datetime,  # noqa: ARG001 - the shape of the other room functions
-) -> float | None:
+def deviation(state: RoomState) -> float | None:
     """Return the active sensor's value minus the setpoint, rounded to 0.1 K.
 
     Only while the room heats with no hold; ``None`` otherwise, or when the
