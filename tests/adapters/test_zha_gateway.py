@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -6,7 +7,15 @@ from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from zha.application.gateway import Gateway
 from zha.zigbee.device import Device
+from zigpy.event import EventBase
 from zigpy.types import EUI64
+from zigpy.zcl import (
+    AttributeReadEvent,
+    AttributeReportedEvent,
+    AttributeUpdatedEvent,
+    AttributeWrittenEvent,
+    ClusterType,
+)
 from zigpy.zcl.foundation import Status, WriteAttributesStatusRecord
 
 from custom_components.easy_trv.adapters import zha_gateway
@@ -513,6 +522,310 @@ def test_zha_api_matches_the_calls_the_adapter_makes() -> None:
     assert list(inspect.signature(Gateway.get_device).parameters) == ["self", "ieee"]
 
 
+# --- subscribe ------------------------------------------------------------
+
+THERMOSTAT = 0x0201
+LOCAL_TEMP_SETPOINT = 0x0012
+
+
+def _noop(*_args: object) -> None:
+    """An observation callback that ignores everything."""
+
+
+class _EventCluster(EventBase):
+    """A zigpy-like cluster: real EventBase semantics, scriptable reads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.read_attributes = AsyncMock(return_value=({}, {}))
+
+    def fire(
+        self, event_class: type, attribute: int, value: int, **extra: object
+    ) -> None:
+        fields: dict[str, object] = {
+            "device_ieee": IEEE,
+            "endpoint_id": 1,
+            "cluster_type": ClusterType.Server,
+            "cluster_id": THERMOSTAT,
+            "attribute_name": "x",
+            "attribute_id": attribute,
+            "manufacturer_code": None,
+            "value": value,
+        }
+        if event_class in (AttributeReportedEvent, AttributeReadEvent):
+            fields["raw_value"] = value
+        if event_class is AttributeWrittenEvent:
+            fields["status"] = Status.SUCCESS
+        fields.update(extra)
+        self.emit(event_class.event_type, event_class(**fields))
+
+
+def _subscribable() -> tuple[MagicMock, _EventCluster]:
+    device = MagicMock()
+    device.write_zigbee_attribute = AsyncMock()
+    cluster = _EventCluster()
+    device.async_get_cluster.return_value = cluster
+    return device, cluster
+
+
+async def test_subscribe_delivers_device_reports(hass) -> None:
+    device, cluster = _subscribable()
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+    device.async_get_cluster.assert_called_once_with(1, THERMOSTAT)
+    cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 2150)
+    assert seen == [(IEEE, LOCAL_TEMP_SETPOINT, "report", 2150)]
+
+
+async def test_subscribe_delivers_updated_events_as_reports(hass) -> None:
+    """Quirk-transformed and unknown-attribute reports arrive as updated events."""
+    device, cluster = _subscribable()
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+    cluster.fire(AttributeUpdatedEvent, LOCAL_TEMP_SETPOINT, 2200)
+    assert seen == [(IEEE, LOCAL_TEMP_SETPOINT, "report", 2200)]
+
+
+async def test_subscribe_delivers_foreign_writes_as_written(hass) -> None:
+    device, cluster = _subscribable()
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+    cluster.fire(AttributeWrittenEvent, LOCAL_TEMP_SETPOINT, 1900)
+    cluster.fire(
+        AttributeWrittenEvent, LOCAL_TEMP_SETPOINT, 1800, status=Status.FAILURE
+    )
+    assert seen == [(IEEE, LOCAL_TEMP_SETPOINT, "written", 1900)]
+
+
+async def test_subscribe_ignores_other_attributes_and_plain_reads(hass) -> None:
+    device, cluster = _subscribable()
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+    cluster.fire(AttributeReportedEvent, 0x0000, 2000)
+    cluster.fire(AttributeReadEvent, LOCAL_TEMP_SETPOINT, 2000)
+    assert seen == []
+
+
+async def test_subscribe_skips_non_integer_values(hass) -> None:
+    device, cluster = _subscribable()
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+    cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, None)
+    assert seen == []
+
+
+async def test_a_raising_callback_does_not_break_zigpy(hass) -> None:
+    device, cluster = _subscribable()
+    calls: list[int] = []
+
+    def boom(_ieee: str, _attr: int, _kind: str, raw: int) -> None:
+        calls.append(raw)
+        raise RuntimeError
+
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], boom)
+    cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 2150)
+    cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 2160)
+    assert calls == [2150, 2160]
+
+
+async def test_own_write_is_not_delivered(hass) -> None:
+    device, cluster = _subscribable()
+
+    async def write(*_args: object) -> None:
+        cluster.fire(AttributeWrittenEvent, LOCAL_TEMP_SETPOINT, 2150)
+        cluster.fire(AttributeUpdatedEvent, LOCAL_TEMP_SETPOINT, 2150)
+
+    device.write_zigbee_attribute = AsyncMock(side_effect=write)
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+        await gw.write(IEEE, 1, THERMOSTAT, LOCAL_TEMP_SETPOINT, 2150)
+        # in-flight ends with the write: a later report is delivered again
+        cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 2150)
+    assert seen == [(IEEE, LOCAL_TEMP_SETPOINT, "report", 2150)]
+
+
+async def test_own_failed_write_clears_in_flight(hass) -> None:
+    device, cluster = _subscribable()
+    device.write_zigbee_attribute = AsyncMock(side_effect=TimeoutError())
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+        with pytest.raises(zha_gateway.GatewayError):
+            await gw.write(IEEE, 1, THERMOSTAT, LOCAL_TEMP_SETPOINT, 2150)
+        cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 2150)
+    assert len(seen) == 1
+
+
+async def test_own_read_is_not_delivered(hass) -> None:
+    device, cluster = _subscribable()
+
+    async def read(_attributes: list[int], **_kwargs: object) -> tuple[dict, dict]:
+        cluster.fire(AttributeReadEvent, LOCAL_TEMP_SETPOINT, 2150)
+        cluster.fire(AttributeUpdatedEvent, LOCAL_TEMP_SETPOINT, 2150)
+        return {LOCAL_TEMP_SETPOINT: 2150}, {}
+
+    cluster.read_attributes = AsyncMock(side_effect=read)
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+        assert await gw.read(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT]) == {
+            LOCAL_TEMP_SETPOINT: 2150
+        }
+        cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 2150)
+    assert len(seen) == 1
+
+
+async def test_in_flight_only_covers_the_written_attribute(hass) -> None:
+    device, cluster = _subscribable()
+
+    async def write(*_args: object) -> None:
+        cluster.fire(AttributeReportedEvent, 0x001C, 4)
+
+    device.write_zigbee_attribute = AsyncMock(side_effect=write)
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(IEEE, 1, THERMOSTAT, [0x001C], lambda *a: seen.append(a))
+        await gw.write(IEEE, 1, THERMOSTAT, LOCAL_TEMP_SETPOINT, 2150)
+    assert seen == [(IEEE, 0x001C, "report", 4)]
+
+
+async def test_overlapping_operations_keep_in_flight_until_all_finish(hass) -> None:
+    device, cluster = _subscribable()
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def slow_write(*_args: object) -> None:
+        started.set()
+        await release.wait()
+
+    device.write_zigbee_attribute = AsyncMock(side_effect=slow_write)
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+        first = asyncio.create_task(
+            gw.write(IEEE, 1, THERMOSTAT, LOCAL_TEMP_SETPOINT, 1)
+        )
+        await started.wait()
+        cluster.read_attributes = AsyncMock(return_value=({LOCAL_TEMP_SETPOINT: 1}, {}))
+        await gw.read(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT])
+        cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 1)
+        assert seen == []  # the write is still in flight
+        release.set()
+        await first
+        cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 1)
+    assert len(seen) == 1
+
+
+async def test_unsubscribe_stops_delivery(hass) -> None:
+    device, cluster = _subscribable()
+    seen: list[tuple[str, int, str, int]] = []
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        unsubscribe = gw.subscribe(
+            IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], lambda *a: seen.append(a)
+        )
+    unsubscribe()
+    unsubscribe()  # idempotent
+    cluster.fire(AttributeReportedEvent, LOCAL_TEMP_SETPOINT, 2150)
+    cluster.fire(AttributeUpdatedEvent, LOCAL_TEMP_SETPOINT, 2150)
+    cluster.fire(AttributeWrittenEvent, LOCAL_TEMP_SETPOINT, 2150)
+    assert seen == []
+
+
+async def test_unsubscribe_never_raises(hass) -> None:
+    device, cluster = _subscribable()
+    cluster.on_event = MagicMock(
+        side_effect=lambda *_a: MagicMock(side_effect=KeyError)
+    )
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        unsubscribe = gw.subscribe(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], _noop)
+    unsubscribe()
+    unsubscribe()
+
+
+async def test_subscribe_unknown_device_raises_zha_unavailable(hass) -> None:
+    with patch(PATCH_TARGET, return_value=_gateway_with(None)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(zha_gateway.ZhaUnavailable):
+            gw.subscribe(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], _noop)
+
+
+async def test_subscribe_without_cluster_raises_gateway_error(hass) -> None:
+    device, _ = _subscribable()
+    device.async_get_cluster.side_effect = KeyError(THERMOSTAT)
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(zha_gateway.GatewayError):
+            gw.subscribe(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], _noop)
+
+
+async def test_subscribe_removes_listeners_if_registration_fails(hass) -> None:
+    device, cluster = _subscribable()
+    real = cluster.on_event
+    calls = 0
+
+    def flaky(name: str, callback: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise RuntimeError
+        return real(name, callback)
+
+    cluster.on_event = flaky
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        with pytest.raises(zha_gateway.GatewayError):
+            gw.subscribe(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], _noop)
+    listeners = cluster._event_listeners.values()  # noqa: SLF001
+    assert all(not registered for registered in listeners)
+
+
+def test_zigpy_event_api_matches_what_the_adapter_subscribes_to() -> None:
+    """Pin the zigpy event contract subscribe() relies on (unstable internals)."""
+    assert AttributeReportedEvent.event_type == "attribute_report"
+    assert AttributeUpdatedEvent.event_type == "attribute_updated"
+    assert AttributeWrittenEvent.event_type == "attribute_written"
+    on_event = list(inspect.signature(EventBase.on_event).parameters)
+    assert on_event[:3] == ["self", "event_name", "callback"]
+
+
 # --- FakeGateway ----------------------------------------------------------
 
 
@@ -586,3 +899,49 @@ async def test_fake_gateway_contract() -> None:
     assert fake.writes == writes_before
     assert fake.reads == reads_before
     assert fake.store == store_before
+
+
+async def test_fake_gateway_subscribe_and_inject() -> None:
+    fake = FakeGateway()
+    fake.add_device("climate.living_trv", IEEE)
+    seen: list[tuple[str, int, str, int]] = []
+    other: list[tuple[str, int, str, int]] = []
+
+    def callback(*args: object) -> None:
+        seen.append(args)  # type: ignore[arg-type]
+
+    unsubscribe = fake.subscribe(
+        IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT, 0x001C], callback
+    )
+    fake.subscribe(IEEE, 1, THERMOSTAT, [0x0000], lambda *a: other.append(a))
+    assert fake.subscriptions[0][:4] == (
+        IEEE,
+        1,
+        THERMOSTAT,
+        (LOCAL_TEMP_SETPOINT, 0x001C),
+    )
+
+    fake.inject(IEEE, LOCAL_TEMP_SETPOINT, 2150)
+    fake.inject(IEEE, 0x001C, 4, kind="written")
+    fake.inject(IEEE, 0x0099, 1)
+    fake.inject("00:12:4b:00:00:00:00:99", LOCAL_TEMP_SETPOINT, 1)
+    assert seen == [
+        (IEEE, LOCAL_TEMP_SETPOINT, "report", 2150),
+        (IEEE, 0x001C, "written", 4),
+    ]
+    assert other == []
+
+    # the fake's own write does not echo; unsubscribe removes the record
+    await fake.write(IEEE, 1, THERMOSTAT, LOCAL_TEMP_SETPOINT, 2200)
+    assert len(seen) == 2
+    unsubscribe()
+    unsubscribe()
+    fake.inject(IEEE, LOCAL_TEMP_SETPOINT, 2150)
+    assert len(seen) == 2
+    assert len(fake.subscriptions) == 1
+
+
+async def test_fake_gateway_subscribe_unknown_device_raises() -> None:
+    fake = FakeGateway()
+    with pytest.raises(zha_gateway.GatewayError):
+        fake.subscribe(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], _noop)

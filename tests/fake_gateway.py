@@ -10,8 +10,12 @@ from custom_components.easy_trv.adapters.zha_gateway import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
+    from custom_components.easy_trv.adapters.zha_gateway import (
+        ObservationCallback,
+        ObservationKind,
+    )
     from custom_components.easy_trv.core.values import Version
 
 
@@ -39,6 +43,9 @@ class FakeGateway:
         self.fail_read: dict[tuple[str, int], str] = {}
         self.read_override: dict[tuple[str, int], int] = {}
         self.unsupported_write: set[tuple[str, int]] = set()
+        self.subscriptions: list[
+            tuple[str, int, int, tuple[int, ...], ObservationCallback]
+        ] = []
 
     def add_device(  # noqa: PLR0913 - keyword-only options mirror DeviceRef
         self,
@@ -113,3 +120,32 @@ class FakeGateway:
                 msg = f"read failed for 0x{attr:04X}: UNSUPPORTED_ATTRIBUTE"
                 raise GatewayError(msg)
         return result
+
+    def subscribe(
+        self,
+        ieee: str,
+        endpoint: int,
+        cluster: int,
+        attributes: Sequence[int],
+        callback: ObservationCallback,
+    ) -> Callable[[], None]:
+        """Record a subscription; return an idempotent unsubscribe."""
+        self._require_known(ieee)
+        record = (ieee, endpoint, cluster, tuple(attributes), callback)
+        self.subscriptions.append(record)
+
+        def unsubscribe() -> None:
+            if record in self.subscriptions:
+                self.subscriptions.remove(record)
+
+        return unsubscribe
+
+    def inject(
+        self, ieee: str, attribute: int, raw: int, kind: ObservationKind = "report"
+    ) -> None:
+        """Deliver an observation to every matching subscription, synchronously."""
+        for sub_ieee, _endpoint, _cluster, attributes, callback in list(
+            self.subscriptions
+        ):
+            if sub_ieee == ieee and attribute in attributes:
+                callback(ieee, attribute, kind, raw)
