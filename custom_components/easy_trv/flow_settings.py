@@ -1,0 +1,286 @@
+"""The settings forms of Easy TRV: the options and the settings step of a room.
+
+The tables below describe every setting that is a choice or a number. The
+schema builders turn them into the two forms; the stored options stay flat.
+"""
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Final
+
+import voluptuous as vol
+from homeassistant.const import UnitOfTemperature, UnitOfTime
+from homeassistant.data_entry_flow import section
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
+
+from custom_components.easy_trv.const import (
+    CONF_ADAPTIVE_MODE,
+    CONF_FROST_TEMPERATURE,
+    CONF_HYSTERESIS,
+    CONF_MAX_ATTEMPTS,
+    CONF_MIN_DELTA,
+    CONF_PROFILE,
+    CONF_REFRESH_MINUTES,
+    CONF_SENSOR_TIMEOUT,
+    CONF_VERIFY_DELAY,
+    CONF_WINDOW_DETECTION,
+    PROFILE_AUTO,
+    SETTING_GLOBAL,
+)
+from custom_components.easy_trv.core.settings import DEFAULTS, overrides
+from custom_components.easy_trv.labels import async_option_labels, localized_number
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from homeassistant.core import HomeAssistant
+
+    from custom_components.easy_trv.profiles.engine import Profile
+
+# The values double as translation keys, which must not contain a dot: 0_4 = 0.4 K.
+SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
+    CONF_WINDOW_DETECTION: ("on", "off", "leave"),
+    CONF_HYSTERESIS: ("0_2", "0_4", "0_6", "0_8", "1_0"),
+    CONF_ADAPTIVE_MODE: ("on", "off", "leave"),
+}
+
+
+@dataclass(frozen=True)
+class NumberSpec:
+    """The bounds and unit of a numeric setting."""
+
+    minimum: float
+    maximum: float
+    step: float = 1
+    unit: str | None = None
+
+
+NUMBERS: Final[Mapping[str, NumberSpec]] = {
+    CONF_REFRESH_MINUTES: NumberSpec(1, 120, unit=UnitOfTime.MINUTES),
+    CONF_VERIFY_DELAY: NumberSpec(2, 60, unit=UnitOfTime.SECONDS),
+    CONF_MAX_ATTEMPTS: NumberSpec(1, 10),
+    CONF_MIN_DELTA: NumberSpec(0.0, 1.0, 0.1, UnitOfTemperature.KELVIN),
+    CONF_SENSOR_TIMEOUT: NumberSpec(0, 1440, unit=UnitOfTime.MINUTES),
+    CONF_FROST_TEMPERATURE: NumberSpec(4.0, 16.0, 0.5, UnitOfTemperature.CELSIUS),
+}
+
+# How the options form groups its fields (the stored options stay flat).
+_SECTION_WRITES: Final = "writes"
+_SECTION_THERMOSTAT: Final = "thermostat"
+SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
+    _SECTION_WRITES: (
+        CONF_REFRESH_MINUTES,
+        CONF_VERIFY_DELAY,
+        CONF_MAX_ATTEMPTS,
+        CONF_MIN_DELTA,
+        CONF_SENSOR_TIMEOUT,
+    ),
+    _SECTION_THERMOSTAT: (
+        CONF_WINDOW_DETECTION,
+        CONF_HYSTERESIS,
+        CONF_ADAPTIVE_MODE,
+        CONF_FROST_TEMPERATURE,
+    ),
+}
+# The order of the room's settings form.
+ROOM_SETTING_KEYS: Final = (
+    CONF_PROFILE,
+    CONF_WINDOW_DETECTION,
+    CONF_HYSTERESIS,
+    CONF_ADAPTIVE_MODE,
+    CONF_FROST_TEMPERATURE,
+    CONF_REFRESH_MINUTES,
+    CONF_VERIFY_DELAY,
+    CONF_MAX_ATTEMPTS,
+    CONF_MIN_DELTA,
+    CONF_SENSOR_TIMEOUT,
+)
+ROOM_SELECT_KEYS: Final = (
+    CONF_PROFILE,
+    *(key for key in ROOM_SETTING_KEYS if key in SELECT_VALUES),
+)
+ROOM_NUMBER_KEYS: Final = tuple(key for key in ROOM_SETTING_KEYS if key in NUMBERS)
+
+ERR_TIMEOUT_RANGE: Final = "timeout_range"
+
+# The sensor timeout is either off (0) or within these bounds (minutes).
+_TIMEOUT_MIN: Final = 10
+_TIMEOUT_MAX: Final = 1440
+
+
+# --- Settings fields (shared by the options flow and the room's settings step) ---
+
+
+def _number_selector(key: str) -> NumberSelector:
+    """Return the box input of a numeric setting."""
+    spec = NUMBERS[key]
+    config = NumberSelectorConfig(
+        min=spec.minimum,
+        max=spec.maximum,
+        step=spec.step,
+        mode=NumberSelectorMode.BOX,
+    )
+    if spec.unit is not None:
+        config["unit_of_measurement"] = spec.unit
+    return NumberSelector(config)
+
+
+def _select_selector(
+    key: str, options: list[str] | list[SelectOptionDict]
+) -> SelectSelector:
+    """Return the dropdown of a choice setting, translated by the setting's key."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=options,
+            mode=SelectSelectorMode.DROPDOWN,
+            translation_key=key,
+        )
+    )
+
+
+def _stored_number(key: str, value: float) -> float:
+    """Return a number as it is stored: the selector's floats become ints if whole."""
+    if isinstance(DEFAULTS[key], int):
+        return round(value)
+    return round(value, 1)
+
+
+def stored_numbers(
+    user_input: Mapping[str, Any], keys: Sequence[str]
+) -> dict[str, Any]:
+    """Return the filled numbers among ``keys``; an empty field is not stored."""
+    return {
+        key: _stored_number(key, user_input[key])
+        for key in keys
+        if user_input.get(key) is not None
+    }
+
+
+def timeout_error(values: Mapping[str, Any]) -> dict[str, str]:
+    """Return the form error of a sensor timeout that is neither 0 nor in bounds."""
+    timeout = values.get(CONF_SENSOR_TIMEOUT)
+    if timeout and not _TIMEOUT_MIN <= timeout <= _TIMEOUT_MAX:
+        return {CONF_SENSOR_TIMEOUT: ERR_TIMEOUT_RANGE}
+    return {}
+
+
+async def setting_texts(
+    hass: HomeAssistant, values: Mapping[str, Any]
+) -> dict[str, str]:
+    """Render setting values as plain text in the language of Home Assistant.
+
+    Selects use the labels of their selector, numbers get their unit and, in
+    German, a decimal comma. A sensor timeout of 0 reads as "off".
+    """
+    texts: dict[str, str] = {}
+    for key, value in values.items():
+        if key in NUMBERS and not (key == CONF_SENSOR_TIMEOUT and value == 0):
+            text = f"{value:.1f}" if isinstance(value, float) else str(value)
+            text = localized_number(hass, text)
+            unit = NUMBERS[key].unit
+            texts[key] = text if unit is None else f"{text} {unit}"
+        else:
+            name = "sensor_timeout" if key == CONF_SENSOR_TIMEOUT else key
+            option = "off" if key == CONF_SENSOR_TIMEOUT else str(value)
+            texts[key] = (await async_option_labels(hass, name)).get(option, option)
+    return texts
+
+
+def effective_settings(
+    options: Mapping[str, Any], keys: Sequence[str]
+) -> dict[str, Any]:
+    """Return the saved global value of each setting, else its built-in default."""
+    values = {**DEFAULTS, **overrides(options)}
+    return {
+        key: _stored_number(key, values[key]) if key in NUMBERS else values[key]
+        for key in keys
+    }
+
+
+def room_settings_schema(profiles: Mapping[str, Profile]) -> vol.Schema:
+    """Return the room's settings form: "global" or a value, empty = global."""
+    profile_options = [
+        SelectOptionDict(value=SETTING_GLOBAL, label="Global"),
+        SelectOptionDict(value=PROFILE_AUTO, label="Auto"),
+        *(
+            SelectOptionDict(value=profile_id, label=profile.name)
+            for profile_id, profile in profiles.items()
+        ),
+    ]
+    schema: dict[Any, Any] = {}
+    for key in ROOM_SETTING_KEYS:
+        if key == CONF_PROFILE:
+            schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
+                key, profile_options
+            )
+        elif key in SELECT_VALUES:
+            schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
+                key, [SETTING_GLOBAL, *SELECT_VALUES[key]]
+            )
+        else:
+            schema[vol.Optional(key)] = _number_selector(key)
+    return vol.Schema(schema)
+
+
+def room_settings(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Return what a room stores of its settings: the selects and filled numbers."""
+    return {
+        **{key: user_input[key] for key in ROOM_SELECT_KEYS},
+        **stored_numbers(user_input, ROOM_NUMBER_KEYS),
+    }
+
+
+# --- The options form --------------------------------------------------
+
+
+def options_schema(current: Mapping[str, Any]) -> vol.Schema:
+    """Return the form of the global options in two sections.
+
+    The selects default to what is saved (else the built-in default). The
+    numbers have neither a default nor a suggestion unless they are saved: an
+    empty number is not stored, and the built-in default applies.
+    """
+    effective = {**DEFAULTS, **overrides(current)}
+
+    def group(keys: Sequence[str]) -> section:
+        fields: dict[Any, Any] = {}
+        for key in keys:
+            if key in SELECT_VALUES:
+                fields[vol.Required(key, default=effective[key])] = _select_selector(
+                    key, list(SELECT_VALUES[key])
+                )
+            else:
+                fields[vol.Optional(key)] = _number_selector(key)
+        return section(vol.Schema(fields), {"collapsed": False})
+
+    return vol.Schema(
+        {vol.Required(name): group(keys) for name, keys in SECTIONS.items()}
+    )
+
+
+def options_suggestions(current: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return the numbers the options form shows: only those that are saved."""
+    saved = overrides(current)
+    return {
+        name: {key: saved[key] for key in keys if key in NUMBERS and key in saved}
+        for name, keys in SECTIONS.items()
+    }
+
+
+def stored_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Return what the options store of a submitted form: the selects and numbers.
+
+    The sections only lay the form out; the options are stored flat.
+    """
+    flat = {key: value for name in SECTIONS for key, value in user_input[name].items()}
+    return {
+        **{key: flat[key] for key in SELECT_VALUES},
+        **stored_numbers(flat, list(NUMBERS)),
+    }
