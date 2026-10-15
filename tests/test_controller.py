@@ -1,7 +1,8 @@
 import asyncio
 import json
 import logging
-from dataclasses import replace
+import math
+from dataclasses import FrozenInstanceError, replace
 from datetime import timedelta
 
 import pytest
@@ -27,7 +28,11 @@ from custom_components.easy_trv.const import (
     EVENT_STATE_CHANGED,
     EVENT_WRITE_FAILED,
 )
-from custom_components.easy_trv.controller import RoomController
+from custom_components.easy_trv.controller import (
+    RoomController,
+    RoomStatistics,
+    ThermostatStatistics,
+)
 from custom_components.easy_trv.core.model import (
     Note,
     OperatingMode,
@@ -2632,3 +2637,710 @@ async def test_deviations_name_the_thermostats_that_deviate(
         HeatingState.RESTRICTED_UNAVAILABLE,
         HeatingState.HEATING,
     )
+
+
+# --- Statistics -----------------------------------------------------------
+
+
+def tick(freezer, seconds) -> None:
+    """Move frozen time without firing timers."""
+    freezer.tick(timedelta(seconds=seconds))
+
+
+def trv_stats(room, trv="climate.a") -> ThermostatStatistics:
+    return room.statistics().per_thermostat[trv]
+
+
+def sent_to(gateway, ieee) -> int:
+    """Return how many write requests reached a device (the failing ones too)."""
+    return len([w for w in gateway.writes if w[0] == ieee])
+
+
+def report(hass, entity_id, action, state="heat") -> None:
+    """Set a climate state with an ``hvac_action`` (``None``: without one)."""
+    hass.states.async_set(
+        entity_id, state, {} if action is None else {"hvac_action": action}
+    )
+
+
+def hours(seconds) -> float:
+    return pytest.approx(seconds / 3600)
+
+
+async def test_statistics_start_at_zero_and_are_frozen(controller) -> None:
+    stats = controller.statistics()
+    assert isinstance(stats, RoomStatistics)
+    assert stats.deviation is None
+    # No contacts, no thermostat that reported an hvac_action.
+    assert stats.heating_hours is None
+    assert stats.window_openings is None
+    assert stats.window_open_hours is None
+    assert stats.per_thermostat == {
+        "climate.a": ThermostatStatistics(0, 0, 0),
+        "climate.b": ThermostatStatistics(0, 0, 0),
+    }
+    with pytest.raises(FrozenInstanceError):
+        stats.deviation = 1.0  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        stats.per_thermostat["climate.a"].writes = 1  # type: ignore[misc]
+
+
+# Writes and failed writes
+
+
+async def test_every_sent_write_counts_once_and_read_backs_do_not(
+    hass, controller, gateway
+) -> None:
+    await controller.async_start()
+    await settle(hass)
+    # Window detection, hysteresis, frost, source and value: five each.
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 0, 0)
+    assert trv_stats(controller, "climate.b") == ThermostatStatistics(5, 0, 0)
+    assert sent_to(gateway, IEEE_A) == 5
+    assert len(gateway.reads) == 10
+
+
+async def test_every_attempt_of_a_retried_write_counts(
+    hass, freezer, controller, gateway
+) -> None:
+    gateway.read_override[(IEEE_B, VALUE)] = 0
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.b") == ThermostatStatistics(5, 1, 0)
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 0, 0)
+    # The retry after 5 s is a write of its own and mismatches again.
+    await advance(hass, freezer, 5)
+    assert trv_stats(controller, "climate.b") == ThermostatStatistics(6, 2, 0)
+    assert sent_to(gateway, IEEE_B) == 6
+
+
+async def test_a_write_the_gateway_rejects_counts_as_write_and_failure(
+    hass, controller, gateway
+) -> None:
+    gateway.fail_write[(IEEE_A, VALUE)] = "radio busy"
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 1, 0)
+
+
+async def test_a_failed_read_back_counts_as_a_failure(
+    hass, controller, gateway
+) -> None:
+    gateway.fail_read[(IEEE_A, VALUE)] = "radio busy"
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 1, 0)
+
+
+async def test_a_mismatch_counts_as_a_failure(hass, controller, gateway) -> None:
+    gateway.read_override[(IEEE_A, VALUE)] = 2000
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 1, 0)
+
+
+async def test_a_timeout_counts_as_a_failure(
+    hass, freezer, make_controller, gateway, monkeypatch
+) -> None:
+    original = gateway.write
+
+    async def hang_on_a(ieee, *args) -> None:
+        if ieee == IEEE_A:
+            await asyncio.sleep(3600)
+        await original(ieee, *args)
+
+    monkeypatch.setattr(gateway, "write", hang_on_a)
+    room = make_controller()
+    await room.async_start()
+    for _ in range(20):
+        await advance(hass, freezer, 5)
+        if trv_stats(room, "climate.a").write_failures:
+            break
+    # The first write hung until the timeout; the next one is out and hangs.
+    assert trv_stats(room, "climate.a") == ThermostatStatistics(2, 1, 0)
+
+
+async def test_an_unexpected_error_after_a_sent_write_counts_a_failure(
+    hass, controller, gateway, monkeypatch
+) -> None:
+    original = gateway.write
+    calls = []
+
+    async def explode_once(*args) -> None:
+        calls.append(args)
+        if len(calls) == 1:
+            msg = "boom"
+            raise RuntimeError(msg)
+        await original(*args)
+
+    monkeypatch.setattr(gateway, "write", explode_once)
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 1, 0)
+    assert trv_stats(controller, "climate.b") == ThermostatStatistics(5, 0, 0)
+
+
+async def test_a_signal_is_a_write_but_not_a_failure(hass, controller, gateway) -> None:
+    gateway.read_override[(IEEE_A, SOURCE)] = 2
+    await controller.async_start()
+    await settle(hass)
+    stats = trv_stats(controller, "climate.a")
+    assert (stats.writes, stats.write_failures) == (sent_to(gateway, IEEE_A), 0)
+    assert stats.writes >= 5
+
+
+async def test_an_unsupported_attribute_is_a_write_but_not_a_failure(
+    hass, controller, gateway
+) -> None:
+    gateway.unsupported_write.add((IEEE_A, HYSTERESIS))
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 0, 0)
+    assert sent_to(gateway, IEEE_A) == 5
+
+
+async def test_a_write_to_an_unavailable_device_is_not_counted(
+    hass, freezer, controller, gateway
+) -> None:
+    gateway.availability[IEEE_A] = False
+    await controller.async_start()
+    # Long enough for the first retries, which fail before anything is sent.
+    await advance(hass, freezer, 30)
+    assert health(controller)["climate.a"] in {"unavailable", "error"}
+    assert sent_to(gateway, IEEE_A) == 0
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(0, 0, 0)
+    assert trv_stats(controller, "climate.b") == ThermostatStatistics(5, 0, 0)
+
+
+async def test_a_write_the_profile_cannot_plan_for_the_firmware_is_not_counted(
+    hass, make_controller, config, gateway
+) -> None:
+    old_a = replace(config.trvs[0], firmware=(1, 2, 1))
+    room = make_controller(cfg=replace(config, trvs=(old_a, config.trvs[1])))
+    await room.async_start()
+    await settle(hass)
+    # Hysteresis needs 1.3.0 and never reaches A: not a write, not a failure.
+    assert sent_to(gateway, IEEE_A) == 4
+    assert trv_stats(room, "climate.a") == ThermostatStatistics(4, 0, 0)
+    assert trv_stats(room, "climate.b") == ThermostatStatistics(5, 0, 0)
+
+
+async def test_a_value_the_profile_cannot_encode_is_not_counted(
+    hass, freezer, make_controller, config, gateway
+) -> None:
+    # The hysteresis range is 0.2 to 1.0 K: planning fails for both thermostats,
+    # again on every retry.
+    room = make_controller(cfg=replace(config, hysteresis=5.0))
+    await room.async_start()
+    await advance(hass, freezer, 10)
+    assert sent_to(gateway, IEEE_A) == 4
+    assert trv_stats(room, "climate.a") == ThermostatStatistics(4, 0, 0)
+    assert trv_stats(room, "climate.b") == ThermostatStatistics(4, 0, 0)
+
+
+async def test_nothing_is_counted_after_stop(hass, controller) -> None:
+    await controller.async_start()
+    await settle(hass)
+    before = controller.statistics()
+    await controller.async_stop()
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    assert controller.statistics() == before
+
+
+# Dropouts
+
+
+async def test_a_dropout_counts_each_available_to_unavailable_edge(
+    hass, controller
+) -> None:
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").dropouts == 0
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").dropouts == 1
+    # Still unavailable: a new report of the same is no new dropout.
+    hass.states.async_set("climate.a", "unavailable", {"note": "again"})
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").dropouts == 1
+    hass.states.async_set("climate.a", "heat")
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").dropouts == 1
+    # Changing between available states is no dropout either.
+    hass.states.async_set("climate.a", "off")
+    await settle(hass)
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").dropouts == 2
+    assert trv_stats(controller, "climate.b").dropouts == 0
+
+
+async def test_a_thermostat_unavailable_at_start_is_no_dropout(
+    hass, controller
+) -> None:
+    hass.states.async_set("climate.a", "unavailable")
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").dropouts == 0
+    hass.states.async_set("climate.a", "heat")
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").dropouts == 0
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").dropouts == 1
+
+
+# Window openings and open time
+
+
+async def test_open_time_grows_while_a_contact_is_open(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    stats = climate_window.statistics()
+    assert (stats.window_openings, stats.window_open_hours) == (0, 0.0)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    tick(freezer, 90)
+    stats = climate_window.statistics()
+    assert stats.window_openings == 1
+    assert stats.window_open_hours == hours(90)
+    tick(freezer, 30)
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    tick(freezer, 600)
+    stats = climate_window.statistics()
+    assert stats.window_openings == 1
+    assert stats.window_open_hours == hours(120)
+
+
+async def test_an_opening_counts_on_the_raw_edge_before_the_open_delay(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    await start_delayed(hass, climate_delay, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 10, step=5)
+    # The delay of 30 s still runs: the room does not know of the window yet.
+    assert climate_delay.window_open is False
+    stats = climate_delay.statistics()
+    assert stats.window_openings == 1
+    assert stats.window_open_hours == hours(10)
+    # Aired for a moment: the room never switched off, the opening stays.
+    hass.states.async_set(CONTACT, "off")
+    await advance(hass, freezer, 60, step=5)
+    assert climate_delay.window_open is False
+    stats = climate_delay.statistics()
+    assert stats.window_openings == 1
+    assert stats.window_open_hours == hours(10)
+
+
+async def test_repeated_open_reports_do_not_count_again(
+    hass, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    # The same state again, with other attributes: a report, not an edge.
+    hass.states.async_set(CONTACT, "on", {"battery": 80})
+    await settle(hass)
+    hass.states.async_set(CONTACT, "on", {"battery": 79})
+    await settle(hass)
+    # A second contact opening while the first is open is the same opening.
+    hass.states.async_set("binary_sensor.w2", "on")
+    await settle(hass)
+    hass.states.async_set("binary_sensor.w2", "on", {"battery": 5})
+    await settle(hass)
+    assert climate_window.statistics().window_openings == 1
+
+
+async def test_every_closed_to_open_edge_of_a_flapping_contact_counts(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    await start_delayed(hass, climate_delay, gateway)
+    for expected in (1, 2, 3):
+        hass.states.async_set(CONTACT, "on")
+        await advance(hass, freezer, 5, step=5)
+        assert climate_delay.statistics().window_openings == expected
+        hass.states.async_set(CONTACT, "off")
+        await advance(hass, freezer, 5, step=5)
+        assert climate_delay.statistics().window_openings == expected
+    assert climate_delay.statistics().window_open_hours == hours(15)
+
+
+async def test_two_contacts_open_and_closing_one_after_the_other_are_one_opening(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    tick(freezer, 10)
+    hass.states.async_set("binary_sensor.w2", "on")
+    await settle(hass)
+    tick(freezer, 10)
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    tick(freezer, 10)
+    hass.states.async_set("binary_sensor.w2", "off")
+    await settle(hass)
+    tick(freezer, 100)
+    stats = climate_window.statistics()
+    assert stats.window_openings == 1
+    assert stats.window_open_hours == hours(30)
+
+
+async def test_a_silent_contact_counts_as_it_resolves(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    tick(freezer, 10)
+    # An open contact that goes silent keeps its last state: still open.
+    hass.states.async_set(CONTACT, "unavailable")
+    await settle(hass)
+    tick(freezer, 10)
+    hass.states.async_set(CONTACT, "unknown")
+    await settle(hass)
+    tick(freezer, 10)
+    stats = climate_window.statistics()
+    assert stats.window_openings == 1
+    assert stats.window_open_hours == hours(30)
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    tick(freezer, 100)
+    assert climate_window.statistics().window_open_hours == hours(30)
+    # A closed contact that goes silent keeps being closed; opening is an edge.
+    hass.states.async_set(CONTACT, "unavailable")
+    await settle(hass)
+    assert climate_window.statistics().window_openings == 1
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert climate_window.statistics().window_openings == 2
+
+
+async def test_a_contact_never_seen_counts_as_closed_until_it_reports_open(
+    hass, climate_window, gateway
+) -> None:
+    await start_with_setpoint(hass, climate_window, gateway)
+    stats = climate_window.statistics()
+    assert (stats.window_openings, stats.window_open_hours) == (0, 0.0)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert climate_window.statistics().window_openings == 1
+
+
+async def test_a_contact_open_at_start_runs_the_time_without_an_opening(
+    hass, freezer, climate_window
+) -> None:
+    hass.states.async_set(CONTACT, "on")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await climate_window.async_start()
+    await settle(hass)
+    tick(freezer, 60)
+    stats = climate_window.statistics()
+    assert stats.window_openings == 0
+    assert stats.window_open_hours == hours(60)
+
+
+async def test_stop_closes_the_running_durations(hass, freezer, climate_window) -> None:
+    hass.states.async_set(CONTACT, "on")
+    hass.states.async_set("binary_sensor.w2", "off")
+    report(hass, "climate.a", "heating")
+    await climate_window.async_start()
+    await settle(hass)
+    tick(freezer, 30)
+    await climate_window.async_stop()
+    tick(freezer, 600)
+    stats = climate_window.statistics()
+    assert stats.window_open_hours == hours(30)
+    assert stats.heating_hours == hours(30)
+    # Nothing is taken in any more.
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "on")
+    report(hass, "climate.b", "heating")
+    await settle(hass)
+    tick(freezer, 600)
+    assert climate_window.statistics() == stats
+
+
+# Heating time
+
+
+async def test_heating_time_is_unavailable_until_a_thermostat_reports_an_action(
+    hass, freezer, controller
+) -> None:
+    await controller.async_start()
+    await settle(hass)
+    tick(freezer, 600)
+    assert controller.statistics().heating_hours is None
+    # An attribute without a value is no report.
+    hass.states.async_set("climate.a", "heat", {"hvac_action": None})
+    await settle(hass)
+    assert controller.statistics().heating_hours is None
+    report(hass, "climate.a", "idle")
+    await settle(hass)
+    tick(freezer, 600)
+    assert controller.statistics().heating_hours == 0.0
+
+
+async def test_heating_time_adds_up_while_any_thermostat_heats(
+    hass, freezer, controller
+) -> None:
+    await controller.async_start()
+    await settle(hass)
+    report(hass, "climate.b", "idle")
+    report(hass, "climate.a", "heating")
+    await settle(hass)
+    tick(freezer, 60)
+    report(hass, "climate.b", "heating")
+    await settle(hass)
+    tick(freezer, 60)
+    # B still heats: the period goes on.
+    report(hass, "climate.a", "idle")
+    await settle(hass)
+    assert controller.statistics().heating_hours == hours(120)
+    tick(freezer, 60)
+    report(hass, "climate.b", "idle")
+    await settle(hass)
+    tick(freezer, 600)
+    assert controller.statistics().heating_hours == hours(180)
+
+
+async def test_other_actions_do_not_heat(hass, freezer, controller) -> None:
+    await controller.async_start()
+    await settle(hass)
+    for action in ("idle", "off", "cooling", "preheating"):
+        report(hass, "climate.a", action)
+        await settle(hass)
+        tick(freezer, 60)
+    assert controller.statistics().heating_hours == 0.0
+
+
+async def test_heating_stops_when_the_thermostat_drops_out_and_stays_available(
+    hass, freezer, controller
+) -> None:
+    await controller.async_start()
+    await settle(hass)
+    report(hass, "climate.a", "heating")
+    await settle(hass)
+    tick(freezer, 30)
+    # An unavailable climate entity has no attributes at all.
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    tick(freezer, 600)
+    assert controller.statistics().heating_hours == hours(30)
+    report(hass, "climate.a", "heating")
+    await settle(hass)
+    tick(freezer, 30)
+    assert controller.statistics().heating_hours == hours(60)
+
+
+async def test_heating_that_runs_at_start_counts_from_the_start(
+    hass, freezer, controller
+) -> None:
+    report(hass, "climate.b", "heating")
+    await controller.async_start()
+    await settle(hass)
+    tick(freezer, 60)
+    assert controller.statistics().heating_hours == hours(60)
+
+
+# Deviation
+
+
+async def test_deviation_follows_the_room(hass, climate, gateway) -> None:
+    assert climate.statistics().deviation is None
+    await start_with_setpoint(hass, climate, gateway, 21.0)
+    assert climate.statistics().deviation == pytest.approx(0.3)
+    hass.states.async_set("sensor.t1", "20.5", CELSIUS)
+    await settle(hass)
+    assert climate.statistics().deviation == pytest.approx(-0.5)
+    await climate.async_set_operation(OperatingMode.OFF)
+    await settle(hass)
+    assert climate.statistics().deviation is None
+
+
+# Notifications
+
+
+async def test_listeners_see_each_count_when_it_changes(
+    hass, make_controller, gateway, config
+) -> None:
+    room = make_controller(
+        cfg=with_climate(config, window_contacts=(CONTACT,)),
+        params=replace(PARAMS, verify_delay=10.0),
+    )
+    hass.states.async_set(CONTACT, "off")
+    seen: list[RoomStatistics] = []
+    room.add_update_listener(lambda: seen.append(room.statistics()))
+    await room.async_start()
+    await settle(hass)
+    # The first write is out, its read-back waits for the verify delay.
+    assert gateway.reads == []
+    assert any(s.per_thermostat["climate.a"].writes == 1 for s in seen)
+
+    seen.clear()
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert seen[-1].window_openings == 1
+    seen.clear()
+    hass.states.async_set("climate.b", "unavailable")
+    await settle(hass)
+    assert seen[-1].per_thermostat["climate.b"].dropouts == 1
+    seen.clear()
+    report(hass, "climate.a", "heating")
+    await settle(hass)
+    assert seen[-1].heating_hours == pytest.approx(0.0, abs=1e-3)
+
+
+async def test_listeners_see_the_window_counts_with_an_open_delay(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    await start_closed(hass, climate_delay, gateway)
+    seen: list[RoomStatistics] = []
+    climate_delay.add_update_listener(lambda: seen.append(climate_delay.statistics()))
+    # The delay is armed: the opening is counted, nothing else happens.
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert seen[-1].window_openings == 1
+    tick(freezer, 10)
+    # Cancelled before it ran out.
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert seen[-1].window_open_hours == hours(10)
+    # Opened for good, then closed: the room is told both times.
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 35, step=5)
+    assert climate_delay.window_open is True
+    assert seen[-1].window_openings == 2
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert seen[-1].window_open_hours == hours(45)
+
+
+async def test_listeners_see_the_window_counts_without_an_open_delay(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    seen: list[RoomStatistics] = []
+    climate_window.add_update_listener(lambda: seen.append(climate_window.statistics()))
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert seen[-1].window_openings == 1
+    tick(freezer, 20)
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert seen[-1].window_open_hours == hours(20)
+
+
+async def test_an_unrelated_climate_change_notifies_nobody(hass, controller) -> None:
+    await controller.async_start()
+    await settle(hass)
+    report(hass, "climate.a", "heating")
+    await settle(hass)
+    calls = []
+    controller.add_update_listener(lambda: calls.append(1))
+    hass.states.async_set(
+        "climate.a", "heat", {"hvac_action": "heating", "current_temperature": 20.5}
+    )
+    await settle(hass)
+    assert calls == []
+
+
+async def test_listeners_hear_a_running_duration_every_minute_until_stop(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    seen: list[float | None] = []
+    climate_window.add_update_listener(
+        lambda: seen.append(climate_window.statistics().window_open_hours)
+    )
+    await advance(hass, freezer, 180, step=60)
+    assert len(seen) >= 3
+    assert seen == sorted(seen)
+    assert seen[-1] == hours(180)
+
+    await climate_window.async_stop()
+    seen.clear()
+    await advance(hass, freezer, 180, step=60)
+    assert seen == []
+
+
+# Restoring
+
+
+async def test_restored_counters_continue_and_never_go_down(hass, controller) -> None:
+    controller.restore_statistic("writes", 7, "climate.a")
+    controller.restore_statistic("write_failures", 2.0, "climate.a")
+    controller.restore_statistic("dropouts", 4, "climate.b")
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(7, 2, 0)
+    assert trv_stats(controller, "climate.b") == ThermostatStatistics(0, 0, 4)
+    await controller.async_start()
+    await settle(hass)
+    assert trv_stats(controller, "climate.a").writes == 12
+    # A restored value below the count never lowers it.
+    controller.restore_statistic("writes", 3, "climate.a")
+    assert trv_stats(controller, "climate.a").writes == 12
+    hass.states.async_set("climate.b", "unavailable")
+    await settle(hass)
+    assert trv_stats(controller, "climate.b").dropouts == 5
+
+
+async def test_restored_values_that_are_not_usable_are_ignored(
+    hass, controller
+) -> None:
+    controller.restore_statistic("writes", 5, "climate.a")
+    for value in (math.nan, math.inf, -math.inf, -3.0):
+        controller.restore_statistic("writes", value, "climate.a")
+        controller.restore_statistic("heating_time", value)
+    assert trv_stats(controller, "climate.a").writes == 5
+    await controller.async_start()
+    await settle(hass)
+    report(hass, "climate.a", "idle")
+    await settle(hass)
+    assert controller.statistics().heating_hours == 0.0
+
+
+async def test_restored_durations_are_hours_and_continue(
+    hass, freezer, climate_window
+) -> None:
+    hass.states.async_set(CONTACT, "on")
+    hass.states.async_set("binary_sensor.w2", "off")
+    report(hass, "climate.a", "heating")
+    climate_window.restore_statistic("window_openings", 3)
+    climate_window.restore_statistic("window_open_time", 1.5)
+    climate_window.restore_statistic("heating_time", 2.0)
+    await climate_window.async_start()
+    await settle(hass)
+    tick(freezer, 36)
+    stats = climate_window.statistics()
+    # What was restored, no opening for the one that is open at start, and the
+    # time that has run since the start.
+    assert stats.window_openings == 3
+    assert stats.window_open_hours == pytest.approx(1.5 + 36 / 3600)
+    assert stats.heating_hours == pytest.approx(2.0 + 36 / 3600)
+    # Restoring a lower value afterwards changes nothing.
+    climate_window.restore_statistic("window_open_time", 1.0)
+    assert climate_window.statistics().window_open_hours == pytest.approx(
+        1.5 + 36 / 3600
+    )
+
+
+async def test_restoring_what_the_room_does_not_have_is_ignored(
+    controller,
+) -> None:
+    controller.restore_statistic("window_openings", 4)
+    controller.restore_statistic("window_open_time", 4.0)
+    controller.restore_statistic("writes", 4, "climate.unknown")
+    controller.restore_statistic("no_such_key", 4)
+    controller.restore_statistic("no_such_key", 4, "climate.a")
+    controller.restore_statistic("deviation", 1.0)
+    stats = controller.statistics()
+    assert stats.window_openings is None
+    assert stats.window_open_hours is None
+    assert stats.deviation is None
+    assert set(stats.per_thermostat) == {"climate.a", "climate.b"}
+    assert trv_stats(controller, "climate.a") == ThermostatStatistics(0, 0, 0)

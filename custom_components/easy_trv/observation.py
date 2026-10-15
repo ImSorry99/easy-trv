@@ -216,13 +216,15 @@ def _outdoor_celsius(state: State | None) -> float | None:
 class HoldInputs:
     """Track the window contacts and the outdoor sensor of a room."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - the room's entry points, one argument each
         self,
         hass: HomeAssistant,
         config: RoomConfig,
         outdoor_sensor: str | None,
         feed: Callable[[LogicEvent], None],
         changed: Callable[[], None],
+        *,
+        raw_changed: Callable[[bool], None] | None = None,
     ) -> None:
         """Watch the contacts of ``config`` and, when needed, ``outdoor_sensor``.
 
@@ -230,7 +232,11 @@ class HoldInputs:
         whose long-open warning waits until it is colder outside. ``changed``
         is called when the set of silent contacts changes and when the open delay
         starts or is cancelled, which the room shows although the logic has no
-        event for it.
+        event for it. ``raw_changed`` is called with the new state when the
+        contacts go from all closed to any open or back, at that moment and not
+        after the open delay; a contact that says nothing counts as it last was.
+        It runs before the room is told (by ``feed`` or ``changed``, one of which
+        always follows), and not for the state the room starts with.
         """
         self._hass = hass
         self._config = config
@@ -240,8 +246,11 @@ class HoldInputs:
         self._outdoor = outdoor_sensor if needed else None
         self._feed = feed
         self._changed = changed
+        self._raw_changed = raw_changed
         self._unsubscribers: list[CALLBACK_TYPE] = []
         self._window_open = False
+        # Whether any contact is open, before the open delay.
+        self._raw_open = False
         self._unreliable: frozenset[str] = frozenset()
         # contact -> whether it was open the last time it said anything
         self._last: dict[str, bool] = {}
@@ -284,6 +293,7 @@ class HoldInputs:
                 )
             )
             self._window_open = self._resolve()
+            self._raw_open = self._window_open
             self._track_silent(frozenset())
         if self._outdoor is not None:
             self._unsubscribers.append(
@@ -358,6 +368,11 @@ class HoldInputs:
         silent_before = self._unreliable
         is_open = self._resolve()
         self._track_silent(silent_before)
+        if is_open != self._raw_open:
+            # Before the room is told, which is what makes it notify.
+            self._raw_open = is_open
+            if self._raw_changed is not None:
+                self._raw_changed(is_open)
         fed = False
         if is_open and not self._window_open:
             fed = self._open_after_delay()

@@ -11,14 +11,16 @@ Zigbee operations in flight.
 import asyncio
 import contextlib
 import logging
+import math
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final, assert_never
 
+from homeassistant.components.climate.const import ATTR_HVAC_ACTION, HVACAction
 from homeassistant.const import (
     ATTR_TEMPERATURE,
     ATTR_UNIT_OF_MEASUREMENT,
@@ -44,6 +46,7 @@ from custom_components.easy_trv.const import (
     OPERATION_TIMEOUT,
     TICK_SECONDS,
 )
+from custom_components.easy_trv.core import statistics as room_stats
 from custom_components.easy_trv.core.model import (
     INTENT_NAMES,
     ClearIssue,
@@ -142,6 +145,9 @@ _LOG_LEVELS: Final = {
 _SUPPORTED_UNITS: Final = frozenset({"°C", "C", "°F", "F"})
 # States that carry no reading, so a missing unit there is not worth a warning.
 _NO_READING_STATES: Final = frozenset({STATE_UNKNOWN, STATE_UNAVAILABLE, ""})
+# The counters kept for every thermostat, by the key their sensors have.
+_TRV_COUNTERS: Final = frozenset({"writes", "write_failures", "dropouts"})
+_SECONDS_PER_HOUR: Final = 3600
 
 
 # HA climate states the room understands as a thermostat mode. Both ``auto`` and
@@ -227,6 +233,36 @@ def _jsonable(value: Any) -> Any:
     return _scalar(value)
 
 
+@dataclass(frozen=True)
+class ThermostatStatistics:
+    """What Easy TRV counted for one thermostat since the counters began."""
+
+    # Write requests sent, retries included; read-backs do not count.
+    writes: int
+    # Sent writes that ended as ``Failed`` or ``Mismatch``.
+    write_failures: int
+    # Times the climate entity went from available to unavailable.
+    dropouts: int
+
+
+@dataclass(frozen=True)
+class RoomStatistics:
+    """What a room has counted and timed; a value that does not exist is ``None``."""
+
+    # Active sensor minus setpoint (K) while the room heats; ``None`` otherwise.
+    deviation: float | None
+    # Hours at least one thermostat reported ``hvac_action: heating``; ``None``
+    # while no thermostat of the room reported an ``hvac_action`` at all.
+    heating_hours: float | None
+    # Times the contacts went from all closed to any open; ``None`` without
+    # contacts.
+    window_openings: int | None
+    # Hours any contact was open; ``None`` without contacts.
+    window_open_hours: float | None
+    # By climate entity of the thermostat.
+    per_thermostat: Mapping[str, ThermostatStatistics]
+
+
 class RoomController:
     """Drive the thermostats of one room from Home Assistant states.
 
@@ -284,7 +320,12 @@ class RoomController:
         )
         self._knobs = KnobTimers(hass, self._dispatch)
         self._holds = HoldInputs(
-            hass, config, outdoor_sensor, self._dispatch, self._notify_update
+            hass,
+            config,
+            outdoor_sensor,
+            self._dispatch,
+            self._notify_update,
+            raw_changed=self._on_window_raw,
         )
         self._warned_units: set[str] = set()
         self._stopped = False
@@ -293,6 +334,18 @@ class RoomController:
         self._heating_state: HeatingState | None = None
         self._state_reasons: tuple[HeatingState, ...] = ()
         self._state_since: datetime | None = None
+        # Statistics: counters per thermostat, the window and heating periods,
+        # and what each thermostat reports as its ``hvac_action``.
+        self._trv_counts: dict[str, Counter[str]] = {
+            trv: Counter() for trv in self._firmware
+        }
+        self._window_openings = 0
+        self._window_open_time = room_stats.Duration(0.0, None)
+        self._heating_time = room_stats.Duration(0.0, None)
+        self._trv_heating: dict[str, bool] = dict.fromkeys(self._firmware, False)
+        # Whether any thermostat has reported an ``hvac_action`` yet; without
+        # one the heating time cannot be known.
+        self._reports_action = False
 
     # --- Public surface --------------------------------------------------
 
@@ -586,6 +639,65 @@ class RoomController:
             "deviations": self.deviations,
         }
 
+    def statistics(self, now: datetime | None = None) -> RoomStatistics:
+        """Return what the room has counted and timed, running periods included.
+
+        ``now`` defaults to the current time. After ``async_stop`` the periods
+        are closed, so the values stay where the room left them.
+        """
+        now = dt_util.utcnow() if now is None else now
+        contacts = bool(self._config.window_contacts)
+        return RoomStatistics(
+            deviation=room_stats.deviation(self._state),
+            heating_hours=(
+                room_stats.seconds(self._heating_time, now) / _SECONDS_PER_HOUR
+                if self._reports_action
+                else None
+            ),
+            window_openings=self._window_openings if contacts else None,
+            window_open_hours=(
+                room_stats.seconds(self._window_open_time, now) / _SECONDS_PER_HOUR
+                if contacts
+                else None
+            ),
+            per_thermostat={
+                trv: ThermostatStatistics(
+                    counts["writes"], counts["write_failures"], counts["dropouts"]
+                )
+                for trv, counts in self._trv_counts.items()
+            },
+        )
+
+    def restore_statistic(
+        self, key: str, value: float, thermostat: str | None = None
+    ) -> None:
+        """Seed a total from the value a sensor showed before the restart.
+
+        ``key`` is the sensor's key, ``thermostat`` the climate entity for the
+        keys a thermostat has. A duration is given in hours, like the sensor
+        shows it. A total never goes down, and a value that is not a number, or
+        for something the room does not have, is ignored. Call it before the
+        value is published; periods that are running keep running.
+        """
+        if not math.isfinite(value):
+            return
+        if thermostat is not None:
+            counts = self._trv_counts.get(thermostat)
+            if counts is not None and key in _TRV_COUNTERS:
+                counts[key] = max(counts[key], int(value))
+            return
+        seconds = value * _SECONDS_PER_HOUR
+        contacts = bool(self._config.window_contacts)
+        match key:
+            case "heating_time":
+                self._heating_time = room_stats.restored(self._heating_time, seconds)
+            case "window_openings" if contacts:
+                self._window_openings = max(self._window_openings, int(value))
+            case "window_open_time" if contacts:
+                self._window_open_time = room_stats.restored(
+                    self._window_open_time, seconds
+                )
+
     async def async_start(self) -> None:
         """Subscribe to states and time, start the worker and begin the room."""
         config = self._config
@@ -629,6 +741,7 @@ class RoomController:
         self._subscriptions.subscribe_all()
         window_open, outdoor = self._holds.start()
         self._started = True
+        self._begin_periods(window_open=window_open)
         self._dispatch(
             Start(
                 sensors=tuple(
@@ -649,6 +762,10 @@ class RoomController:
     async def async_stop(self) -> None:
         """Cancel listeners, timers and the worker; later callbacks are ignored."""
         self._stopped = True
+        # Close the periods that run, so the values stay where the room left them.
+        now = dt_util.utcnow()
+        self._window_open_time = room_stats.stop(self._window_open_time, now)
+        self._heating_time = room_stats.stop(self._heating_time, now)
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
@@ -676,12 +793,18 @@ class RoomController:
             return
         entity_id = event.data["entity_id"]
         if entity_id in self._trv_ids:
-            available = _is_available(event.data["new_state"])
+            new_state = event.data["new_state"]
+            heating_changed = self._track_heating(entity_id, new_state)
+            available = _is_available(new_state)
             if available != _is_available(event.data["old_state"]):
                 if available:
                     # Never subscribed, or ZHA reloaded and dropped our listeners.
                     self._subscriptions.subscribe(entity_id)
+                else:
+                    self._trv_counts[entity_id]["dropouts"] += 1
                 self._dispatch(TrvAvailabilityChanged(entity_id, available))
+            elif heating_changed:
+                self._tell_update_listeners()
         elif entity_id in self._config.temp_sensors:
             self._dispatch(SensorChanged(self._reading(entity_id)))
 
@@ -740,6 +863,62 @@ class RoomController:
     def _trv_available(self, entity_id: str) -> bool:
         """Return whether the climate entity exists and is not ``unavailable``."""
         return _is_available(self._hass.states.get(entity_id))
+
+    # --- Statistics ------------------------------------------------------
+
+    def _begin_periods(self, *, window_open: bool) -> None:
+        """Start the periods that are running already: open window, heating TRV.
+
+        The open window is not an opening: it was open before the start.
+        """
+        if window_open:
+            self._window_open_time = room_stats.start(
+                self._window_open_time, dt_util.utcnow()
+            )
+        for entity_id in self._firmware:
+            self._track_heating(entity_id, self._hass.states.get(entity_id))
+
+    def _track_heating(self, entity_id: str, state: State | None) -> bool:
+        """Take what a thermostat reports as its action; return whether it matters.
+
+        The room is heating while any of its thermostats says ``heating``. A
+        thermostat that is gone or unavailable has no action and does not heat.
+        It matters when the room starts or stops heating, or when the first
+        thermostat reports an action at all.
+        """
+        action = None if state is None else state.attributes.get(ATTR_HVAC_ACTION)
+        changed = False
+        if action is not None and not self._reports_action:
+            self._reports_action = True
+            changed = True
+        self._trv_heating[entity_id] = action == HVACAction.HEATING
+        now = dt_util.utcnow()
+        before = self._heating_time
+        if any(self._trv_heating.values()):
+            self._heating_time = room_stats.start(before, now)
+        else:
+            self._heating_time = room_stats.stop(before, now)
+        return changed or self._heating_time != before
+
+    def _on_window_raw(self, is_open: bool) -> None:  # noqa: FBT001 - a callback
+        """Count an opening and time the open window, before any open delay.
+
+        Called when the contacts go from all closed to any open or back, before
+        the room is told. Nobody is notified here: the same event does that, by
+        feeding the logic or by arming or cancelling the open delay.
+        """
+        now = dt_util.utcnow()
+        if is_open:
+            self._window_openings += 1
+            self._window_open_time = room_stats.start(self._window_open_time, now)
+        else:
+            self._window_open_time = room_stats.stop(self._window_open_time, now)
+
+    def _count_write(self, trv: str) -> None:
+        """Count a write request that is about to be sent, and tell the listeners."""
+        self._trv_counts[trv]["writes"] += 1
+        if not self._stopped:
+            self._tell_update_listeners()
 
     # --- Logic dispatch --------------------------------------------------
 
@@ -802,6 +981,10 @@ class RoomController:
     def _notify_update(self) -> None:
         """Re-derive the heating state, then tell the update listeners."""
         self._evaluate_state()
+        self._tell_update_listeners()
+
+    def _tell_update_listeners(self) -> None:
+        """Tell the update listeners, which read what the room shows now."""
         for listener in list(self._update_listeners):
             try:
                 listener()
@@ -1070,11 +1253,18 @@ class RoomController:
         )
 
     async def _write_and_verify(self, trv: str, op: Operation) -> Outcome:
-        """Write the value, wait, read it back and judge the read-back."""
+        """Write the value, wait, read it back and judge the read-back.
+
+        Counts the write when the request is sent, and a failed outcome of a
+        sent write; nothing that stops before the request is counted.
+        """
         ieee = self._device_refs[trv].ieee
+        sent = False
         try:
             if not self._gateway.is_available(ieee):
                 return Failed("device unavailable")
+            sent = True
+            self._count_write(trv)
             async with asyncio.timeout(OPERATION_TIMEOUT):
                 await self._gateway.write(
                     ieee, op.endpoint, op.cluster, op.attribute, op.raw_value
@@ -1090,5 +1280,15 @@ class RoomController:
             installed = _fmt_version(self._firmware[trv])
             return Unsupported(op.capability, "unknown", installed, reason="device")
         except (GatewayError, TimeoutError) as err:
+            if sent:
+                self._trv_counts[trv]["write_failures"] += 1
             return Failed(str(err) or type(err).__name__)
-        return _judge(op, values)
+        except Exception:
+            # ``_process`` turns it into a failure, which this write has too.
+            if sent:
+                self._trv_counts[trv]["write_failures"] += 1
+            raise
+        outcome = _judge(op, values)
+        if isinstance(outcome, Mismatch):
+            self._trv_counts[trv]["write_failures"] += 1
+        return outcome
