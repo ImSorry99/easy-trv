@@ -65,11 +65,19 @@ WINDOW_PHASE_LIMIT = timedelta(minutes=30)
 def is_echo(
     known: TrvState, capability: str, value: float | str | None, now: datetime
 ) -> bool:
-    """Return whether ``value`` is one the room wrote in the last ``ECHO_WINDOW``."""
+    """Return whether ``value`` is one the room wrote in the last ``ECHO_WINDOW``.
+
+    A write counts only if the thermostat has not reported a value that was no
+    echo since: a knob turned away from the room's value and back again is a
+    turn, not the echo of the older write.
+    """
     if value is None:
         return False
+    since = known.foreign_at.get(capability)
     return any(
-        _equal(written, value) and now - at <= ECHO_WINDOW
+        _equal(written, value)
+        and now - at <= ECHO_WINDOW
+        and (since is None or at >= since)
         for written, at in known.written_recently.get(capability, ())
     )
 
@@ -295,23 +303,22 @@ def _observe_setpoint(  # noqa: PLR0913
     """
     trv, capability = event.trv, event.capability
     known = state.trvs[trv]
-    previous = _known(known, capability, known.reported_setpoint)
+    previous = shown(known, capability, known.reported_setpoint)
     echo = is_echo(known, capability, value, now)
     known = replace(
         known,
         reported_setpoint=value,
         reported_at={**known.reported_at, capability: now},
+        foreign_at=_foreign(known, capability, now, echo=echo),
     )
     at_window_value = abs(value - WINDOW_PHASE_SETPOINT) <= SAME
     leaving_window = known.note is Note.WINDOW_PHASE and not at_window_value
     if leaving_window:
         known = replace(known, note=None, note_since=None)
     if echo:
-        state = _store(state, trv, known)
-        guarded = device_driven(known) or capability in known.resync_pending
-        if leaving_window and not guarded:
-            return _leave_window_phase(cfg, state, now, trv, value, capability_of)
-        return state, []
+        # A write the room made while the thermostat showed its window phase
+        # does not exist (it is left alone), so an echo never ends that phase.
+        return _store(state, trv, known), []
     wants_window_value = state.setpoint is not None and (
         abs(state.setpoint - WINDOW_PHASE_SETPOINT) <= SAME
     )
@@ -372,10 +379,13 @@ def _observe_mode(
         return state, []
     known = state.trvs[trv]
     was_on_schedule = on_schedule(known)
-    previous = _known(known, capability, known.reported_mode)
+    previous = shown(known, capability, known.reported_mode)
     echo = is_echo(known, capability, mode, now)
     known = replace(
-        known, reported_mode=mode, reported_at={**known.reported_at, capability: now}
+        known,
+        reported_mode=mode,
+        reported_at={**known.reported_at, capability: now},
+        foreign_at=_foreign(known, capability, now, echo=echo),
     )
     if mode not in OWN_MODES:
         return _on_schedule_report(cfg, state, now, trv, known)
@@ -412,6 +422,19 @@ def _on_schedule_report(
         commands.append(Log("info", note))
     known = replace(known, knob_pending={})
     return _store(state, trv, known), commands
+
+
+def _foreign(
+    known: TrvState, capability: str, now: datetime, *, echo: bool
+) -> Mapping[str, datetime]:
+    """Return ``foreign_at`` after a report: it moves for one that is no echo.
+
+    A report while the resync guard of the capability holds says nothing: it may
+    still be the value from before our write.
+    """
+    if echo or capability in known.resync_pending:
+        return known.foreign_at
+    return {**known.foreign_at, capability: now}
 
 
 def _pend(
@@ -515,13 +538,14 @@ def _adopted(cfg: RoomConfig, trv: str, value: float | str) -> FireEvent:
     )
 
 
-def _known(
+def shown(
     known: TrvState, capability: str, reported: float | str | None
 ) -> float | str | None:
     """Return the value a thermostat was last known to show, or ``None``.
 
     That is its newest report or the room's newest write to it, whichever is
-    newer (a report without a time counts as older than any write).
+    newer (a report without a time counts as older than any write, and a write
+    made at the instant of a report counts as the later one).
     """
     # Written in order: of several writes at the same instant the last one counts.
     newest = max(
@@ -532,7 +556,7 @@ def _known(
     if newest is None:
         return reported
     stamp = known.reported_at.get(capability)
-    if reported is None or stamp is None or newest[1] > stamp:
+    if reported is None or stamp is None or newest[1] >= stamp:
         return newest[0]
     return reported
 
@@ -544,8 +568,8 @@ def _shows(
     value: float | str,
 ) -> bool:
     """Return whether a thermostat is known to show ``value`` already."""
-    shown = _known(known, capability, reported)
-    return shown is not None and _equal(shown, value)
+    current = shown(known, capability, reported)
+    return current is not None and _equal(current, value)
 
 
 def _value_of(intent: SetSetpoint | SetHvacMode) -> float | str:

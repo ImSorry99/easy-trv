@@ -27,6 +27,7 @@ from custom_components.easy_trv.core.model import (
     TrvAvailabilityChanged,
     TrvHealth,
 )
+from custom_components.easy_trv.core.observe import shown
 from custom_components.easy_trv.core.room_logic import RoomLogic
 from custom_components.easy_trv.core.setpoint import clamp
 from tests.core.test_room_logic import (
@@ -289,6 +290,19 @@ def test_restore_wins_and_writes_only_differing_thermostats() -> None:
     assert st.trvs["climate.b"].reported_setpoint == 19.0
 
 
+def test_a_write_made_at_start_is_what_the_thermostat_is_known_to_show() -> None:
+    room = logic()
+    st, _ = room.handle(
+        RestoreRoom(22.0, RoomMode.HEAT, Preset.NONE), T0, RoomState.initial(CFG)
+    )
+    reported = {"climate.a": (22.0, "heat"), "climate.b": (19.0, "heat")}
+    st, _ = room.handle(Start((), BOTH_AVAILABLE, reported), T0, st)
+    known = st.trvs["climate.b"]
+    assert known.reported_setpoint == 19.0
+    assert shown(known, "setpoint", known.reported_setpoint) == 22.0
+    assert shown(st.trvs["climate.a"], "setpoint", 22.0) == 22.0
+
+
 def test_restored_off_is_written_to_thermostats_still_heating() -> None:
     room = logic()
     st, _ = room.handle(
@@ -353,6 +367,24 @@ def test_initial_mode_is_off_only_when_every_thermostat_is_off() -> None:
     mixed = {"climate.a": (19.0, "off"), "climate.b": (19.0, "heat")}
     st, _ = logic().handle(Start((), BOTH_AVAILABLE, mixed), T0, RoomState.initial(CFG))
     assert st.mode is RoomMode.HEAT
+
+
+def test_first_start_turns_a_thermostat_that_reports_off_on_in_a_heating_room() -> None:
+    mixed = {"climate.a": (19.0, "off"), "climate.b": (19.0, "heat")}
+    st, cmds = logic().handle(
+        Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE, mixed),
+        T0,
+        RoomState.initial(CFG),
+    )
+    assert st.mode is RoomMode.HEAT
+    assert writes(cmds) == [("climate.a", SetHvacMode("heat"))]
+    assert st.trvs["climate.a"].written_recently["hvac_mode"][-1] == ("heat", T0)
+    # A mode nobody reported is not written, and one on its schedule is left alone.
+    unknown = {"climate.a": (19.0, None), "climate.b": (19.0, "auto")}
+    _, cmds = logic().handle(
+        Start((), BOTH_AVAILABLE, unknown), T0, RoomState.initial(CFG)
+    )
+    assert writes(cmds) == []
 
 
 def test_initial_setpoint_skips_unavailable_and_unreported_thermostats() -> None:

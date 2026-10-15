@@ -67,8 +67,12 @@ class SpyGateway(FakeGateway):
     def __init__(self) -> None:
         super().__init__()
         self.calls: list[str] = []
+        # While set and not open, writes wait: the queue behind them builds up.
+        self.gate: asyncio.Event | None = None
 
     async def write(self, ieee, endpoint, cluster, attribute, value) -> None:
+        if self.gate is not None:
+            await self.gate.wait()
         self.calls.append("write")
         await super().write(ieee, endpoint, cluster, attribute, value)
 
@@ -1157,6 +1161,8 @@ async def test_report_from_a_thermostat_is_decoded_and_adopted(
     hass, freezer, climate, gateway
 ) -> None:
     await start_with_setpoint(hass, climate, gateway)
+    # The report comes after the room's own write, not at the same instant.
+    freezer.tick(timedelta(seconds=1))
     gateway.inject(IEEE_A, SETPOINT, 2200)
     await advance(hass, freezer, 1, step=1)
     assert gateway.writes == []
@@ -1214,6 +1220,87 @@ async def test_a_foreign_value_read_back_after_a_write_is_adopted(
     assert climate.setpoint == 23.0
     assert climate.setpoint_source == "device:climate.a"
     assert writes_to(gateway, IEEE_B, SETPOINT) == [2100, 2300]
+
+
+async def test_a_queued_setpoint_write_lands_with_the_newest_target(
+    hass, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    gateway.gate = asyncio.Event()
+    await climate.async_set_setpoint(22.0)
+    await settle(hass)
+    # A's 22 is in flight, B's waits in the queue behind it.
+    await climate.async_set_setpoint(23.0)
+    gateway.gate.set()
+    await settle(hass)
+    assert 2200 not in writes_to(gateway, IEEE_B, SETPOINT)
+    assert writes_to(gateway, IEEE_B, SETPOINT)[-1] == 2300
+    assert writes_to(gateway, IEEE_A, SETPOINT)[-1] == 2300
+    assert climate.in_sync is True
+
+
+async def test_a_queued_mode_write_follows_a_hold_that_ended_meanwhile(
+    hass, make_controller, config, gateway
+) -> None:
+    room = make_controller(
+        cfg=with_climate(config, window_contacts=(CONTACT,)),
+    )
+    hass.states.async_set(CONTACT, "off")
+    await start_with_setpoint(hass, room, gateway)
+    gateway.gate = asyncio.Event()
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    gateway.gate.set()
+    await settle(hass)
+    # B's queued off would have landed after the window closed.
+    assert 0 not in writes_to(gateway, IEEE_B, MODE)
+    assert writes_to(gateway, IEEE_B, MODE)[-1] == 4
+    assert room.window_open is False
+    assert room.in_sync is True
+
+
+async def test_in_sync_is_false_when_a_thermostat_is_known_to_show_another_value(
+    hass, freezer, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    assert climate.in_sync is True
+    freezer.tick(timedelta(seconds=1))
+    # A late echo of the earlier 21 is ignored as an echo, but A shows it now.
+    await climate.async_set_setpoint(22.0)
+    await settle(hass)
+    assert climate.in_sync is True
+    freezer.tick(timedelta(seconds=1))
+    gateway.inject(IEEE_A, SETPOINT, 2100)
+    await settle(hass)
+    assert climate.in_sync is False
+    freezer.tick(timedelta(seconds=1))
+    gateway.inject(IEEE_A, SETPOINT, 2200)
+    await settle(hass)
+    assert climate.in_sync is True
+
+
+async def test_in_sync_is_false_when_a_thermostat_is_known_to_show_the_wrong_mode(
+    hass, freezer, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    await climate.async_set_mode(RoomMode.OFF)
+    await settle(hass)
+    freezer.tick(timedelta(seconds=1))
+    await climate.async_set_mode(RoomMode.HEAT)
+    await settle(hass)
+    assert climate.in_sync is True
+    # The late echo of the off is ignored as an echo, but B shows it now.
+    freezer.tick(timedelta(seconds=1))
+    gateway.inject(IEEE_B, MODE, 0)
+    await settle(hass)
+    assert climate.mode is RoomMode.HEAT
+    assert climate.in_sync is False
+    freezer.tick(timedelta(seconds=1))
+    gateway.inject(IEEE_B, MODE, 4)
+    await settle(hass)
+    assert climate.in_sync is True
 
 
 async def test_an_observation_is_ignored_after_stop(hass, climate, gateway) -> None:

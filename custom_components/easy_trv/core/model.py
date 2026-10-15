@@ -267,6 +267,9 @@ class TrvState:
     resync_pending: Mapping[str, float | str] = field(default_factory=dict)
     # capability -> when reported_setpoint / reported_mode was last reported
     reported_at: Mapping[str, datetime] = field(default_factory=dict)
+    # capability -> when a value that was no echo of our writes was last reported:
+    # writes from before it no longer vouch for the values the thermostat reports
+    foreign_at: Mapping[str, datetime] = field(default_factory=dict)
     # Switched off by a hold while it ran its own schedule: the room leaves it
     # off after the hold (it never writes ``auto``) until it reports auto or heat.
     left_off: bool = False

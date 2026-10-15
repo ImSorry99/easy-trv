@@ -75,8 +75,10 @@ from custom_components.easy_trv.core.model import (
     TrvAvailabilityChanged,
     Unsupported,
 )
+from custom_components.easy_trv.core.observe import shown
 from custom_components.easy_trv.core.room_logic import RoomLogic
-from custom_components.easy_trv.core.setpoint import device_driven
+from custom_components.easy_trv.core.setpoint import SAME, device_driven, suspended
+from custom_components.easy_trv.core.setpoint import current as current_target
 from custom_components.easy_trv.core.values import parse_temperature
 from custom_components.easy_trv.labels import thermostat_name
 from custom_components.easy_trv.observation import (
@@ -382,8 +384,9 @@ class RoomController:
         """Return whether every thermostat is verified at the room's values.
 
         False while a thermostat is away, on its schedule or window phase, still
-        waiting for a setpoint or mode write, or while a knob turn is pending,
-        and while a window contact says neither open nor closed.
+        waiting for a setpoint or mode write, while a knob turn is pending, while
+        it is known to show something else than the room wants now, and while a
+        window contact says neither open nor closed.
         """
         wanted = {
             self._capability_of(SetSetpoint(0.0)),
@@ -399,7 +402,8 @@ class RoomController:
 
         ``wanted`` names the setpoint and mode capabilities. Not in sync: it is
         away or device-driven, a write of either is queued, running or awaiting
-        its retry, the attempts for either failed, or a knob turn is pending.
+        its retry, the attempts for either failed, a knob turn is pending, or the
+        value it was last known to show is not the room's.
         """
         return (
             trv.available
@@ -410,6 +414,27 @@ class RoomController:
             and trv.error_capability not in wanted
             and not trv.knob_pending
             and not trv.resync_pending
+            and self._shows_room_values(trv)
+        )
+
+    def _shows_room_values(self, trv: TrvState) -> bool:
+        """Return whether what a thermostat is known to show is what it should.
+
+        That is ``off`` while the room is off or held, otherwise ``heat`` and the
+        room's setpoint. A value nobody reported or wrote is not known.
+        """
+        state = self._state
+        setpoint_capability = self._capability_of(SetSetpoint(0.0))
+        mode_capability = self._capability_of(SetHvacMode("heat"))
+        mode = shown(trv, mode_capability, trv.reported_mode)
+        if mode is not None and mode != ("off" if suspended(state) else "heat"):
+            return False
+        celsius = shown(trv, setpoint_capability, trv.reported_setpoint)
+        return (
+            suspended(state)
+            or state.setpoint is None
+            or not isinstance(celsius, float)
+            or abs(celsius - state.setpoint) <= SAME
         )
 
     async def async_set_setpoint(self, celsius: float) -> None:
@@ -798,9 +823,13 @@ class RoomController:
                 self._queue.task_done()
 
     async def _process(self, trv: str, intent: Intent) -> None:
-        """Run one operation and feed its result, whatever it was, to the logic."""
+        """Run one operation and feed its result, whatever it was, to the logic.
+
+        A setpoint or mode write is sent with what the room wants at this moment:
+        it may have waited in the queue while a knob turn or a hold changed that.
+        """
         try:
-            result = await self._run_operation(trv, intent)
+            result = await self._run_operation(trv, self._current(intent))
         except Exception as exc:
             # Anything not mapped to an outcome yet: log it and report a
             # failure so the logic's retry and issue machinery still runs.
@@ -812,9 +841,18 @@ class RoomController:
             )
             failed = Failed(f"unexpected: {type(exc).__name__}: {exc}")
             result = OperationResult(trv, intent, self._capability_of(intent), failed)
+        # The result is for the intent the logic issued, whose guards (a resync
+        # waits for exactly its write) expect it.
+        result = replace(result, intent=intent)
         # Before the result: its listeners see the operation as finished.
         self._busy[trv, self._capability_of(intent)] -= 1
         self._dispatch(result)
+
+    def _current(self, intent: Intent) -> Intent:
+        """Return what a queued setpoint or mode write should send now."""
+        if self._config.setpoint_range is None:
+            return intent
+        return current_target(self._state, intent) or intent
 
     async def _run_operation(self, trv: str, intent: Intent) -> OperationResult:
         """Plan, write and read back one intent; every failure is an outcome."""

@@ -298,8 +298,9 @@ def reconcile_start(
     reported_modes = [m for m in modes if m is not None]
     if reported_modes and all(m == "off" for m in reported_modes):
         state = replace(state, mode=RoomMode.OFF)
-    # A held room still brings heating thermostats to off.
-    with_mode = holding(state)
+    # Thermostats that report off in a room that comes up heating get heat, and
+    # a held room still brings heating thermostats to off.
+    with_mode = True
     if first is None:
         return _sync_differing(cfg, state, now, capability_of, with_mode=with_mode)
     adopted = state.trvs[first].reported_setpoint

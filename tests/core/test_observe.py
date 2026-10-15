@@ -131,6 +131,44 @@ def test_late_echo_within_120_s_is_not_adopted() -> None:
     assert is_echo(st.trvs[A], "setpoint", 21.0, echo_at)
 
 
+def test_a_knob_turned_back_to_the_old_value_is_a_knob_turn_not_an_echo() -> None:
+    st = started_with_setpoint(22.0)
+    # A is turned to 23 and adopted; B gets 23.
+    st, _ = logic().handle(reported(A, 23.0), T0 + timedelta(seconds=10), st)
+    st, _ = settle(st, at=T0 + timedelta(seconds=13))
+    assert st.setpoint == 23.0
+    # Within 120 s of the room's 22, A is turned back to 22: that is not its echo.
+    back = T0 + timedelta(seconds=60)
+    assert not is_echo(st.trvs[A], "setpoint", 22.0, back)
+    st, cmds = logic().handle(reported(A, 22.0), back, st)
+    assert of_type(cmds, ScheduleKnobSettle) == [ScheduleKnobSettle(A, "setpoint", 3.0)]
+    st, cmds = settle(st, at=back + timedelta(seconds=3))
+    assert st.setpoint == 22.0
+    assert executes(cmds) == [(B, SetSetpoint(22.0))]
+
+
+def test_a_write_after_the_foreign_report_is_an_echo_again() -> None:
+    st = started_with_setpoint(22.0)
+    st, _ = logic().handle(reported(A, 23.0), T0 + timedelta(seconds=10), st)
+    st, _ = logic().handle(SetRoomSetpoint(22.0), T0 + timedelta(seconds=20), st)
+    assert is_echo(st.trvs[A], "setpoint", 22.0, T0 + timedelta(seconds=30))
+    st, cmds = logic().handle(reported(A, 22.0), T0 + timedelta(seconds=30), st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+
+
+def test_a_mode_turned_back_within_the_echo_window_is_a_knob_turn() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
+    st, _ = logic().handle(reported_mode(A, "heat"), T0 + timedelta(seconds=10), st)
+    st, _ = settle(st, capability="hvac_mode", at=T0 + timedelta(seconds=13))
+    assert st.mode is RoomMode.HEAT
+    # The "off" the room wrote at T0 is not what this is.
+    st, cmds = logic().handle(reported_mode(A, "off"), T0 + timedelta(seconds=40), st)
+    assert of_type(cmds, ScheduleKnobSettle) == [
+        ScheduleKnobSettle(A, "hvac_mode", 3.0)
+    ]
+
+
 def test_echo_after_120_s_is_a_knob_turn() -> None:
     st = started_with_setpoint(21.0)
     st, _ = logic().handle(SetRoomSetpoint(22.0), T0 + timedelta(seconds=10), st)
