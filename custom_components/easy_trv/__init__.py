@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components.climate.const import ATTR_MAX_TEMP, ATTR_MIN_TEMP
 from homeassistant.config_entries import ConfigEntry
@@ -68,6 +68,12 @@ _OPERATING_MODE_SUFFIX = "_operating_mode"
 
 # The hysteresis choice that version 1 entries could store and version 2 retired.
 _HYSTERESIS_LEAVE = "leave"
+
+# The intent behind each setting that can be left "as set in the thermostat".
+_LEAVABLE_INTENTS: Final = {
+    "window_detection": "set_window_detection",
+    "adaptive_mode": "set_adaptive_mode",
+}
 
 # The way to reach ZHA; tests replace it with a factory returning a fake gateway.
 GATEWAY_FACTORY: Callable[[HomeAssistant], TrvGateway] = ZhaLibraryGateway
@@ -309,6 +315,21 @@ def _thermostat_ids(data: Mapping[str, Any]) -> list[str]:
     return [trv for trv in trvs if isinstance(trv, str)]
 
 
+def _left_to_thermostat(profile: Profile, settings: RoomSettings) -> set[str]:
+    """Return the capabilities whose setting the room leaves to the thermostat.
+
+    Easy TRV writes nothing there; the person controls it, so it stays visible.
+    """
+    intents = {
+        intent
+        for key, intent in _LEAVABLE_INTENTS.items()
+        if getattr(settings, key) == "leave"
+    }
+    return {
+        name for name, spec in profile.capabilities.items() if spec.intent in intents
+    }
+
+
 def _reconcile_hidden_entities(
     hass: HomeAssistant,
     entry: EasyTrvConfigEntry,
@@ -320,13 +341,17 @@ def _reconcile_hidden_entities(
 
     ``profiles`` and ``settings`` are those of the rooms that were set up. The
     thermostats of the rooms that could not be set up (``invalid``) keep their
-    entities as they are.
+    entities as they are. A setting the room leaves to the thermostat keeps its
+    entity visible.
     """
     hidden: set[str] = set()
     for subentry_id, profile in profiles.items():
-        if settings[subentry_id].hide_thermostat_entities == "on":
+        room = settings[subentry_id]
+        if room.hide_thermostat_entities == "on":
             trvs = _thermostat_ids(entry.subentries[subentry_id].data)
-            hidden |= controlled_entities(hass, trvs, profile)
+            hidden |= controlled_entities(
+                hass, trvs, profile, skip=_left_to_thermostat(profile, room)
+            )
     keep_devices: set[str] = set()
     for subentry_id in invalid:
         trvs = _thermostat_ids(entry.subentries[subentry_id].data)

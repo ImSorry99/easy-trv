@@ -14,7 +14,7 @@ from homeassistant.helpers import entity_registry as er
 from custom_components.easy_trv.const import DOMAIN
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Collection, Iterable
 
     from homeassistant.core import HomeAssistant
 
@@ -48,20 +48,26 @@ def thermostat_devices(hass: HomeAssistant, climates: Iterable[str]) -> set[str]
 
 
 def controlled_entities(
-    hass: HomeAssistant, climates: Iterable[str], profile: Profile
+    hass: HomeAssistant,
+    climates: Iterable[str],
+    profile: Profile,
+    *,
+    skip: Collection[str] = (),
 ) -> set[str]:
     """Return the entities Easy TRV controls on the given thermostats.
 
     Per climate entity that is its own id and, on the same device, every ZHA
     entity whose domain and translation key a capability of ``profile`` names.
-    An entity without a translation key never matches. A climate entity that is
-    not registered adds nothing; one without a device adds only itself.
+    The capabilities in ``skip`` (by name) are left out: Easy TRV does not
+    write them, so their entities stay as they are. An entity without a
+    translation key never matches. A climate entity that is not registered adds
+    nothing; one without a device adds only itself.
     """
     registry = er.async_get(hass)
     named = {
         (spec.entity.domain, spec.entity.translation_key)
-        for spec in profile.capabilities.values()
-        if spec.entity is not None
+        for name, spec in profile.capabilities.items()
+        if spec.entity is not None and name not in skip
     }
     controlled: set[str] = set()
     for climate in climates:

@@ -343,6 +343,83 @@ async def test_only_rooms_with_the_setting_on_hide(hass, trv_a) -> None:
     assert hidden_by_integration(hass) == trv_a.hidden
 
 
+# --- What is left to the thermostat stays visible --------------------------------
+
+OPEN_WINDOW = "switch.a_zha_open_window"
+ADAPTIVE_MODE = "switch.a_zha_adaptive_mode"
+
+
+async def test_leave_window_detection_keeps_open_window_visible(hass, trv_a) -> None:
+    entry = make_entry(
+        hass, [room_data(trvs=["climate.a"], window_detection="leave")], HIDE_ON
+    )
+
+    await start(hass, entry)
+
+    # The person controls the flag: everything else is hidden as before.
+    assert OPEN_WINDOW in trv_a.hidden
+    assert hidden_by_integration(hass) == trv_a.hidden - {OPEN_WINDOW}
+    assert marked_entities(hass) == trv_a.hidden - {OPEN_WINDOW}
+    assert is_untouched(entry_of(hass, OPEN_WINDOW))
+
+
+async def test_leave_adaptive_mode_keeps_adaptive_switch_visible(hass, trv_a) -> None:
+    entry = make_entry(
+        hass, [room_data(trvs=["climate.a"], adaptive_mode="leave")], HIDE_ON
+    )
+
+    await start(hass, entry)
+
+    assert ADAPTIVE_MODE in trv_a.hidden
+    assert hidden_by_integration(hass) == trv_a.hidden - {ADAPTIVE_MODE}
+    assert marked_entities(hass) == trv_a.hidden - {ADAPTIVE_MODE}
+    assert is_untouched(entry_of(hass, ADAPTIVE_MODE))
+
+
+async def test_leave_in_the_global_options_counts_for_a_room_that_follows_them(
+    hass, trv_a
+) -> None:
+    entry = make_entry(
+        hass,
+        [room_data(trvs=["climate.a"], window_detection="global")],
+        {**HIDE_ON, "window_detection": "leave", "adaptive_mode": "leave"},
+    )
+
+    await start(hass, entry)
+
+    assert hidden_by_integration(hass) == trv_a.hidden - {OPEN_WINDOW, ADAPTIVE_MODE}
+
+
+async def test_open_window_is_shown_again_when_the_room_switches_to_leave(
+    hass, trv_a
+) -> None:
+    entry = make_entry(hass, [room_data(trvs=["climate.a"])], HIDE_ON)
+    await start(hass, entry)
+    assert hidden_by_integration(hass) == trv_a.hidden
+    assert is_marked(entry_of(hass, OPEN_WINDOW))
+    subentry = next(iter(entry.subentries.values()))
+
+    hass.config_entries.async_update_subentry(
+        entry,
+        subentry,
+        data=room_data(trvs=["climate.a"], window_detection="leave"),
+    )
+    await settle(hass)
+
+    assert hidden_by_integration(hass) == trv_a.hidden - {OPEN_WINDOW}
+    assert marked_entities(hass) == trv_a.hidden - {OPEN_WINDOW}
+    assert is_untouched(entry_of(hass, OPEN_WINDOW))
+
+
+def test_controlled_entities_skip_the_named_capabilities(hass, trv_a) -> None:
+    controlled = controlled_entities(
+        hass, [trv_a.climate], NATIVE, skip=("window_detection_flag", "adaptive_mode")
+    )
+
+    assert controlled == trv_a.hidden - {OPEN_WINDOW, ADAPTIVE_MODE}
+    assert controlled_entities(hass, [trv_a.climate], NATIVE, skip=()) == trv_a.hidden
+
+
 # --- The person's choices stay ----------------------------------------------------
 
 
