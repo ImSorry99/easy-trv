@@ -63,10 +63,10 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# What the unique ids of the entities that earlier versions registered and no
-# platform provides now end with, by domain: the 0.4.0 operating mode select and
-# the 0.5.0 status sensor.
-_RETIRED_SUFFIXES: Final = {"select": "_operating_mode", "sensor": "_status"}
+# What the unique id of the 0.4.0 operating mode select ends with. The 0.5.0
+# status sensor is told by its whole unique id, ``<subentry id>_status``.
+_RETIRED_SELECT_SUFFIX: Final = "_operating_mode"
+_RETIRED_SENSOR_SUFFIX: Final = "_status"
 
 # The hysteresis choice that version 1 entries could store and version 2 retired.
 _HYSTERESIS_LEAVE = "leave"
@@ -561,13 +561,20 @@ def _remove_retired_entities(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> 
     """
     registry = er.async_get(hass)
     for registered in er.async_entries_for_config_entry(registry, entry.entry_id):
-        suffix = _RETIRED_SUFFIXES.get(registered.domain)
-        if (
-            suffix is not None
-            and registered.platform == DOMAIN
-            and registered.unique_id.endswith(suffix)
-        ):
+        if registered.platform == DOMAIN and _is_retired(registered):
             registry.async_remove(registered.entity_id)
+
+
+def _is_retired(registered: er.RegistryEntry) -> bool:
+    """Return whether a registry entry is an entity that no platform provides now."""
+    if registered.domain == "select":
+        return registered.unique_id.endswith(_RETIRED_SELECT_SUFFIX)
+    return (
+        registered.domain == "sensor"
+        and registered.config_subentry_id is not None
+        and registered.unique_id
+        == f"{registered.config_subentry_id}{_RETIRED_SENSOR_SUFFIX}"
+    )
 
 
 async def _async_reload_on_update(

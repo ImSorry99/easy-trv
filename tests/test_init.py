@@ -133,6 +133,9 @@ async def test_setup_removes_the_retired_entities(hass, entry) -> None:
     # unique ids of another integration.
     sensor_like_select = register("sensor", DOMAIN, "operating_mode", "lookalike")
     select_like_status = register("select", DOMAIN, "status", "other_lookalike")
+    # Only the exact unique id of the status sensor is retired, not any sensor
+    # whose unique id ends with "_status".
+    longer_status = register("sensor", DOMAIN, "window_status", "window_lookalike")
     state = register("sensor", DOMAIN, "state", "living_heating_state")
     other_entry = MockConfigEntry(domain="other")
     other_entry.add_to_hass(hass)
@@ -151,6 +154,7 @@ async def test_setup_removes_the_retired_entities(hass, entry) -> None:
     for kept in (
         sensor_like_select,
         select_like_status,
+        longer_status,
         foreign_select,
         foreign_status,
     ):

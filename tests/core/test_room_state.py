@@ -218,7 +218,17 @@ def test_a_contact_restricts_before_a_schedule() -> None:
 def test_restricted_from_each_deviation(
     health: TrvHealth, note: Note | None, expected: HeatingState
 ) -> None:
-    st = with_trv(RoomState.initial(CFG), "climate.a", health=health, note=note)
+    st = with_trv(
+        RoomState.initial(CFG),
+        "climate.a",
+        health=health,
+        note=note,
+        unsupported=(
+            frozenset({"hysteresis"})
+            if health is TrvHealth.UNSUPPORTED
+            else frozenset()
+        ),
+    )
     assert heating_state(room_facts(st)) == (
         expected,
         (expected, HeatingState.HEATING),
@@ -264,6 +274,46 @@ def test_fault_alone_does_not_restrict() -> None:
     )
 
 
+def test_a_thermostat_in_error_that_lacks_a_function_is_restricted_too() -> None:
+    st = with_trv(
+        RoomState.initial(CFG),
+        "climate.a",
+        health=TrvHealth.ERROR,
+        unsupported=frozenset({"hysteresis"}),
+    )
+    facts_ = room_facts(st)
+    assert facts_.deviations == {"climate.a": "error"}
+    assert facts_.thermostat_reasons == {"unsupported"}
+    assert heating_state(facts_) == (
+        HeatingState.FAULT,
+        (HeatingState.FAULT, HeatingState.RESTRICTED_UNSUPPORTED, HeatingState.HEATING),
+    )
+
+
+def test_an_unavailable_thermostat_that_lacks_a_function_is_restricted_twice() -> None:
+    st = with_trv(
+        RoomState.initial(CFG),
+        "climate.a",
+        health=TrvHealth.UNAVAILABLE,
+        unsupported=frozenset({"hysteresis"}),
+    )
+    assert room_facts(st).thermostat_reasons == {"unavailable", "unsupported"}
+
+
+def test_a_function_the_profile_never_had_restricts_nothing() -> None:
+    st = with_trv(
+        RoomState.initial(CFG),
+        "climate.a",
+        unsupported=frozenset({"hysteresis"}),
+        not_in_profile=frozenset({"hysteresis"}),
+    )
+    assert room_facts(st).thermostat_reasons == frozenset()
+    assert heating_state(room_facts(st)) == (
+        HeatingState.HEATING,
+        (HeatingState.HEATING,),
+    )
+
+
 def test_every_reason_of_a_thermostat_counts() -> None:
     # Unavailable with a note: both reasons hold, though ``deviations`` shows one.
     st = with_trv(
@@ -287,7 +337,9 @@ def test_every_reason_of_a_thermostat_counts() -> None:
 
 def test_the_reasons_of_all_thermostats_are_collected() -> None:
     st = RoomState.initial(CFG)
-    st = with_trv(st, "climate.a", health=TrvHealth.UNSUPPORTED)
+    st = with_trv(
+        st, "climate.a", health=TrvHealth.UNSUPPORTED, unsupported=frozenset({"x"})
+    )
     st = with_trv(st, "climate.b", note=Note.WINDOW_PHASE)
     assert room_facts(st).thermostat_reasons == {"unsupported", "window_phase"}
 

@@ -78,11 +78,15 @@ def internal_source(state: RoomState, config: RoomConfig) -> bool:
 
 
 def _restrictions(trv: TrvState) -> set[str]:
-    """Return every way the thermostat restricts the room (an error is none)."""
+    """Return every way the thermostat restricts the room (an error is none).
+
+    It lacks a function when the profile declares one that the firmware does not
+    have, whatever its health: the same set the hint names.
+    """
     reasons: set[str] = set()
     if trv.health is TrvHealth.UNAVAILABLE:
         reasons.add("unavailable")
-    if trv.health is TrvHealth.UNSUPPORTED:
+    if trv.unsupported - trv.not_in_profile:
         reasons.add("unsupported")
     if trv.note is Note.SCHEDULE:
         reasons.add("schedule")
