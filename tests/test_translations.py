@@ -161,6 +161,8 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["selector"]["capability"]["options"]) == INTENTS
     assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
     assert set(data["selector"]["sensor_timeout"]["options"]) == {"off"}
+    presets = data["entity"]["climate"]["room"]["state_attributes"]["preset_mode"]
+    assert set(presets["state"]) == {"none", "frost"}
     # Existing sections of the earlier tasks stay in place.
     assert set(data["entity"]["sensor"]["room_status"]["state"]) == {
         "ok",
@@ -210,6 +212,9 @@ def test_german_translation_is_actually_german() -> None:
         "from_area": "Aus Bereich",
         "custom": "Eigener Raum",
     }
+    assert de["entity"]["climate"]["room"]["state_attributes"]["preset_mode"][
+        "state"
+    ] == {"none": "Keins", "frost": "Frostschutz"}
     assert de["entity"]["sensor"]["room_status"]["state"] == {
         "ok": "OK",
         "degraded": "Eingeschränkt",

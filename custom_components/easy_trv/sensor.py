@@ -8,6 +8,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.util import slugify
 
 from custom_components.easy_trv.const import DOMAIN
+from custom_components.easy_trv.core.model import Note
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigSubentry
@@ -85,8 +86,22 @@ class RoomStatusSensor(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the details the controller published with the status."""
-        return self._controller.attributes
+        controller = self._controller
+        return {
+            **controller.attributes,
+            "window_open": controller.window_open,
+            "outdoor_cutoff": controller.outdoor_hold,
+            "setpoint_source": controller.setpoint_source,
+            "in_sync": controller.in_sync,
+            "schedule_thermostats": [
+                trv for trv, note in controller.notes.items() if note is Note.SCHEDULE
+            ],
+        }
 
     async def async_added_to_hass(self) -> None:
         """Write the state whenever the controller publishes a new status."""
         self.async_on_remove(self._controller.add_listener(self.async_write_ha_state))
+        # The room's holds and sync change without a new status.
+        self.async_on_remove(
+            self._controller.add_update_listener(self.async_write_ha_state)
+        )

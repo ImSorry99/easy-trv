@@ -327,6 +327,16 @@ class RoomController:
         return self._state.preset
 
     @property
+    def frost_return(self) -> float | None:
+        """Return the setpoint the room returns to when the frost preset ends."""
+        return self._state.frost_return
+
+    @property
+    def thermostats(self) -> tuple[str, ...]:
+        """Return the climate entities of the room's thermostats."""
+        return tuple(self._firmware)
+
+    @property
     def effective_range(self) -> tuple[float, float, float] | None:
         """Return ``(min, max, step)`` of the setpoint, ``None`` without a climate.
 
@@ -426,6 +436,7 @@ class RoomController:
 
     def snapshot(self) -> dict[str, Any]:
         """Return configuration, tunables and state as JSON-able data."""
+        state = self._state
         return {
             "config": _jsonable(self._config),
             "params": _jsonable(self._params),
@@ -435,6 +446,17 @@ class RoomController:
                 for trv, state in self._state.trvs.items()
                 if state.not_in_profile
             },
+            "hold": {
+                "window_open": state.window_open,
+                "window_opened_at": (
+                    None
+                    if state.window_opened_at is None
+                    else state.window_opened_at.isoformat()
+                ),
+                "outdoor_hold": state.outdoor_hold,
+            },
+            "notes": {trv: note.value for trv, note in self.notes.items()},
+            "observations": self._subscriptions.recent(),
         }
 
     async def async_start(self) -> None:

@@ -9,7 +9,8 @@ the logic, and releases everything again on ``stop``.
 
 import logging
 import math
-from typing import TYPE_CHECKING, Final
+from collections import deque
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
@@ -19,6 +20,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.util import dt as dt_util
 
 from custom_components.easy_trv.adapters.zha_gateway import GatewayError
 from custom_components.easy_trv.core.model import (
@@ -51,6 +53,8 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# How many of the latest observations per thermostat diagnostics keep.
+OBSERVATIONS_KEPT: Final = 10
 _FAHRENHEIT: Final = frozenset({"°F", "F"})
 # A contact in one of these states says nothing; it counts as closed.
 _SILENT: Final = frozenset({STATE_UNAVAILABLE, STATE_UNKNOWN})
@@ -82,6 +86,13 @@ class ThermostatSubscriptions:
             groups.setdefault((spec.endpoint, spec.cluster), {})[spec.attribute] = name
         self._groups = groups
         self._active: dict[str, list[CALLBACK_TYPE]] = {}
+        self._recent: dict[str, deque[dict[str, Any]]] = {
+            trv: deque(maxlen=OBSERVATIONS_KEPT) for trv in ieees
+        }
+
+    def recent(self) -> dict[str, list[dict[str, Any]]]:
+        """Return the latest observations of each thermostat, oldest first."""
+        return {trv: list(seen) for trv, seen in self._recent.items()}
 
     def subscribe_all(self) -> None:
         """Subscribe every thermostat."""
@@ -138,6 +149,14 @@ class ThermostatSubscriptions:
             capability = capabilities.get(attribute)
             if capability is None:
                 return
+            self._recent[trv].append(
+                {
+                    "at": dt_util.utcnow().isoformat(),
+                    "capability": capability,
+                    "raw": raw,
+                    "kind": kind,
+                }
+            )
             value = self._profile.decode(capability, raw)
             self._feed(TrvObserved(trv, capability, value, raw, kind))
 

@@ -1018,7 +1018,15 @@ async def test_snapshot_is_json_able(hass, controller, gateway) -> None:
     await controller.async_start()
     await settle(hass)
     snapshot = json.loads(json.dumps(controller.snapshot()))
-    assert set(snapshot) == {"config", "params", "state", "not_in_profile"}
+    assert set(snapshot) == {
+        "config",
+        "params",
+        "state",
+        "not_in_profile",
+        "hold",
+        "notes",
+        "observations",
+    }
     assert snapshot["config"]["room_id"] == "room1"
     assert snapshot["config"]["trvs"][0] == {
         "entity_id": "climate.a",

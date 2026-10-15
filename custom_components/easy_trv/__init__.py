@@ -1,6 +1,7 @@
 """Easy TRV: climate-control integration for Zigbee thermostatic radiator valves."""
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -73,17 +74,55 @@ class EasyTrvRuntimeData:
 type EasyTrvConfigEntry = ConfigEntry[EasyTrvRuntimeData]
 
 
-def room_config_from_subentry(
+# The intents a room needs to be a thermostat of its own.
+_INTENT_SETPOINT = "set_setpoint"
+_INTENT_MODE = "set_hvac_mode"
+_DEFAULT_STEP = 0.5
+
+
+def effective_range(
+    profile: Profile, settings: RoomSettings
+) -> tuple[float, float, float] | None:
+    """Return ``(min, max, step)`` of the room setpoint, ``None`` without a climate.
+
+    The room's limits are cut to the limits the profile declares for the
+    thermostats; the narrowest wins. A profile that cannot write the setpoint or
+    the mode gives the room no climate entity.
+
+    Raises:
+        ValueError: If the two ranges do not overlap.
+
+    """
+    intents = {spec.intent for spec in profile.capabilities.values()}
+    if not {_INTENT_SETPOINT, _INTENT_MODE} <= intents:
+        return None
+    limits = profile.limits(_INTENT_SETPOINT)
+    low, high, step = (-math.inf, math.inf, _DEFAULT_STEP) if limits is None else limits
+    low = max(settings.setpoint_min, low)
+    high = min(settings.setpoint_max, high)
+    if low >= high:
+        msg = "setpoint range is empty"
+        raise ValueError(msg)
+    return low, high, step
+
+
+def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shapes it
     subentry_id: str,
     title: str,
     data: Mapping[str, Any],
     device_refs: Mapping[str, DeviceRef],
     settings: RoomSettings,
+    profile: Profile,
 ) -> RoomConfig:
     """Build the :class:`RoomConfig` of a ``room`` subentry.
 
     ``device_refs`` must hold every thermostat listed in ``data``. The
-    thermostat settings come from ``settings``, the resolved settings of the room.
+    thermostat settings come from ``settings``, the resolved settings of the
+    room; ``profile`` limits the setpoint range.
+
+    Raises:
+        ValueError: If the setpoint ranges of the room and the profile are disjoint.
+
     """
     return RoomConfig(
         room_id=subentry_id,
@@ -101,7 +140,7 @@ def room_config_from_subentry(
         hysteresis=settings.hysteresis,
         adaptive_mode=settings.adaptive_mode,
         frost_temperature=settings.frost_temperature,
-        setpoint_range=None,  # Task 9 derives it from the profile
+        setpoint_range=effective_range(profile, settings),
         window_contacts=tuple(data.get(CONF_WINDOW_CONTACTS, ())),
         window_warn=(
             timedelta(minutes=settings.window_warn_minutes)
@@ -208,7 +247,12 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
         profiles, subentry.data.get(CONF_PROFILE, PROFILE_AUTO), device_refs
     )
     config = room_config_from_subentry(
-        subentry.subentry_id, subentry.title, subentry.data, device_refs, settings
+        subentry.subentry_id,
+        subentry.title,
+        subentry.data,
+        device_refs,
+        settings,
+        profile,
     )
     params = RoomParams.from_settings(settings)
     controller = RoomController(

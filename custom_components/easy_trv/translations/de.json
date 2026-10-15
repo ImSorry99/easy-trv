@@ -116,6 +116,18 @@
     }
   },
   "entity": {
+    "climate": {
+      "room": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Keins",
+              "frost": "Frostschutz"
+            }
+          }
+        }
+      }
+    },
     "sensor": {
       "room_status": {
         "name": "Status",

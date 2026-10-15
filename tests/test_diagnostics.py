@@ -14,13 +14,17 @@ from tests.helpers_entry import (
     FAST_OPTIONS,
     GATEWAY_FACTORY,
     IEEE_A,
+    IEEE_B,
     make_entry,
     patched_gateway,
     room_data,
+    settle,
     start,
     use_config_dir,
 )
 
+SETPOINT = 0x0012
+MODE = 0x001C
 OPTIONS = {**FAST_OPTIONS, "refresh_minutes": 30}
 
 
@@ -65,7 +69,16 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
     assert diag["profile_errors"] == []
     assert set(diag["rooms"]) == {subentry_id}
     room = diag["rooms"][subentry_id]
-    assert set(room) == {"config", "params", "state", "not_in_profile", "settings"}
+    assert set(room) == {
+        "config",
+        "params",
+        "state",
+        "not_in_profile",
+        "hold",
+        "notes",
+        "observations",
+        "settings",
+    }
     assert room["config"]["name"] == "Living"
     assert room["config"]["trvs"][0]["ieee"] == IEEE_A
     assert room["params"]["refresh"] == 1800.0
@@ -129,3 +142,60 @@ async def test_diagnostics_of_an_entry_that_failed_to_set_up(hass) -> None:
         "profile_errors": [],
         "rooms": {},
     }
+
+
+async def test_diagnostics_include_holds_and_observations(
+    hass, fake_gateway, freezer
+) -> None:
+    freezer.move_to("2026-10-15T08:00:00+00:00")
+    hass.states.async_set("binary_sensor.window", "off")
+    entry = make_entry(
+        hass, [room_data(window_contacts=["binary_sensor.window"])], OPTIONS
+    )
+    await start(hass, entry)
+    subentry_id = next(iter(entry.subentries))
+    # Twelve knob turns on one thermostat, then its schedule on the other.
+    for step in range(12):
+        fake_gateway.inject(IEEE_A, SETPOINT, 2000 + 50 * step)
+    fake_gateway.inject(IEEE_B, MODE, 1)
+    fake_gateway.inject(IEEE_B, MODE, 4, kind="written")
+    hass.states.async_set("binary_sensor.window", "on")
+    await settle(hass)
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    room = diag["rooms"][subentry_id]
+    assert room["hold"] == {
+        "window_open": True,
+        "window_opened_at": "2026-10-15T08:00:00+00:00",
+        "outdoor_hold": False,
+    }
+    assert room["notes"] == {}
+    observations = room["observations"]
+    assert set(observations) == {"climate.a", "climate.b"}
+    # Only the last ten of each thermostat are kept, oldest first.
+    assert [o["raw"] for o in observations["climate.a"]] == [
+        2000 + 50 * step for step in range(2, 12)
+    ]
+    assert observations["climate.a"][0] == {
+        "at": "2026-10-15T08:00:00+00:00",
+        "capability": "setpoint",
+        "raw": 2100,
+        "kind": "report",
+    }
+    seen = [(o["capability"], o["raw"], o["kind"]) for o in observations["climate.b"]]
+    assert seen == [("hvac_mode", 1, "report"), ("hvac_mode", 4, "written")]
+    json.dumps(diag, cls=ExtendedJSONEncoder)
+
+
+async def test_diagnostics_show_the_notes_of_a_thermostat(
+    hass, fake_gateway, entry
+) -> None:
+    await start(hass, entry)
+    subentry_id = next(iter(entry.subentries))
+    fake_gateway.inject(IEEE_A, MODE, 1)
+    await settle(hass)
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diag["rooms"][subentry_id]["notes"] == {"climate.a": "schedule"}

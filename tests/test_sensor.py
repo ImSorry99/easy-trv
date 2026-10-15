@@ -174,7 +174,7 @@ async def test_each_room_gets_exactly_one_sensor_and_device(hass) -> None:
     await start(hass, entry)
 
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert sorted(e.entity_id for e in entities) == [
+    assert sorted(e.entity_id for e in entities if e.domain == "sensor") == [
         "sensor.bedroom_heating_status",
         "sensor.living_heating_status",
     ]
@@ -202,6 +202,42 @@ async def test_removed_sensor_stops_listening(hass, entry) -> None:
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert len(controller._listeners) == 0  # noqa: SLF001
+    assert len(controller._update_listeners) == 0  # noqa: SLF001
+
+
+async def test_status_sensor_has_the_room_attributes(hass, fake_gateway) -> None:
+    hass.states.async_set("binary_sensor.window", "off")
+    hass.states.async_set("climate.a", "heat", {"temperature": 21.0})
+    hass.states.async_set("climate.b", "heat", {"temperature": 21.0})
+    entry = make_entry(
+        hass,
+        [room_data(window_contacts=["binary_sensor.window"])],
+        FAST_OPTIONS,
+    )
+    await start(hass, entry)
+
+    attributes = hass.states.get("sensor.living_heating_status").attributes
+    assert attributes["window_open"] is False
+    assert attributes["outdoor_cutoff"] is False
+    assert attributes["setpoint_source"] == "initial"
+    assert attributes["in_sync"] is True
+    assert attributes["schedule_thermostats"] == []
+
+    # The sensor follows the room without a new status: a window opens ...
+    hass.states.async_set("binary_sensor.window", "on")
+    await settle(hass)
+    attributes = hass.states.get("sensor.living_heating_status").attributes
+    assert attributes["window_open"] is True
+
+    # ... and a thermostat runs its schedule.
+    hass.states.async_set("binary_sensor.window", "off")
+    await settle(hass)
+    fake_gateway.inject(IEEE_A, 0x001C, 1)
+    await settle(hass)
+    attributes = hass.states.get("sensor.living_heating_status").attributes
+    assert attributes["window_open"] is False
+    assert attributes["schedule_thermostats"] == ["climate.a"]
+    assert attributes["in_sync"] is False
 
 
 def test_translations_cover_the_sensor_states_and_issues() -> None:
