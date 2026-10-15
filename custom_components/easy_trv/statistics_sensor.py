@@ -12,6 +12,7 @@ controller before the room starts, and shows the highest value it has shown.
 """
 
 import math
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -29,7 +30,7 @@ from homeassistant.util import slugify
 from custom_components.easy_trv.labels import thermostat_name
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from homeassistant.config_entries import ConfigSubentry
     from homeassistant.helpers.device_registry import DeviceInfo
@@ -111,6 +112,70 @@ THERMOSTAT_STATISTICS: tuple[ThermostatStatistic, ...] = (
         read=lambda stats: stats.dropouts,
     ),
 )
+
+
+def room_unique_id(subentry_id: str, key: str) -> str:
+    """Return the unique id of a statistic of the room."""
+    return f"{subentry_id}_{key}"
+
+
+def thermostat_unique_id(subentry_id: str, climate_entity_id: str, key: str) -> str:
+    """Return the unique id of a statistic of one thermostat of the room.
+
+    Raises:
+        ValueError: If ``climate_entity_id`` is not an entity id.
+
+    """
+    object_id = split_entity_id(climate_entity_id)[1]
+    return f"{subentry_id}_{object_id}_{key}"
+
+
+def statistics_unique_ids(
+    subentry_id: str, thermostats: Iterable[str], *, contacts: bool
+) -> set[str]:
+    """Return the unique ids of the statistics sensors a room has.
+
+    A room has the window sensors only with ``contacts``, and one set of sensors
+    for each of its ``thermostats``. A thermostat that is not an entity id (the
+    data of a room that cannot be set up may hold anything) has none.
+    """
+    unique_ids = {
+        room_unique_id(subentry_id, description.key)
+        for description in ROOM_STATISTICS
+        if contacts or not description.needs_contacts
+    }
+    for climate_entity_id in thermostats:
+        with suppress(ValueError):
+            unique_ids.update(
+                thermostat_unique_id(subentry_id, climate_entity_id, description.key)
+                for description in THERMOSTAT_STATISTICS
+            )
+    return unique_ids
+
+
+def room_statistics_unique_ids(subentry_id: str, stats: RoomStatistics) -> set[str]:
+    """Return the unique ids of the statistics sensors of a room that is set up."""
+    return statistics_unique_ids(
+        subentry_id, stats.per_thermostat, contacts=stats.window_openings is not None
+    )
+
+
+def is_statistics_unique_id(subentry_id: str, unique_id: str) -> bool:
+    """Return whether a unique id is one a statistics sensor of the room can have.
+
+    Whether the sensor is wanted is another question: this only tells the
+    statistics sensors from the room's other entities.
+    """
+    prefix = f"{subentry_id}_"
+    if not unique_id.startswith(prefix):
+        return False
+    own = unique_id.removeprefix(prefix)
+    if own in {description.key for description in ROOM_STATISTICS}:
+        return True
+    return any(
+        own.endswith(f"_{description.key}") and own != f"_{description.key}"
+        for description in THERMOSTAT_STATISTICS
+    )
 
 
 def statistics_sensors(
@@ -270,7 +335,7 @@ class RoomStatisticSensor(StatisticSensor):
             read=lambda: description.read(controller.statistics()),
             restore=lambda total: controller.restore_statistic(description.key, total),
         )
-        self._attr_unique_id = f"{subentry.subentry_id}_{description.key}"
+        self._attr_unique_id = room_unique_id(subentry.subentry_id, description.key)
         # Suggest the entity id: HA would put the area in front of the device
         # name. Only used while the unique id is not registered.
         self.entity_id = f"sensor.{slugify(subentry.title)}_{description.key}"
@@ -300,7 +365,9 @@ class ThermostatStatisticSensor(StatisticSensor):
                 description.key, total, climate_entity_id
             ),
         )
-        object_id = split_entity_id(climate_entity_id)[1]
         self._attr_translation_placeholders = {"thermostat": label}
-        self._attr_unique_id = f"{subentry.subentry_id}_{object_id}_{description.key}"
+        self._attr_unique_id = thermostat_unique_id(
+            subentry.subentry_id, climate_entity_id, description.key
+        )
+        object_id = split_entity_id(climate_entity_id)[1]
         self.entity_id = f"sensor.{object_id}_{description.key}"

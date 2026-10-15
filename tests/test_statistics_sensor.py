@@ -23,6 +23,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.restore_state import async_get as async_restore_data
 from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
     mock_restore_cache,
     mock_restore_cache_with_extra_data,
 )
@@ -130,6 +131,10 @@ def number(hass, entity_id: str) -> float:
 
 def room_of(entry):
     return next(iter(entry.runtime_data.rooms.values()))
+
+
+def subentry_of(entry, title: str):
+    return next(s for s in entry.subentries.values() if s.title == title)
 
 
 def sent_to(gateway, ieee) -> int:
@@ -789,3 +794,256 @@ async def test_unloading_releases_the_listeners_of_the_statistics(
     assert await hass.config_entries.async_unload(big_room.entry_id)
 
     assert len(controller._update_listeners) == 0  # noqa: SLF001
+
+
+# --- A room that is reconfigured --------------------------------------------
+
+
+def statistics_of(hass, entry, prefix: str) -> set[str]:
+    """Return the sensors of the entry whose entity id starts with the prefix."""
+    return {entity_id for entity_id in sensors(hass, entry) if prefix in entity_id}
+
+
+async def test_removing_a_thermostat_removes_its_statistics(hass, entry) -> None:
+    await start(hass, entry)
+    before = sensors(hass, entry)
+    assert statistics_of(hass, entry, "sensor.b_") == {
+        "sensor.b_writes",
+        "sensor.b_write_failures",
+        "sensor.b_dropouts",
+    }
+
+    hass.config_entries.async_update_subentry(
+        entry, subentry_of(entry, "Living"), data=room_data(trvs=["climate.a"])
+    )
+    await settle(hass)
+
+    after = sensors(hass, entry)
+    assert statistics_of(hass, entry, "sensor.b_") == set()
+    assert hass.states.get(B_WRITES) is None
+    # Everything else stays, as the same registry entries.
+    assert set(after) == set(before) - {
+        "sensor.b_writes",
+        "sensor.b_write_failures",
+        "sensor.b_dropouts",
+    }
+    for entity_id, kept in after.items():
+        assert kept.id == before[entity_id].id
+
+
+async def test_a_moved_thermostat_keeps_its_entity_ids_in_the_new_room(
+    hass, fake_gateway
+) -> None:
+    fake_gateway.add_device("climate.c", "00:33", firmware=FIRMWARE)
+    hass.states.async_set("climate.c", "heat")
+    entry = make_entry(
+        hass,
+        [
+            room_data("Living"),
+            room_data("Bedroom", trvs=["climate.c"], temp_sensors=["sensor.t2"]),
+        ],
+        FAST_OPTIONS,
+    )
+    await start(hass, entry)
+    living, bedroom = subentry_of(entry, "Living"), subentry_of(entry, "Bedroom")
+
+    hass.config_entries.async_update_subentry(
+        entry, living, data=room_data("Living", trvs=["climate.a"])
+    )
+    hass.config_entries.async_update_subentry(
+        entry,
+        bedroom,
+        data=room_data(
+            "Bedroom", trvs=["climate.c", "climate.b"], temp_sensors=["sensor.t2"]
+        ),
+    )
+    await settle(hass)
+
+    registry = er.async_get(hass)
+    moved = registry.async_get(B_WRITES)
+    assert moved is not None
+    assert moved.unique_id == f"{bedroom.subentry_id}_b_writes"
+    assert moved.config_subentry_id == bedroom.subentry_id
+    assert value(hass, B_WRITES) != STATE_UNAVAILABLE
+    # No suffixed twin, and nothing of the thermostat is left in the old room.
+    assert [entity_id for entity_id in sensors(hass, entry) if "_2" in entity_id] == []
+    assert not [
+        found
+        for found in sensors(hass, entry).values()
+        if found.unique_id.startswith(f"{living.subentry_id}_b_")
+    ]
+    assert {"sensor.a_writes", "sensor.c_writes"} <= set(sensors(hass, entry))
+
+
+async def test_removing_the_contacts_removes_the_window_sensors(
+    hass, entry_with_contact
+) -> None:
+    await start(hass, entry_with_contact)
+    assert {OPENINGS, OPEN_TIME} <= set(sensors(hass, entry_with_contact))
+
+    hass.config_entries.async_update_subentry(
+        entry_with_contact, subentry_of(entry_with_contact, "Living"), data=room_data()
+    )
+    await settle(hass)
+
+    remaining = sensors(hass, entry_with_contact)
+    assert not {OPENINGS, OPEN_TIME} & set(remaining)
+    assert hass.states.get(OPENINGS) is None
+    assert hass.states.get(OPEN_TIME) is None
+    assert {DEVIATION, HEATING_TIME, A_WRITES} <= set(remaining)
+
+
+async def test_a_room_that_cannot_be_set_up_keeps_the_statistics_of_its_data(
+    hass, fake_gateway
+) -> None:
+    for entity_id, ieee in (("climate.c", "00:33"), ("climate.d", "00:44")):
+        fake_gateway.add_device(entity_id, ieee, firmware=FIRMWARE)
+        hass.states.async_set(entity_id, "heat")
+    hass.states.async_set("binary_sensor.window2", "off")
+    entry = make_entry(
+        hass,
+        [
+            room_data("Living"),
+            room_data(
+                "Bedroom",
+                trvs=["climate.c", "climate.d"],
+                temp_sensors=["sensor.t2"],
+                window_contacts=["binary_sensor.window2"],
+            ),
+        ],
+        FAST_OPTIONS,
+    )
+    await start(hass, entry)
+    bedroom_keys = ("deviation", "heating_time", "window_openings", "window_open_time")
+    own = {f"sensor.bedroom_{key}" for key in bedroom_keys} | {
+        f"sensor.{trv}_{key}"
+        for trv in ("c", "d")
+        for key in ("writes", "write_failures", "dropouts")
+    }
+    assert own <= set(sensors(hass, entry))
+
+    # The room can no longer be set up. It lost a thermostat and its contact,
+    # and its data holds something that is no entity id.
+    hass.config_entries.async_update_subentry(
+        entry,
+        subentry_of(entry, "Bedroom"),
+        data=room_data(
+            "Bedroom",
+            trvs=["climate.c", "not an entity id"],
+            temp_sensors=["sensor.t2"],
+        ),
+    )
+    await settle(hass)
+
+    assert subentry_of(entry, "Bedroom").subentry_id not in {*entry.runtime_data.rooms}
+    kept = set(sensors(hass, entry))
+    # What its data still lists survives for when the room works again ...
+    assert {
+        "sensor.bedroom_deviation",
+        "sensor.bedroom_heating_time",
+        "sensor.c_writes",
+        "sensor.c_write_failures",
+        "sensor.c_dropouts",
+    } <= kept
+    # ... what it no longer lists is gone, so another room can use the ids.
+    assert not kept & {
+        "sensor.bedroom_window_openings",
+        "sensor.bedroom_window_open_time",
+        "sensor.d_writes",
+        "sensor.d_write_failures",
+        "sensor.d_dropouts",
+    }
+    # The other room is untouched.
+    assert {DEVIATION, A_WRITES, B_WRITES} <= kept
+
+
+async def test_a_room_that_cannot_be_set_up_keeps_everything_its_data_lists(
+    hass, fake_gateway
+) -> None:
+    fake_gateway.add_device("climate.c", "00:33", firmware=FIRMWARE)
+    hass.states.async_set("climate.c", "heat")
+    hass.states.async_set("binary_sensor.window2", "off")
+    entry = make_entry(
+        hass,
+        [
+            room_data("Living"),
+            room_data(
+                "Bedroom",
+                trvs=["climate.c"],
+                temp_sensors=["sensor.t2"],
+                window_contacts=["binary_sensor.window2"],
+            ),
+        ],
+        FAST_OPTIONS,
+    )
+    await start(hass, entry)
+    before = sensors(hass, entry)
+    assert "sensor.bedroom_window_openings" in before
+
+    hass.config_entries.async_update_subentry(
+        entry,
+        subentry_of(entry, "Bedroom"),
+        data=room_data(
+            "Bedroom",
+            trvs=["climate.c"],
+            temp_sensors=["sensor.t2"],
+            window_contacts=["binary_sensor.window2"],
+            profile="no_such_profile",
+        ),
+    )
+    await settle(hass)
+
+    assert set(sensors(hass, entry)) == set(before)
+
+
+async def test_only_stale_statistics_are_removed(hass, entry) -> None:
+    registry = er.async_get(hass)
+    subentry_id = next(iter(entry.subentries))
+
+    def register(domain, platform, suffix, object_id, owner=entry):
+        return registry.async_get_or_create(
+            domain,
+            platform,
+            f"{subentry_id}_{suffix}",
+            config_entry=owner,
+            config_subentry_id=subentry_id if owner is entry else None,
+            suggested_object_id=object_id,
+        )
+
+    # Left behind by a thermostat that is no longer part of the room, and by a
+    # contact that is gone.
+    stale = [
+        register("sensor", DOMAIN, "ghost_writes", "ghost_writes"),
+        register("sensor", DOMAIN, "ghost_write_failures", "ghost_failures"),
+        register("sensor", DOMAIN, "window_openings", "living_window_openings"),
+    ]
+    # Neighbours that stay: other sensors of the integration, other kinds of
+    # entities, and the same unique ids of another integration.
+    other_entry = MockConfigEntry(domain="other")
+    other_entry.add_to_hass(hass)
+    neighbours = [
+        register("sensor", DOMAIN, "notes", "living_notes"),
+        register("sensor", DOMAIN, "ghost_total", "ghost_total"),
+        register("binary_sensor", DOMAIN, "ghost_writes", "ghost_binary"),
+        register("sensor", "other", "ghost_writes", "foreign_writes", other_entry),
+        # Not the unique id of a sensor of this room, whatever it ends with.
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            "elsewhere_ghost_writes",
+            config_entry=entry,
+            config_subentry_id=subentry_id,
+            suggested_object_id="elsewhere_writes",
+        ),
+    ]
+
+    await start(hass, entry)
+
+    for gone in stale:
+        assert registry.async_get(gone.entity_id) is None
+        assert hass.states.get(gone.entity_id) is None
+    for kept in neighbours:
+        assert registry.async_get(kept.entity_id) is not None
+    # The room's own sensors are live.
+    assert value(hass, STATE_ENTITY) == "heating"
+    assert value(hass, A_WRITES) != STATE_UNAVAILABLE

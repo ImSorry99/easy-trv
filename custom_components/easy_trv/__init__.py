@@ -46,6 +46,11 @@ from custom_components.easy_trv.labels import (
     localized_number,
 )
 from custom_components.easy_trv.profiles.loader import LoadResult, async_load_profiles
+from custom_components.easy_trv.statistics_sensor import (
+    is_statistics_unique_id,
+    room_statistics_unique_ids,
+    statistics_unique_ids,
+)
 from custom_components.easy_trv.visibility import (
     controlled_entities,
     reconcile_hidden,
@@ -527,7 +532,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     entry.runtime_data = EasyTrvRuntimeData(
         gateway, profiles, rooms, resolved, areas, labels
     )
-    _remove_retired_entities(hass, entry)
+    _remove_unused_entities(hass, entry, invalid)
     _reconcile_hidden_entities(hass, entry, room_profiles, resolved, invalid)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -551,18 +556,55 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     return True
 
 
-def _remove_retired_entities(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> None:
-    """Remove the entities of earlier versions that no platform provides now.
+def _remove_unused_entities(
+    hass: HomeAssistant, entry: EasyTrvConfigEntry, invalid: set[str]
+) -> None:
+    """Remove the entities that no platform provides now.
 
     These are the operating mode selects of 0.4.0 (frost protection moved to the
-    mode ``auto`` of the room thermostat) and the status sensors of 0.5.0 (merged
-    into the heating state sensor, which has its own unique id and stays). The
-    registry would keep them as unavailable entities otherwise.
+    mode ``auto`` of the room thermostat), the status sensors of 0.5.0 (merged
+    into the heating state sensor, which has its own unique id and stays) and
+    the statistics sensors of thermostats and contacts a room has lost. The
+    registry would keep them as unavailable entities otherwise, and a thermostat
+    that joins another room would find its entity ids taken and get ``_2``.
     """
+    expected = _expected_statistics(entry, invalid)
     registry = er.async_get(hass)
     for registered in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if registered.platform == DOMAIN and _is_retired(registered):
+        if registered.platform == DOMAIN and (
+            _is_retired(registered) or _is_stale_statistic(registered, expected)
+        ):
             registry.async_remove(registered.entity_id)
+
+
+def _expected_statistics(entry: EasyTrvConfigEntry, invalid: set[str]) -> set[str]:
+    """Return the unique ids of the statistics sensors the rooms have now.
+
+    A room that is set up tells it by its controller. A room that cannot be set
+    up (``invalid``) has none: its stored data tells, read as defensively as
+    everywhere else, so its sensors stay for the day the room works again.
+    """
+    expected: set[str] = set()
+    for subentry_id, controller in entry.runtime_data.rooms.items():
+        expected |= room_statistics_unique_ids(subentry_id, controller.statistics())
+    for subentry_id in invalid:
+        data = entry.subentries[subentry_id].data
+        expected |= statistics_unique_ids(
+            subentry_id,
+            _thermostat_ids(data),
+            contacts=bool(data.get(CONF_WINDOW_CONTACTS)),
+        )
+    return expected
+
+
+def _is_stale_statistic(registered: er.RegistryEntry, expected: set[str]) -> bool:
+    """Return whether a registry entry is a statistics sensor no room has now."""
+    return (
+        registered.domain == "sensor"
+        and registered.config_subentry_id is not None
+        and is_statistics_unique_id(registered.config_subentry_id, registered.unique_id)
+        and registered.unique_id not in expected
+    )
 
 
 def _is_retired(registered: er.RegistryEntry) -> bool:
