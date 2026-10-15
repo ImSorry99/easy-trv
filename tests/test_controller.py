@@ -28,6 +28,7 @@ from custom_components.easy_trv.const import (
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.core.model import (
     Note,
+    OperatingMode,
     Preset,
     RoomConfig,
     RoomMode,
@@ -1447,17 +1448,18 @@ async def test_set_mode_off_and_back_to_heat(hass, climate, gateway) -> None:
     assert writes_to(gateway, IEEE_A, SETPOINT)[-1] == 2100
 
 
-async def test_set_preset_frost_and_back(hass, climate, gateway) -> None:
+async def test_set_operation_frost_and_back(hass, climate, gateway) -> None:
     await start_with_setpoint(hass, climate, gateway)
-    await climate.async_set_preset(Preset.FROST)
+    await climate.async_set_operation(OperatingMode.FROST)
     await settle(hass)
+    assert climate.operation is OperatingMode.FROST
     assert climate.preset is Preset.FROST
     assert climate.setpoint == 7.0
     assert climate.setpoint_source == "frost"
     assert writes_to(gateway, IEEE_A, SETPOINT) == [700]
-    await climate.async_set_preset(Preset.NONE)
+    await climate.async_set_operation(OperatingMode.HEAT)
     await settle(hass)
-    assert climate.preset is Preset.NONE
+    assert climate.operation is OperatingMode.HEAT
     assert climate.setpoint == 21.0
     assert writes_to(gateway, IEEE_B, SETPOINT) == [700, 2100]
 

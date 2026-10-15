@@ -65,7 +65,7 @@ from custom_components.easy_trv.core.model import (
     SensorReading,
     SetHvacMode,
     SetRoomMode,
-    SetRoomPreset,
+    SetRoomOperation,
     SetRoomSetpoint,
     SetSetpoint,
     SetStatus,
@@ -84,6 +84,7 @@ from custom_components.easy_trv.core.setpoint import (
     suspended,
 )
 from custom_components.easy_trv.core.setpoint import current as current_target
+from custom_components.easy_trv.core.setpoint import operation as room_operation
 from custom_components.easy_trv.core.values import parse_temperature
 from custom_components.easy_trv.labels import thermostat_name
 from custom_components.easy_trv.observation import (
@@ -110,6 +111,7 @@ if TYPE_CHECKING:
     from custom_components.easy_trv.core.model import (
         Intent,
         Note,
+        OperatingMode,
         Outcome,
         Preset,
         RoomConfig,
@@ -330,12 +332,17 @@ class RoomController:
 
     @property
     def preset(self) -> Preset:
-        """Return the room's preset."""
+        """Return whether the room holds its frost protection temperature."""
         return self._state.preset
 
     @property
+    def operation(self) -> OperatingMode:
+        """Return the operating mode of the room: off, frost or heat."""
+        return room_operation(self._state)
+
+    @property
     def frost_return(self) -> float | None:
-        """Return the setpoint the room returns to when the frost preset ends."""
+        """Return the setpoint the room returns to when frost protection ends."""
         return self._state.frost_return
 
     @property
@@ -450,9 +457,9 @@ class RoomController:
         """Switch the room on (``heat``) or off."""
         self._dispatch(SetRoomMode(mode))
 
-    async def async_set_preset(self, preset: Preset) -> None:
-        """Select the preset of the room."""
-        self._dispatch(SetRoomPreset(preset))
+    async def async_set_operation(self, operation: OperatingMode) -> None:
+        """Switch the room off, to frost protection only, or to heating."""
+        self._dispatch(SetRoomOperation(operation))
 
     async def async_restore(
         self,

@@ -33,18 +33,28 @@ _PRESETS = {preset.value: preset for preset in Preset}
 
 @dataclass
 class RoomExtraData(ExtraStoredData):
-    """What a room remembers that its visible attributes do not show."""
+    """What a room remembers that its visible attributes do not show.
+
+    ``preset`` is whether the room is on frost protection; ``None`` when the
+    data predates it (0.3.0 kept it in the ``preset_mode`` attribute).
+    """
 
     frost_return: float | None
+    preset: Preset | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return the data for the restore store."""
-        return {"frost_return": self.frost_return}
+        return {
+            "frost_return": self.frost_return,
+            "preset": None if self.preset is None else self.preset.value,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RoomExtraData:
-        """Read the stored data; a value that is no number counts as unset."""
-        return cls(_number(data.get("frost_return")))
+        """Read the stored data; a value that is not valid counts as unset."""
+        return cls(
+            _number(data.get("frost_return")), _PRESETS.get(str(data.get("preset")))
+        )
 
 
 def _number(value: object) -> float | None:
@@ -79,7 +89,12 @@ async def async_setup_entry(
 
 
 class RoomClimate(ClimateEntity, RestoreEntity):
-    """The thermostat of a room: one setpoint, mode and preset for all valves."""
+    """The thermostat of a room: one setpoint and mode for all valves.
+
+    Frost protection is not a preset here but an operating mode of the room
+    (the room's select entity); the thermostat then shows ``heat`` at the
+    frost protection temperature.
+    """
 
     _attr_has_entity_name = True
     _attr_name = None
@@ -87,12 +102,10 @@ class RoomClimate(ClimateEntity, RestoreEntity):
     _attr_should_poll = False
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]  # noqa: RUF012
-    _attr_preset_modes = [Preset.NONE.value, Preset.FROST.value]  # noqa: RUF012
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.PRESET_MODE
     )
 
     def __init__(
@@ -129,11 +142,6 @@ class RoomClimate(ClimateEntity, RestoreEntity):
         return _HVAC_MODES[self._controller.mode]
 
     @property
-    def preset_mode(self) -> str:
-        """Return the preset of the room."""
-        return self._controller.preset.value
-
-    @property
     def target_temperature(self) -> float | None:
         """Return the setpoint of the room."""
         return self._controller.setpoint
@@ -161,7 +169,8 @@ class RoomClimate(ClimateEntity, RestoreEntity):
     @property
     def extra_restore_state_data(self) -> RoomExtraData:
         """Return what has to survive a restart besides the visible state."""
-        return RoomExtraData(self._controller.frost_return)
+        controller = self._controller
+        return RoomExtraData(controller.frost_return, controller.preset)
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set the target temperature of the room."""
@@ -169,7 +178,7 @@ class RoomClimate(ClimateEntity, RestoreEntity):
             await self._controller.async_set_setpoint(float(celsius))
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Switch the room on or off."""
+        """Switch the room on or off; off ends frost protection."""
         await self._controller.async_set_mode(_ROOM_MODES[hvac_mode.value])
 
     async def async_turn_on(self) -> None:
@@ -179,10 +188,6 @@ class RoomClimate(ClimateEntity, RestoreEntity):
     async def async_turn_off(self) -> None:
         """Switch the room off."""
         await self._controller.async_set_mode(RoomMode.OFF)
-
-    async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Select a preset."""
-        await self._controller.async_set_preset(_PRESETS[preset_mode])
 
     async def async_added_to_hass(self) -> None:
         """Restore the room and write the state whenever the room changes.
@@ -199,12 +204,14 @@ class RoomClimate(ClimateEntity, RestoreEntity):
         if last is None:
             return
         extra = await self.async_get_last_extra_data()
-        frost_return = (
-            RoomExtraData.from_dict(extra.as_dict()).frost_return if extra else None
-        )
+        data = RoomExtraData.from_dict(extra.as_dict()) if extra else None
+        preset = data.preset if data else None
+        if preset is None:
+            # Remembered by 0.3.0, which had frost protection as a preset.
+            preset = _PRESETS.get(str(last.attributes.get("preset_mode")))
         await self._controller.async_restore(
             _number(last.attributes.get(ATTR_TEMPERATURE)),
             _ROOM_MODES.get(last.state),
-            _PRESETS.get(str(last.attributes.get("preset_mode"))),
-            frost_return,
+            preset,
+            data.frost_return if data else None,
         )

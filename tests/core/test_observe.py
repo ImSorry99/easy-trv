@@ -8,6 +8,7 @@ from custom_components.easy_trv.core.model import (
     Mismatch,
     Note,
     Ok,
+    OperatingMode,
     Preset,
     RaiseIssue,
     RestoreRoom,
@@ -18,7 +19,7 @@ from custom_components.easy_trv.core.model import (
     ScheduleRetry,
     SetHvacMode,
     SetRoomMode,
-    SetRoomPreset,
+    SetRoomOperation,
     SetRoomSetpoint,
     SetRoomTemperature,
     SetSetpoint,
@@ -220,7 +221,7 @@ def test_knob_turn_while_off_turns_the_room_on() -> None:
 
 def test_knob_turn_leaves_the_frost_preset() -> None:
     st = started_with_setpoint(21.0)
-    st, _ = logic().handle(SetRoomPreset(Preset.FROST), T0, st)
+    st, _ = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
     st, _ = logic().handle(reported(A, 19.0), AFTER, st)
     st, _ = settle(st)
     assert (st.preset, st.frost_return, st.setpoint) == (Preset.NONE, None, 19.0)
@@ -684,7 +685,7 @@ def test_a_stale_report_while_the_room_is_off_is_not_a_knob_turn() -> None:
 
 def test_a_stale_report_during_a_hold_is_not_a_knob_turn() -> None:
     st = started_with_setpoint(21.0)
-    st, _ = logic().handle(SetRoomPreset(Preset.FROST), T0, st)
+    st, _ = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
     st = replace(st, window_open=True)
     st, _ = logic().handle(SetRoomSetpoint(23.0), AFTER, st)
     st, cmds = logic().handle(reported(A, 7.0), AFTER + timedelta(minutes=5), st)
@@ -843,7 +844,7 @@ def test_a_newer_ha_setpoint_drops_a_pending_knob_value() -> None:
 def test_a_newer_ha_preset_or_restore_drops_a_pending_knob_value() -> None:
     st = started_with_setpoint(21.0)
     st, _ = logic().handle(reported(A, 22.0), AFTER, st)
-    frost, _ = logic().handle(SetRoomPreset(Preset.FROST), AFTER, st)
+    frost, _ = logic().handle(SetRoomOperation(OperatingMode.FROST), AFTER, st)
     assert frost.trvs[A].knob_pending == {}
     restored, _ = logic().handle(
         RestoreRoom(20.0, RoomMode.HEAT, Preset.NONE), AFTER, st

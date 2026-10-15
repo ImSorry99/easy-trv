@@ -1,5 +1,15 @@
 {
   "entity": {
+    "select": {
+      "operating_mode": {
+        "default": "mdi:radiator",
+        "state": {
+          "off": "mdi:radiator-off",
+          "frost": "mdi:snowflake-thermometer",
+          "heat": "mdi:radiator"
+        }
+      }
+    },
     "sensor": {
       "room_status": {
         "default": "mdi:radiator",

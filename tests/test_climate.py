@@ -7,7 +7,6 @@ from homeassistant.components.climate import (
     ATTR_PRESET_MODES,
     ATTR_TARGET_TEMP_STEP,
     SERVICE_SET_HVAC_MODE,
-    SERVICE_SET_PRESET_MODE,
     SERVICE_SET_TEMPERATURE,
     ClimateEntityFeature,
     HVACMode,
@@ -30,7 +29,7 @@ from pytest_homeassistant_custom_component.common import (
     mock_restore_cache_with_extra_data,
 )
 
-from custom_components.easy_trv.core.model import Note
+from custom_components.easy_trv.core.model import Note, OperatingMode
 from custom_components.easy_trv.profiles.loader import BUILTIN_DIR
 from tests.helpers_entry import (
     FAST_OPTIONS,
@@ -89,13 +88,13 @@ async def test_room_climate_entity_properties(hass, entry) -> None:
     assert attributes[ATTR_MAX_TEMP] == 30.0
     assert attributes[ATTR_TARGET_TEMP_STEP] == 0.5
     assert attributes[ATTR_HVAC_MODES] == [HVACMode.HEAT, HVACMode.OFF]
-    assert attributes[ATTR_PRESET_MODES] == ["none", "frost"]
-    assert attributes[ATTR_PRESET_MODE] == "none"
+    # Frost protection is an operating mode of the room, not a preset.
+    assert ATTR_PRESET_MODES not in attributes
+    assert ATTR_PRESET_MODE not in attributes
     assert attributes[ATTR_SUPPORTED_FEATURES] == (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.PRESET_MODE
     )
     assert "hvac_action" not in attributes
     assert attributes["current_temperature"] == 21.3
@@ -179,23 +178,20 @@ async def test_turn_off_and_on(hass, entry, fake_gateway) -> None:
     assert writes(fake_gateway, MODE)
 
 
-async def test_preset_frost_and_back(hass, entry, fake_gateway) -> None:
+async def test_off_ends_frost_protection(hass, entry) -> None:
     await start(hass, entry)
-    fake_gateway.writes.clear()
+    controller = next(iter(entry.runtime_data.rooms.values()))
+    await controller.async_set_operation(OperatingMode.FROST)
+    await settle(hass)
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 5.0
 
-    await call(hass, SERVICE_SET_PRESET_MODE, preset_mode="frost")
-
-    state = hass.states.get(CLIMATE)
-    assert state.attributes[ATTR_PRESET_MODE] == "frost"
-    assert state.attributes[ATTR_TEMPERATURE] == 5.0
-    assert state.attributes["setpoint_source"] == "frost"
-    assert sorted(writes(fake_gateway, SETPOINT)) == [(IEEE_A, 500), (IEEE_B, 500)]
-
-    await call(hass, SERVICE_SET_PRESET_MODE, preset_mode="none")
+    await call(hass, SERVICE_TURN_OFF)
+    await call(hass, SERVICE_TURN_ON)
 
     state = hass.states.get(CLIMATE)
-    assert state.attributes[ATTR_PRESET_MODE] == "none"
+    assert state.state == "heat"
     assert state.attributes[ATTR_TEMPERATURE] == 21.0
+    assert controller.operation is OperatingMode.HEAT
 
 
 async def test_the_state_follows_the_controller_without_a_service(hass, entry) -> None:
@@ -234,25 +230,23 @@ async def test_listener_is_released_when_the_entry_unloads(hass, entry) -> None:
 # --- Restore -----------------------------------------------------------------
 
 
-def remember(
+def remember(  # noqa: PLR0913
     hass,
     state: str = "heat",
     temperature: float = 24.0,
-    preset: str = "none",
+    preset: str | None = "none",
     frost_return: float | None = None,
+    legacy_preset: str | None = None,
 ) -> None:
+    """Remember a room state; ``legacy_preset`` is the 0.3.0 preset attribute."""
+    attributes: dict = {ATTR_TEMPERATURE: temperature}
+    if legacy_preset is not None:
+        attributes[ATTR_PRESET_MODE] = legacy_preset
+    extra: dict = {"frost_return": frost_return}
+    if preset is not None:
+        extra["preset"] = preset
     mock_restore_cache_with_extra_data(
-        hass,
-        [
-            (
-                State(
-                    CLIMATE,
-                    state,
-                    {ATTR_TEMPERATURE: temperature, ATTR_PRESET_MODE: preset},
-                ),
-                {"frost_return": frost_return},
-            )
-        ],
+        hass, [(State(CLIMATE, state, attributes), extra)]
     )
 
 
@@ -280,31 +274,44 @@ async def test_restore_of_a_switched_off_room(hass, entry, fake_gateway) -> None
     assert sorted(writes(fake_gateway, MODE)) == [(IEEE_A, OFF), (IEEE_B, OFF)]
 
 
-async def test_restore_keeps_the_setpoint_to_return_to_from_frost(hass, entry) -> None:
-    remember(hass, "heat", 5.0, preset="frost", frost_return=22.0)
+@pytest.mark.parametrize(
+    ("preset", "legacy_preset"),
+    [("frost", None), (None, "frost")],
+    ids=["stored", "remembered by 0.3.0"],
+)
+async def test_restore_keeps_frost_protection_and_the_setpoint_to_return_to(
+    hass, entry, preset, legacy_preset
+) -> None:
+    remember(
+        hass, "heat", 5.0, preset=preset, frost_return=22.0, legacy_preset=legacy_preset
+    )
 
     await start(hass, entry)
 
+    controller = next(iter(entry.runtime_data.rooms.values()))
     state = hass.states.get(CLIMATE)
-    assert state.attributes[ATTR_PRESET_MODE] == "frost"
+    assert controller.operation is OperatingMode.FROST
     assert state.attributes[ATTR_TEMPERATURE] == 5.0
     assert "frost_return" not in state.attributes
 
-    await call(hass, SERVICE_SET_PRESET_MODE, preset_mode="none")
+    await controller.async_set_operation(OperatingMode.HEAT)
+    await settle(hass)
 
     assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 22.0
 
 
-async def test_the_extra_data_carries_the_frost_return(hass, entry) -> None:
+async def test_the_extra_data_carries_frost_protection(hass, entry) -> None:
     await start(hass, entry)
     await call(hass, SERVICE_SET_TEMPERATURE, **{ATTR_TEMPERATURE: 23.0})
-    await call(hass, SERVICE_SET_PRESET_MODE, preset_mode="frost")
+    controller = next(iter(entry.runtime_data.rooms.values()))
+    await controller.async_set_operation(OperatingMode.FROST)
+    await settle(hass)
 
     stored = {
         stored.state.entity_id: stored.extra_data
         for stored in async_restore_data(hass).async_get_stored_states()
     }
-    assert stored[CLIMATE].as_dict() == {"frost_return": 23.0}
+    assert stored[CLIMATE].as_dict() == {"frost_return": 23.0, "preset": "frost"}
 
 
 @pytest.mark.parametrize(
