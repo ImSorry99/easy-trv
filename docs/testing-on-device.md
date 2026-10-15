@@ -35,7 +35,7 @@ A manual checklist for the first run on real hardware: the owner's four Sonoff T
 
 1. **Add room > From area**, choose "Wohnzimmer". Expected: the next page is prefilled with the three thermostats and the area's temperature and humidity sensors (the thermostats' own readings are not among them). Order the temperature sensors by priority and submit. On the next page, **Room settings**, set **Adaptive mode** to "Adaptive off" and leave everything else on **Global** (open-window detection on, hysteresis 0.4 K, frost protection 7 °C, profile auto). This room checks the hysteresis write (section 3).
 2. **Add room > From area**, choose "Schlafzimmer". One thermostat. Before you submit the first page, add one of the living-room thermostats to the thermostats field. Expected: the form says it already belongs to another room. Remove it again and submit. On **Room settings** leave every field on **Global** (so adaptive mode is on). This room checks the adaptive mode and is the one used for S10.
-3. Expected: two devices, "Heizung Wohnzimmer" and "Heizung Schlafzimmer" (English: "Wohnzimmer heating", "Schlafzimmer heating"), each placed in its area and with one sensor, the diagnostic "Heating state" ("Heizungszustand"), whose entity id is `sensor.wohnzimmer_heating_state` or `sensor.schlafzimmer_heating_state` (called the Heating state sensor below, section 7).
+3. Expected: two devices, "Heizung Wohnzimmer" and "Heizung Schlafzimmer" (English: "Wohnzimmer heating", "Schlafzimmer heating"), each placed in its area and with the diagnostic sensor "Heating state" ("Heizungszustand"), whose entity id is `sensor.wohnzimmer_heating_state` or `sensor.schlafzimmer_heating_state` (called the Heating state sensor below, section 7), and with the statistics sensors that section 8 checks.
 4. Open **Configure** on the Easy TRV page. Expected: two sections, "Writes" and "Thermostat settings"; number fields can be left empty, and the description of each says what an empty field means (for the refresh interval: "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Empty = 20 min.").
 
 ## 3. The first writes
@@ -238,7 +238,7 @@ Open the device page of one living-room thermostat and note its entities. Before
 
 Needs sections 2, 3 and 6.3 done: Wohnzimmer (three thermostats, with the test window contact from 6.3) and Schlafzimmer (one thermostat, no contact) run, the Heating state is `heating`. Keep the Easy TRV debug log on. The statistics sensors sit on the room device, in its diagnostic group. For exact values use Developer tools > States (filter for the sensor id); the device page rounds the durations to two decimals. Note the values of a sensor before each check. In the entity ids below `<trv>` is the part of the thermostat's climate entity id after `climate.`.
 
-Heating time depends on `hvac_action`. Do S11 (section 9) first, or at least read it before 8.5.
+Heating time depends on `hvac_action`, and the TRVZB is known to report it wrongly in adaptive mode (it can say heating with the valve closed). Do S11 (section 9) first, or at least read it before 8.5. Both are run on a thermostat with adaptive mode off (Wohnzimmer) and on one with adaptive mode on (Schlafzimmer).
 
 ### 8.1 The sensors exist
 
@@ -250,7 +250,7 @@ Heating time depends on `hvac_action`. Do S11 (section 9) first, or at least rea
 
 1. Pick one living-room thermostat and note its writes and failed writes. Change the room target by 0.5 K. Expected: after the write and its read-back, writes has risen by the number of `attr 0x...` lines in the debug log for that thermostat since you noted it, and failed writes has not moved. The read-back does not count: one write is +1, not +2.
 2. Take the batteries out of that thermostat and, while ZHA still shows it as available, trigger a write (change the target by 0.5 K). Expected: writes rises with every attempt (up to the configured number of attempts, three by default), failed writes rises with every attempt that ends in `failed: ...` or `mismatch ...` in the debug log, so by the same number, and Repairs shows `trv_unreachable` as before. The other two thermostats of the room count their own writes only.
-3. Once ZHA shows the thermostat as unavailable it is skipped: neither counter moves any more (see 8.3 for the dropout). Put the batteries back and wait for the write that failed to be verified. Expected: writes rises by the successful attempt, failed writes stays where it is. It never goes down.
+3. Once ZHA shows the thermostat as unavailable it is skipped: neither counter moves any more (see 8.3 for the dropout). Put the batteries back and wait until the debug log has stopped writing to it. A thermostat that returns gets all its values again (settings, source, room temperature, target and mode). Expected: writes rises by one per `attr 0x...` line of that thermostat since the batteries went back in, and failed writes stays where it is. Neither ever goes down.
 
 ### 8.3 Dropouts
 
@@ -271,10 +271,13 @@ Wohnzimmer, window closed, room on heat. Note Window openings and Window open ti
 
 Needs S11: the thermostat reports `hvac_action`. If S11 shows that it does not, Heating time must read "Unavailable" in Wohnzimmer and Schlafzimmer; stop here.
 
+Heating time counts what the thermostats report, not valve-open time. Steps 1 to 4 run on Wohnzimmer (adaptive mode off); step 5 repeats the check on Schlafzimmer (adaptive mode on), where the known failure can show.
+
 1. Raise the room target about 3 K above the room temperature so that the thermostats call for heat. Watch `hvac_action` of the three living-room thermostats in Developer tools > States. Expected: Heating time grows, about once a minute, while at least one of them shows `heating`, and stands still while none does.
 2. Compare it with the history graph of the three `hvac_action` attributes over an hour: the hours in which any of them was `heating` match the growth of Heating time, give or take a minute or two. Two thermostats heating at once count once, not twice.
 3. Switch the room off, or open the window until `off_window`. Expected: Heating time stops growing as soon as the thermostats report that they do not heat.
 4. Take the batteries out of a thermostat that heats and wait until ZHA shows it as unavailable. Expected: if it was the only one heating, Heating time stops.
+5. **Adaptive mode on (Schlafzimmer).** Note Heating time of Schlafzimmer. Raise its target about 3 K above the room temperature and wait until the room has reached it and the valve has closed (the valve opening entity on the thermostat's device page at 0, the motor silent). Keep watching `hvac_action` of the thermostat in Developer tools > States for at least 30 minutes after that. Expected: `hvac_action` returns to `idle` and Heating time stands still. If `hvac_action` stays `heating` with the valve closed, Heating time keeps growing while nothing heats; note how long, and the valve opening at the time. That is the failure the research notes describe, and it makes the heating time an upper bound only.
 
 ### 8.6 Control deviation
 
@@ -284,13 +287,13 @@ Needs S11: the thermostat reports `hvac_action`. If S11 shows that it does not, 
 ### 8.7 Restart keeps the totals
 
 1. Note all totals of Wohnzimmer and Schlafzimmer (heating time, window openings, window open time, and the three counters of every thermostat). Restart Home Assistant. Expected: after the rooms have started every total is at least the value you noted. None starts at zero or falls. The control deviation does not carry over, it shows the value of the moment.
-2. Save the room settings of Wohnzimmer without a change (this reloads the integration). Expected: the totals are the same or higher.
+2. Reload Easy TRV (Easy TRV page > three dots > Reload). Saving the room settings without a change does not reload the integration, so do not use that. Expected: the totals are the same or higher.
 
 ### 8.8 A thermostat or a contact leaves
 
-1. Edit Wohnzimmer and remove one thermostat, submit both pages. Expected: its three sensors are gone from Settings > Devices & services > Entities, not marked as unavailable. The other sensors of the room stay.
-2. Edit Schlafzimmer and add that thermostat. Expected: it has three sensors on the Schlafzimmer device, with the entity ids `sensor.<trv>_writes`, `sensor.<trv>_write_failures` and `sensor.<trv>_dropouts` without a `_2` suffix. Note whether their values start at zero or continue from the totals of the old room: Home Assistant hands the last state of a removed sensor to a new sensor with the same entity id for up to 7 days. Then remove the thermostat from Schlafzimmer and add it to Wohnzimmer again: the sensors leave Schlafzimmer.
-3. Remove the test window contact from Wohnzimmer. Expected: Window openings and Window open time are gone. Add the contact again: they come back (note, as above, whether they start at zero).
+1. Note the three totals (writes, failed writes, dropouts) of one living-room thermostat. Edit Wohnzimmer and remove that thermostat, submit both pages. Expected: its three sensors are gone from Settings > Devices & services > Entities, not marked as unavailable. The other sensors of the room stay.
+2. Edit Schlafzimmer and add that thermostat. Expected: it has three sensors on the Schlafzimmer device, with the entity ids `sensor.<trv>_writes`, `sensor.<trv>_write_failures` and `sensor.<trv>_dropouts` without a `_2` suffix, and their values continue from the totals you noted (plus anything counted since). Home Assistant hands the last state of a removed sensor to a new sensor with the same entity id for up to 7 days, and the old sensors were removed minutes ago. They do not start at zero. Then remove the thermostat from Schlafzimmer and add it to Wohnzimmer again: the sensors leave Schlafzimmer and come back in Wohnzimmer, again continuing from their last values. (After more than 7 days they would start at zero; this is not part of the checklist.)
+3. Remove the test window contact from Wohnzimmer. Expected: Window openings and Window open time are gone. Add the contact again: they come back and continue from the values they had before, not from zero (same 7-day rule).
 
 ### 8.9 Long-term statistics and charts
 
@@ -376,13 +379,14 @@ Why: with the adaptive mode on, the thermostat ignores the hysteresis and adapts
 
 ### S11: Does the TRVZB report `hvac_action` in ZHA?
 
-Why: the heating time of a room is the time in which at least one of its thermostats reports `hvac_action: heating`. If the TRVZB reports no `hvac_action`, the heating time stays unavailable. If it reports one but never `heating`, the heating time stays at zero. Either way the other statistics are not affected.
+Why: the heating time of a room is the time in which at least one of its thermostats reports `hvac_action: heating`. If the TRVZB reports no `hvac_action`, the heating time stays unavailable. If it reports one but never `heating`, the heating time stays at zero. Either way the other statistics are not affected. A third case: it reports `heating` with the valve closed. The research notes say the TRVZB does that in adaptive mode (the default), where `running_state` is unreliable. The heating time is then longer than the time the valve was open.
 
 1. Open Developer tools > States and the climate entity of a living-room thermostat. Note whether the attribute `hvac_action` exists and what it shows at rest (for example `idle` or `off`). Read the Heating time sensor of the room: it is "Unavailable" as long as none of the room's thermostats has an `hvac_action`.
 2. Make the thermostat call for heat: the room on heat and a target about 3 K above the thermostat's temperature. Watch the attribute, the display and the valve (an audible motor, the heating symbol). Record whether `hvac_action` becomes `heating`, and how long after the valve starts to open.
 3. Lower the target again, or wait until it is reached. Record when `hvac_action` returns to `idle` or `off`.
 4. Record the Heating time of the room across this. Expected: it grows only while a thermostat shows `heating`. Read `hvac_action` of the other thermostats of the room too; they may differ.
 5. If the attribute does not exist, or never shows `heating`, note it in the table in section 11. The README says that the heating time stays unavailable then.
+6. **Adaptive mode on.** Repeat steps 2 to 4 on the Schlafzimmer thermostat (adaptive mode on by default there). After the target is reached, compare `hvac_action` with the valve opening entity on the thermostat's device page and with the motor and display. Record whether `hvac_action` returns to `idle` when the valve closes, or stays `heating` with the valve closed, and for how long. Steps 1 to 4, run on a living-room thermostat (adaptive mode off), are the comparison.
 
 ## 10. Where to look
 
@@ -441,3 +445,4 @@ The diagnostics contain the thermostats' IEEE addresses and entity ids. Remove o
 | S9: setpoint write in `auto` switches to heat (yes / no) | | |
 | S10: adaptive mode with the external sensor (±0.5 K over an evening, valve behaviour, swing) | | |
 | S11: `hvac_action` of the TRVZB in ZHA (attribute there / `heating` seen / delay) | | |
+| S11 and 8.5 with adaptive mode on (Schlafzimmer): `hvac_action` back to `idle` when the valve closed (yes / no), heating time grew with a closed valve (yes / no, how long) | | |
