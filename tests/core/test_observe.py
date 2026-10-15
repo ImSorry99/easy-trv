@@ -23,6 +23,7 @@ from custom_components.easy_trv.core.model import (
     SetSetpoint,
     SetSource,
     Signal,
+    Start,
     Tick,
     TrvAvailabilityChanged,
     TrvObserved,
@@ -190,7 +191,6 @@ def test_a_knob_turned_back_before_it_settles_adopts_nothing() -> None:
     st = started_with_setpoint(21.0)
     st, _ = logic().handle(reported(A, 22.0), AFTER, st)
     st, _ = logic().handle(reported(A, 21.0), AFTER + timedelta(seconds=1), st)
-    assert st.trvs[A].knob_pending == {}
     st, cmds = settle(st)
     assert executes(cmds) == []
     assert adopted_events(cmds) == []
@@ -215,7 +215,7 @@ def test_a_foreign_write_is_treated_like_a_report() -> None:
 
 
 def test_the_mode_knob_turned_to_off_switches_the_room_off() -> None:
-    st = started_with_setpoint(21.0)
+    st = with_trv(started_with_setpoint(21.0), A, reported_mode="heat")
     st, cmds = logic().handle(reported_mode(A, "off"), AFTER, st)
     assert of_type(cmds, ScheduleKnobSettle) == [
         ScheduleKnobSettle(A, "hvac_mode", 3.0)
@@ -280,12 +280,12 @@ def test_heat_after_auto_writes_the_room_values_once() -> None:
     assert st.trvs[A].reported_mode == "heat"
     assert executes(cmds) == [(A, SetHvacMode("heat")), (A, SetSetpoint(21.0))]
     assert of_type(cmds, ScheduleKnobSettle) == []
-    assert st.trvs[A].resync_pending == {"setpoint", "hvac_mode"}
+    assert st.trvs[A].resync_pending == {"setpoint": 21.0, "hvac_mode": "heat"}
     st, _ = logic().handle(reported(A, 17.0), later, st)
     assert st.trvs[A].knob_pending == {}
     st, _ = logic().handle(result(A, SetHvacMode("heat"), Ok()), later, st)
     st, _ = logic().handle(result(A, SetSetpoint(21.0), Ok()), later, st)
-    assert st.trvs[A].resync_pending == frozenset()
+    assert st.trvs[A].resync_pending == {}
     _, cmds = logic().handle(reported(A, 19.0), later, st)
     assert of_type(cmds, ScheduleKnobSettle)
 
@@ -336,7 +336,7 @@ def test_twelve_degrees_is_a_knob_turn_when_the_room_wants_twelve() -> None:
     st, _ = logic().handle(reported(A, 14.0), AFTER, st)
     st, _ = settle(st)
     assert st.setpoint == 14.0
-    st, _ = logic().handle(SetRoomSetpoint(12.0), AFTER, st)
+    st, _ = logic().handle(SetRoomSetpoint(12.0), SETTLED + timedelta(seconds=10), st)
     _, cmds = logic().handle(reported(B, 12.0), AFTER + timedelta(minutes=5), st)
     assert of_type(cmds, ScheduleKnobSettle) == []
 
@@ -392,13 +392,13 @@ def test_a_returning_thermostat_gets_mode_and_setpoint_and_adopts_nothing() -> N
     st, cmds = returning(st)
     assert (A, SetHvacMode("heat")) in executes(cmds)
     assert (A, SetSetpoint(21.0)) in executes(cmds)
-    assert st.trvs[A].resync_pending == {"setpoint", "hvac_mode"}
+    assert st.trvs[A].resync_pending == {"setpoint": 21.0, "hvac_mode": "heat"}
     assert st.trvs[A].written_recently["setpoint"][-1] == (21.0, LATER)
     st, cmds = logic().handle(reported(A, 18.0), LATER, st)
     assert of_type(cmds, ScheduleKnobSettle) == []
     assert st.trvs[A].reported_setpoint == 18.0
     st, _ = logic().handle(result(A, SetSetpoint(21.0), Ok()), LATER, st)
-    assert st.trvs[A].resync_pending == {"hvac_mode"}
+    assert st.trvs[A].resync_pending == {"hvac_mode": "heat"}
     _, cmds = logic().handle(reported(A, 19.0), LATER, st)
     assert of_type(cmds, ScheduleKnobSettle)
 
@@ -411,7 +411,7 @@ def test_the_resync_guard_ends_on_failure_and_mismatch_too() -> None:
         LATER,
         st,
     )
-    assert st.trvs[A].resync_pending == frozenset()
+    assert st.trvs[A].resync_pending == {}
 
 
 def test_a_mismatch_during_the_resync_is_a_failure_not_an_adoption() -> None:
@@ -431,7 +431,7 @@ def test_a_returning_thermostat_of_an_off_room_gets_off_and_no_setpoint() -> Non
     st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
     st, cmds = returning(st)
     assert writes(cmds) == [(A, SetHvacMode("off"))]
-    assert st.trvs[A].resync_pending == {"hvac_mode"}
+    assert st.trvs[A].resync_pending == {"hvac_mode": "off"}
 
 
 def test_a_returning_thermostat_gets_nothing_in_a_hold_or_on_its_schedule() -> None:
@@ -447,7 +447,7 @@ def test_a_returning_thermostat_gets_nothing_in_a_hold_or_on_its_schedule() -> N
 def test_a_thermostat_going_away_forgets_the_resync_guard() -> None:
     st, _ = returning(started_with_setpoint(21.0))
     st, _ = logic().handle(TrvAvailabilityChanged(A, available=False), LATER, st)
-    assert st.trvs[A].resync_pending == frozenset()
+    assert st.trvs[A].resync_pending == {}
 
 
 def test_observations_during_a_hold_update_the_wish_and_write_nothing() -> None:
@@ -490,7 +490,7 @@ def test_mismatch_with_a_foreign_value_is_an_adoption_not_a_retry() -> None:
 
 
 def test_mismatch_with_a_foreign_mode_is_an_adoption_too() -> None:
-    st = started_with_setpoint(21.0)
+    st = with_trv(started_with_setpoint(21.0), A, reported_mode="heat")
     mismatch = Mismatch(frozenset({4}), 0, observed="off")
     st, cmds = logic().handle(result(A, SetHvacMode("heat"), mismatch), AFTER, st)
     assert of_type(cmds, ScheduleRetry) == []
@@ -560,7 +560,7 @@ def test_nothing_is_adopted_for_a_settled_knob_that_is_gone_or_unusable() -> Non
 
 
 def test_a_mode_turn_that_the_room_overtook_adopts_nothing() -> None:
-    st = started_with_setpoint(21.0)
+    st = with_trv(started_with_setpoint(21.0), A, reported_mode="heat")
     st, _ = logic().handle(reported_mode(A, "off"), AFTER, st)
     held = replace(st, window_open=True)
     after, cmds = settle(held, capability="hvac_mode")
@@ -585,3 +585,158 @@ def test_reports_without_a_usable_value_are_ignored() -> None:
         after, cmds = logic().handle(event, AFTER, st)
         assert after == st
         assert of_type(cmds, ScheduleKnobSettle) == []
+
+
+# --- fix round 1: stale reports, converging knobs, tagged guard ----------
+
+
+def test_a_stale_report_while_the_room_is_off_is_not_a_knob_turn() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
+    st, cmds = logic().handle(SetRoomSetpoint(23.0), AFTER, st)
+    assert writes(cmds) == []
+    st, cmds = logic().handle(reported(A, 21.0), AFTER + timedelta(minutes=5), st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert st.mode is RoomMode.OFF
+    assert st.setpoint == 23.0
+    assert st.trvs[A].reported_setpoint == 21.0
+
+
+def test_a_stale_report_during_a_hold_is_not_a_knob_turn() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(SetRoomPreset(Preset.FROST), T0, st)
+    st = replace(st, window_open=True)
+    st, _ = logic().handle(SetRoomSetpoint(23.0), AFTER, st)
+    st, cmds = logic().handle(reported(A, 7.0), AFTER + timedelta(minutes=5), st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert (st.setpoint, st.preset) == (23.0, Preset.NONE)
+    st = started_with_setpoint(21.0)
+    st = replace(st, window_open=True)
+    st, _ = logic().handle(SetRoomSetpoint(23.0), AFTER, st)
+    st, cmds = logic().handle(reported(A, 21.0), AFTER + timedelta(minutes=5), st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert st.setpoint == 23.0
+
+
+def test_leaving_the_window_phase_writes_the_room_value_instead_of_adopting() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 12.0), AFTER, st)
+    assert st.trvs[A].note is Note.WINDOW_PHASE
+    st, cmds = logic().handle(SetRoomSetpoint(23.0), AFTER, st)
+    assert executes(cmds) == [(B, SetSetpoint(23.0))]
+    back = AFTER + timedelta(minutes=5)
+    st, cmds = logic().handle(reported(A, 21.0), back, st)
+    assert st.trvs[A].note is None
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert executes(cmds) == [(A, SetSetpoint(23.0))]
+    assert st.setpoint == 23.0
+    assert st.trvs[A].resync_pending == {"setpoint": 23.0}
+
+
+def test_leaving_the_window_phase_for_the_room_value_writes_nothing() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 12.0), AFTER, st)
+    st, cmds = logic().handle(reported(A, 21.0), AFTER + timedelta(minutes=5), st)
+    assert executes(cmds) == []
+    assert st.trvs[A].note is None
+
+
+def test_leaving_the_window_phase_while_off_writes_nothing() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 12.0), AFTER, st)
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), AFTER, st)
+    st, cmds = logic().handle(reported(A, 19.0), AFTER + timedelta(minutes=5), st)
+    assert writes(cmds) == []
+    assert of_type(cmds, ScheduleKnobSettle) == []
+
+
+def test_the_first_report_of_a_thermostat_is_only_recorded() -> None:
+    st, _ = started()
+    st, cmds = logic().handle(reported(A, 22.0), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert st.trvs[A].reported_setpoint == 22.0
+    assert st.setpoint is None
+    st, cmds = logic().handle(reported(A, 23.0), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == [ScheduleKnobSettle(A, "setpoint", 3.0)]
+    st, cmds = logic().handle(reported_mode(B, "off"), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert st.trvs[B].reported_mode == "off"
+    st, cmds = logic().handle(reported_mode(B, "heat"), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == [
+        ScheduleKnobSettle(B, "hvac_mode", 3.0)
+    ]
+
+
+def test_a_stale_mode_report_is_not_a_knob_turn() -> None:
+    st = started_with_setpoint(21.0)
+    st = with_trv(st, A, reported_mode="heat")
+    st = replace(st, mode=RoomMode.OFF)
+    st, cmds = logic().handle(reported_mode(A, "heat"), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert st.mode is RoomMode.OFF
+
+
+def test_a_report_is_compared_with_the_newer_of_report_and_write() -> None:
+    st = started_with_setpoint(21.0)
+    st = with_trv(st, A, reported_setpoint=19.0)
+    # The write (21.0 at T0) is newer than a report that carries no time.
+    later = T0 + timedelta(minutes=10)
+    _, cmds = logic().handle(reported(A, 21.0), later, st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    st, cmds = logic().handle(reported(A, 19.0), later, st)
+    assert of_type(cmds, ScheduleKnobSettle)
+    # A report newer than the write is what the thermostat shows now.
+    _, cmds = logic().handle(reported(A, 19.0), later + timedelta(minutes=10), st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+
+
+def test_two_knobs_within_the_debounce_leave_every_thermostat_at_the_last_one() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 22.0), AFTER, st)
+    st, _ = logic().handle(reported(B, 23.0), AFTER + timedelta(seconds=1), st)
+    st, _ = settle(st, A, at=AFTER + timedelta(seconds=3))
+    assert st.setpoint == 22.0
+    st, cmds = settle(st, B, at=AFTER + timedelta(seconds=4))
+    assert st.setpoint == 23.0
+    assert st.setpoint_source == f"device:{B}"
+    assert executes(cmds) == [(A, SetSetpoint(23.0)), (B, SetSetpoint(23.0))]
+    for trv in (A, B):
+        assert st.trvs[trv].written_recently["setpoint"][-1][0] == 23.0
+
+
+def test_an_adoption_writes_to_thermostats_that_are_out_of_line() -> None:
+    st = started_with_setpoint(21.0)
+    st = with_trv(st, B, reported_setpoint=19.0, reported_at={"setpoint": LATER})
+    st, _ = logic().handle(reported(A, 22.0), LATER, st)
+    st, cmds = settle(st, at=LATER + timedelta(seconds=3))
+    assert executes(cmds) == [(B, SetSetpoint(22.0))]
+    # Everything in line: a turn back to the room value changes nothing.
+    st, _ = logic().handle(reported(A, 21.0), LATER + timedelta(seconds=10), st)
+    st = with_trv(st, B, reported_setpoint=22.0, reported_at={"setpoint": LATER})
+    st, _ = logic().handle(SetRoomSetpoint(21.0), LATER + timedelta(seconds=11), st)
+    assert st.setpoint == 21.0
+
+
+def test_only_the_result_of_the_resync_write_releases_the_guard() -> None:
+    st, _ = returning(started_with_setpoint(21.0))
+    assert st.trvs[A].resync_pending == {"setpoint": 21.0, "hvac_mode": "heat"}
+    st, _ = logic().handle(result(A, SetSetpoint(20.0), Ok()), LATER, st)
+    assert st.trvs[A].resync_pending == {"setpoint": 21.0, "hvac_mode": "heat"}
+    st, cmds = logic().handle(reported(A, 18.0), LATER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    st, _ = logic().handle(result(A, SetSetpoint(21.0), Ok()), LATER, st)
+    assert st.trvs[A].resync_pending == {"hvac_mode": "heat"}
+    st, _ = logic().handle(result(A, SetHvacMode("off"), Ok()), LATER, st)
+    assert st.trvs[A].resync_pending == {"hvac_mode": "heat"}
+
+
+def test_what_the_thermostats_reported_at_start_is_the_known_value() -> None:
+    reported_at_start = {A: (19.0, "heat"), B: (19.0, "heat")}
+    st, _ = logic().handle(
+        Start((), {A: True, B: True}, reported_at_start), T0, RoomState.initial(CFG)
+    )
+    assert st.trvs[A].reported_at == {"setpoint": T0, "hvac_mode": T0}
+    _, cmds = logic().handle(reported(A, 19.0), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    _, cmds = logic().handle(reported(A, 20.0), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle)

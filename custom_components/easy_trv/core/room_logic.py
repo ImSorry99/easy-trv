@@ -325,7 +325,7 @@ class RoomLogic:
                 current,
                 available=False,
                 health=TrvHealth.UNAVAILABLE,
-                resync_pending=frozenset(),
+                resync_pending={},
             )
             return self._with_trv(state, trv, gone), []
         back = replace(current, available=True)
@@ -371,10 +371,8 @@ class RoomLogic:
             known = state.trvs[event.trv]
             guarded = event.capability in known.resync_pending
             if guarded:
-                known = replace(
-                    known, resync_pending=known.resync_pending - {event.capability}
-                )
-                state = self._with_trv(state, event.trv, known)
+                released = observe.release_resync(known, event.capability, event.intent)
+                state = self._with_trv(state, event.trv, released)
         match outcome:
             case Ok():
                 return self._on_ok(event, now, state)

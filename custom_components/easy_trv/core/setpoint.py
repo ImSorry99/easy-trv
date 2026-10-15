@@ -255,10 +255,17 @@ def reconcile_start(
     if cfg.setpoint_range is None:
         return state, []
     trvs = dict(state.trvs)
+    stamps = {
+        capability_of(SetSetpoint(0.0)): now,
+        capability_of(SetHvacMode("heat")): now,
+    }
     for trv, (setpoint, mode) in reported.items():
         if trv in trvs:
             trvs[trv] = replace(
-                trvs[trv], reported_setpoint=setpoint, reported_mode=mode
+                trvs[trv],
+                reported_setpoint=setpoint,
+                reported_mode=mode,
+                reported_at=stamps,
             )
     state = replace(state, trvs=trvs)
     if state.setpoint is not None:

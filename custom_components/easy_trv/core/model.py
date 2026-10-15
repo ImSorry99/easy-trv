@@ -261,10 +261,12 @@ class TrvState:
     )
     # capability -> last observed value awaiting the knob debounce
     knob_pending: Mapping[str, float | str] = field(default_factory=dict)
-    # capabilities written to bring the thermostat in line (it came back, or left
-    # its schedule) whose result is still outstanding: reports of them are not
-    # adopted meanwhile, they may still show the old value
-    resync_pending: frozenset[str] = frozenset()
+    # capability -> value written to bring the thermostat in line (it came back,
+    # or left its schedule or window phase) whose result is still outstanding:
+    # reports of it are not adopted meanwhile, they may still show the old value
+    resync_pending: Mapping[str, float | str] = field(default_factory=dict)
+    # capability -> when reported_setpoint / reported_mode was last reported
+    reported_at: Mapping[str, datetime] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
