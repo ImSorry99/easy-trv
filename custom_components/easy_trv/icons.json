@@ -14,6 +14,22 @@
         "state": {
           "error": "mdi:radiator-off"
         }
+      },
+      "room_state": {
+        "default": "mdi:radiator",
+        "state": {
+          "fault": "mdi:alert-circle",
+          "off_manual": "mdi:radiator-off",
+          "off_window": "mdi:window-open-variant",
+          "off_outdoor": "mdi:sun-thermometer",
+          "off_away": "mdi:home-export-outline",
+          "window_pending": "mdi:timer-sand",
+          "emergency": "mdi:thermometer-alert",
+          "restricted": "mdi:alert",
+          "boost": "mdi:fire",
+          "frost": "mdi:snowflake-thermometer",
+          "heating": "mdi:radiator"
+        }
       }
     }
   }

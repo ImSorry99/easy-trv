@@ -339,15 +339,79 @@ def test_the_silent_contact_issue_says_what_stays_as_it_is() -> None:
     de = load(DE)["issues"]["window_contact_unavailable"]
     assert de["title"] == "Fensterkontakt im Raum {room} nicht erreichbar"
     assert de["description"] == (
-        "{contacts} meldet seit mindestens 10 Minuten keinen Zustand. Easy TRV "
-        "behandelt den Kontakt so, wie er zuletzt war, ein nie gesehener Kontakt "
+        "Seit mindestens 10 Minuten meldet im Raum {room} ein Fensterkontakt "
+        "keinen Zustand. Gerade ohne Meldung: {contacts}. Easy TRV behandelt "
+        "einen solchen Kontakt so, wie er zuletzt war, ein nie gesehener Kontakt "
         "gilt als geschlossen. Ein offenes Fenster schaltet die Heizung deshalb "
-        "gerade nicht ab. Prüfe Batterie und Funkverbindung des Kontakts."
+        "gerade nicht ab. Prüfe Batterie und Funkverbindung."
     )
     en = load(EN)["issues"]["window_contact_unavailable"]
-    assert "at least 10 minutes" in en["description"]
-    assert "never seen" in en["description"]
-    assert "does not switch the heating off" in en["description"]
+    assert en["title"] == "Window contact in {room} is not reachable"
+    assert en["description"] == (
+        "For at least 10 minutes a window contact in {room} has not reported a "
+        "state. Currently silent: {contacts}. Easy TRV treats such a contact as "
+        "it was last, and one never seen counts as closed, so an open window "
+        "does not switch the heating off right now. Check the contact's battery "
+        "and radio connection."
+    )
+
+
+STATE_NAMES_EN = {
+    "fault": "Fault",
+    "off_manual": "Off (manual)",
+    "off_window": "Off: window/door open",
+    "off_outdoor": "Off: outdoor temperature",
+    "off_away": "Off: away",
+    "window_pending": "Window open, switching off soon",
+    "emergency": "Emergency mode",
+    "restricted": "Restricted",
+    "boost": "Manual (boost)",
+    "frost": "Frost protection",
+    "heating": "Heating",
+}
+STATE_NAMES_DE = {
+    "fault": "Störung",
+    "off_manual": "Aus (manuell)",
+    "off_window": "Aus: Fenster/Tür offen",
+    "off_outdoor": "Aus: Außentemperatur",
+    "off_away": "Aus: Abwesenheit",
+    "window_pending": "Fenster offen, schaltet gleich ab",
+    "emergency": "Notbetrieb",
+    "restricted": "Eingeschränkt",
+    "boost": "Handbetrieb (Boost)",
+    "frost": "Frostschutz",
+    "heating": "Heizbetrieb",
+}
+
+
+def test_the_heating_state_sensor_is_named_and_its_states_translated() -> None:
+    en = load(EN)["entity"]["sensor"]["room_state"]
+    de = load(DE)["entity"]["sensor"]["room_state"]
+    assert en["name"] == "Heating state"
+    assert de["name"] == "Heizungszustand"
+    # The states come in the order of the sensor's options.
+    assert list(en["state"].items()) == list(STATE_NAMES_EN.items())
+    assert de["state"] == STATE_NAMES_DE
+    assert en["state_attributes"] == {
+        "reasons": {"name": "Reasons"},
+        "since": {"name": "Since"},
+        "window_off_at": {"name": "Switches off at"},
+        "thermostats": {"name": "Deviating thermostats"},
+        "silent_contacts": {"name": "Silent window contacts"},
+    }
+    assert de["state_attributes"] == {
+        "reasons": {"name": "Gründe"},
+        "since": {"name": "Seit"},
+        "window_off_at": {"name": "Abschaltung um"},
+        "thermostats": {"name": "Abweichende Thermostate"},
+        "silent_contacts": {"name": "Stumme Fensterkontakte"},
+    }
+
+
+def test_the_status_sensor_name_says_what_it_is() -> None:
+    # Both sensors are found by name; the entity ids did not change.
+    assert load(EN)["entity"]["sensor"]["room_status"]["name"] == "Heating status"
+    assert load(DE)["entity"]["sensor"]["room_status"]["name"] == "Heizungsstatus"
 
 
 def test_the_window_hold_texts_say_that_all_thermostats_go_off() -> None:

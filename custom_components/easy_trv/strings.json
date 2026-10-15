@@ -150,11 +150,44 @@
     },
     "sensor": {
       "room_status": {
-        "name": "Status",
+        "name": "Heating status",
         "state": {
           "ok": "OK",
           "degraded": "Degraded",
           "error": "Error"
+        }
+      },
+      "room_state": {
+        "name": "Heating state",
+        "state": {
+          "fault": "Fault",
+          "off_manual": "Off (manual)",
+          "off_window": "Off: window/door open",
+          "off_outdoor": "Off: outdoor temperature",
+          "off_away": "Off: away",
+          "window_pending": "Window open, switching off soon",
+          "emergency": "Emergency mode",
+          "restricted": "Restricted",
+          "boost": "Manual (boost)",
+          "frost": "Frost protection",
+          "heating": "Heating"
+        },
+        "state_attributes": {
+          "reasons": {
+            "name": "Reasons"
+          },
+          "since": {
+            "name": "Since"
+          },
+          "window_off_at": {
+            "name": "Switches off at"
+          },
+          "thermostats": {
+            "name": "Deviating thermostats"
+          },
+          "silent_contacts": {
+            "name": "Silent window contacts"
+          }
         }
       }
     }
@@ -194,7 +227,7 @@
     },
     "window_contact_unavailable": {
       "title": "Window contact in {room} is not reachable",
-      "description": "{contacts} has not reported a state for at least 10 minutes. Easy TRV treats the contact as it was last, and a contact that was never seen counts as closed. An open window therefore does not switch the heating off right now. Check the contact's battery and radio connection."
+      "description": "For at least 10 minutes a window contact in {room} has not reported a state. Currently silent: {contacts}. Easy TRV treats such a contact as it was last, and one never seen counts as closed, so an open window does not switch the heating off right now. Check the contact's battery and radio connection."
     },
     "schedule_thermostat_off": {
       "title": "{thermostat} in {room} stays off after the window was closed",

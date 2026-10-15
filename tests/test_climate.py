@@ -640,7 +640,11 @@ async def test_no_climate_entity_without_setpoint_capability(
     assert hass.states.get(CLIMATE) is None
     assert hass.states.get("sensor.living_heating_status").state == "ok"
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert [e.domain for e in entities] == ["sensor"]
+    # The room keeps its two sensors, only the thermostat entity is missing.
+    assert sorted(e.entity_id for e in entities) == [
+        "sensor.living_heating_state",
+        "sensor.living_heating_status",
+    ]
     controller = next(iter(entry.runtime_data.rooms.values()))
     assert controller.effective_range is None
 

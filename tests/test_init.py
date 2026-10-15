@@ -94,14 +94,17 @@ async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
     )
     assert device is not None
     assert device.name == "Living heating"
-    # A thermostat and a status sensor per room, attached to the room's subentry.
+    # A thermostat, a status and a state sensor per room, attached to the room's
+    # subentry.
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     by_id = {e.entity_id: e for e in entities}
     assert by_id.keys() == {
         "climate.living_heating",
         "sensor.living_heating_status",
+        "sensor.living_heating_state",
     }
     assert by_id["sensor.living_heating_status"].unique_id == f"{subentry_id}_status"
+    assert by_id["sensor.living_heating_state"].unique_id == f"{subentry_id}_state"
     assert by_id["climate.living_heating"].unique_id == f"{subentry_id}_climate"
     assert {e.config_subentry_id for e in entities} == {subentry_id}
     assert entry.runtime_data.rooms.keys() == {subentry_id}

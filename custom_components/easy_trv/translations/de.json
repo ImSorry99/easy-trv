@@ -150,11 +150,44 @@
     },
     "sensor": {
       "room_status": {
-        "name": "Status",
+        "name": "Heizungsstatus",
         "state": {
           "ok": "OK",
           "degraded": "Eingeschränkt",
           "error": "Fehler"
+        }
+      },
+      "room_state": {
+        "name": "Heizungszustand",
+        "state": {
+          "fault": "Störung",
+          "off_manual": "Aus (manuell)",
+          "off_window": "Aus: Fenster/Tür offen",
+          "off_outdoor": "Aus: Außentemperatur",
+          "off_away": "Aus: Abwesenheit",
+          "window_pending": "Fenster offen, schaltet gleich ab",
+          "emergency": "Notbetrieb",
+          "restricted": "Eingeschränkt",
+          "boost": "Handbetrieb (Boost)",
+          "frost": "Frostschutz",
+          "heating": "Heizbetrieb"
+        },
+        "state_attributes": {
+          "reasons": {
+            "name": "Gründe"
+          },
+          "since": {
+            "name": "Seit"
+          },
+          "window_off_at": {
+            "name": "Abschaltung um"
+          },
+          "thermostats": {
+            "name": "Abweichende Thermostate"
+          },
+          "silent_contacts": {
+            "name": "Stumme Fensterkontakte"
+          }
         }
       }
     }
@@ -194,7 +227,7 @@
     },
     "window_contact_unavailable": {
       "title": "Fensterkontakt im Raum {room} nicht erreichbar",
-      "description": "{contacts} meldet seit mindestens 10 Minuten keinen Zustand. Easy TRV behandelt den Kontakt so, wie er zuletzt war, ein nie gesehener Kontakt gilt als geschlossen. Ein offenes Fenster schaltet die Heizung deshalb gerade nicht ab. Prüfe Batterie und Funkverbindung des Kontakts."
+      "description": "Seit mindestens 10 Minuten meldet im Raum {room} ein Fensterkontakt keinen Zustand. Gerade ohne Meldung: {contacts}. Easy TRV behandelt einen solchen Kontakt so, wie er zuletzt war, ein nie gesehener Kontakt gilt als geschlossen. Ein offenes Fenster schaltet die Heizung deshalb gerade nicht ab. Prüfe Batterie und Funkverbindung."
     },
     "schedule_thermostat_off": {
       "title": "{thermostat} in {room} bleibt nach dem Lüften aus",
