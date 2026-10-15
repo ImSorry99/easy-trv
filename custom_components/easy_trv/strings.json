@@ -157,14 +157,6 @@
       }
     },
     "sensor": {
-      "room_status": {
-        "name": "Heating status",
-        "state": {
-          "ok": "OK",
-          "degraded": "Degraded",
-          "error": "Error"
-        }
-      },
       "room_state": {
         "name": "Heating state",
         "state": {
@@ -185,6 +177,9 @@
           "heating": "Heating"
         },
         "state_attributes": {
+          "hint": {
+            "name": "Hint"
+          },
           "reasons": {
             "name": "Reasons"
           },
@@ -199,6 +194,21 @@
           },
           "silent_contacts": {
             "name": "Silent window contacts"
+          },
+          "active_sensor": {
+            "name": "Active sensor"
+          },
+          "source": {
+            "name": "Temperature source"
+          },
+          "setpoint_source": {
+            "name": "Setpoint source"
+          },
+          "in_sync": {
+            "name": "In sync"
+          },
+          "last_error": {
+            "name": "Last error"
           }
         }
       }
@@ -380,6 +390,19 @@
         "set_frost_temperature": "Frost protection temperature",
         "set_setpoint": "Target temperature",
         "set_hvac_mode": "Mode"
+      }
+    },
+    "hint": {
+      "options": {
+        "fault": "{name}: error",
+        "unavailable": "{name} not reachable",
+        "contact": "{name} reports nothing ({why})",
+        "unsupported": "{name}: lacks a function ({functions})",
+        "schedule": "{name} runs its own schedule",
+        "window_phase": "{name}: own window detection active",
+        "why_unavailable": "unavailable",
+        "why_unknown": "unknown",
+        "why_missing": "does not exist"
       }
     },
     "outdoor_cutoff": {

@@ -212,12 +212,9 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["entity"]["climate"]) == {"room"}
     assert set(data["entity"]["climate"]["room"]) == {"state"}
     assert set(data["entity"]["climate"]["room"]["state"]) == {"auto"}
-    # Existing sections of the earlier tasks stay in place.
-    assert set(data["entity"]["sensor"]["room_status"]["state"]) == {
-        "ok",
-        "degraded",
-        "error",
-    }
+    # The status sensor is merged into the heating state sensor.
+    assert set(data["entity"]["sensor"]) == {"room_state"}
+    assert set(data["selector"]["hint"]["options"]) == HINT_KEYS
     assert set(data["issues"]) == {
         "trv_unreachable",
         "trv_firmware",
@@ -241,7 +238,15 @@ def test_translation_keys_pass_the_hassfest_rule(path: Path) -> None:
     for platform in data["entity"].values():
         for entity in platform.values():
             keys.extend(entity.get("state", {}))
-    assert {"global", "leave", "0_2", "1_0", "ok", "trv_unreachable"} <= set(keys)
+    assert {
+        "global",
+        "leave",
+        "0_2",
+        "1_0",
+        "restricted_window_phase",
+        "why_unavailable",
+        "trv_unreachable",
+    } <= set(keys)
     assert [key for key in keys if not TRANSLATION_KEY.match(key)] == []
 
 
@@ -264,11 +269,6 @@ def test_german_translation_is_actually_german() -> None:
         "custom": "Eigener Raum",
     }
     assert de["entity"]["climate"]["room"] == {"state": {"auto": "Frostschutz"}}
-    assert de["entity"]["sensor"]["room_status"]["state"] == {
-        "ok": "OK",
-        "degraded": "Eingeschränkt",
-        "error": "Fehler",
-    }
 
 
 def test_frost_protection_is_the_label_of_the_auto_mode() -> None:
@@ -408,6 +408,57 @@ STATE_NAMES_DE = {
 }
 
 
+ATTRIBUTE_NAMES_EN = {
+    "hint": "Hint",
+    "reasons": "Reasons",
+    "since": "Since",
+    "window_off_at": "Switches off at",
+    "thermostats": "Deviating thermostats",
+    "silent_contacts": "Silent window contacts",
+    "active_sensor": "Active sensor",
+    "source": "Temperature source",
+    "setpoint_source": "Setpoint source",
+    "in_sync": "In sync",
+    "last_error": "Last error",
+}
+ATTRIBUTE_NAMES_DE = {
+    "hint": "Hinweis",
+    "reasons": "Gründe",
+    "since": "Seit",
+    "window_off_at": "Abschaltung um",
+    "thermostats": "Abweichende Thermostate",
+    "silent_contacts": "Stumme Fensterkontakte",
+    "active_sensor": "Aktiver Sensor",
+    "source": "Temperaturquelle",
+    "setpoint_source": "Sollwert-Quelle",
+    "in_sync": "Synchron",
+    "last_error": "Letzter Fehler",
+}
+HINT_EN = {
+    "fault": "{name}: error",
+    "unavailable": "{name} not reachable",
+    "contact": "{name} reports nothing ({why})",
+    "unsupported": "{name}: lacks a function ({functions})",
+    "schedule": "{name} runs its own schedule",
+    "window_phase": "{name}: own window detection active",
+    "why_unavailable": "unavailable",
+    "why_unknown": "unknown",
+    "why_missing": "does not exist",
+}
+HINT_DE = {
+    "fault": "{name}: Fehler",
+    "unavailable": "{name} nicht erreichbar",
+    "contact": "{name} meldet nichts ({why})",
+    "unsupported": "{name}: Funktion fehlt ({functions})",
+    "schedule": "{name} läuft im eigenen Wochenplan",
+    "window_phase": "{name}: eigene Fenstererkennung aktiv",
+    "why_unavailable": "nicht verfügbar",
+    "why_unknown": "unbekannt",
+    "why_missing": "gibt es nicht",
+}
+HINT_KEYS = set(HINT_EN)
+
+
 def test_the_heating_state_sensor_is_named_and_its_states_translated() -> None:
     en = load(EN)["entity"]["sensor"]["room_state"]
     de = load(DE)["entity"]["sensor"]["room_state"]
@@ -416,26 +467,24 @@ def test_the_heating_state_sensor_is_named_and_its_states_translated() -> None:
     # The states come in the order of the sensor's options.
     assert list(en["state"].items()) == list(STATE_NAMES_EN.items())
     assert de["state"] == STATE_NAMES_DE
-    assert en["state_attributes"] == {
-        "reasons": {"name": "Reasons"},
-        "since": {"name": "Since"},
-        "window_off_at": {"name": "Switches off at"},
-        "thermostats": {"name": "Deviating thermostats"},
-        "silent_contacts": {"name": "Silent window contacts"},
-    }
-    assert de["state_attributes"] == {
-        "reasons": {"name": "Gründe"},
-        "since": {"name": "Seit"},
-        "window_off_at": {"name": "Abschaltung um"},
-        "thermostats": {"name": "Abweichende Thermostate"},
-        "silent_contacts": {"name": "Stumme Fensterkontakte"},
-    }
+    assert list(en["state_attributes"].items()) == [
+        (key, {"name": name}) for key, name in ATTRIBUTE_NAMES_EN.items()
+    ]
+    assert list(de["state_attributes"].items()) == [
+        (key, {"name": name}) for key, name in ATTRIBUTE_NAMES_DE.items()
+    ]
 
 
-def test_the_status_sensor_name_says_what_it_is() -> None:
-    # Both sensors are found by name; the entity ids did not change.
-    assert load(EN)["entity"]["sensor"]["room_status"]["name"] == "Heating status"
-    assert load(DE)["entity"]["sensor"]["room_status"]["name"] == "Heizungsstatus"
+def test_the_status_sensor_is_gone_from_the_translations() -> None:
+    for path in (STRINGS, EN, DE):
+        assert "room_status" not in load(path)["entity"]["sensor"]
+    icons = json.loads((INTEGRATION / "icons.json").read_text())
+    assert "room_status" not in icons["entity"]["sensor"]
+
+
+@pytest.mark.parametrize(("path", "phrases"), [(EN, HINT_EN), (DE, HINT_DE)])
+def test_the_hint_phrases_are_translated(path: Path, phrases: dict[str, str]) -> None:
+    assert load(path)["selector"]["hint"]["options"] == phrases
 
 
 def test_the_window_hold_texts_say_that_all_thermostats_go_off() -> None:

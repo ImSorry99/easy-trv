@@ -9,12 +9,6 @@
       }
     },
     "sensor": {
-      "room_status": {
-        "default": "mdi:radiator",
-        "state": {
-          "error": "mdi:radiator-off"
-        }
-      },
       "room_state": {
         "default": "mdi:radiator",
         "state": {

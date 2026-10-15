@@ -78,16 +78,16 @@ def entry(hass):
 # --- Setup ----------------------------------------------------------------
 
 
-async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
+async def test_setup_creates_room_device_and_state_sensor(hass, entry) -> None:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
     await settle(hass)
 
     assert entry.state is ConfigEntryState.LOADED
-    state = hass.states.get("sensor.living_heating_status")
+    state = hass.states.get("sensor.living_heating_state")
     assert state is not None
-    assert state.state == "ok"
+    assert state.state == "heating"
     assert state.attributes["source"] == "external"
 
     subentry_id = next(iter(entry.subentries))
@@ -96,16 +96,10 @@ async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
     )
     assert device is not None
     assert device.name == "Living heating"
-    # A thermostat, a status and a state sensor per room, attached to the room's
-    # subentry.
+    # A thermostat and a state sensor per room, attached to the room's subentry.
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     by_id = {e.entity_id: e for e in entities}
-    assert by_id.keys() == {
-        "climate.living_heating",
-        "sensor.living_heating_status",
-        "sensor.living_heating_state",
-    }
-    assert by_id["sensor.living_heating_status"].unique_id == f"{subentry_id}_status"
+    assert by_id.keys() == {"climate.living_heating", "sensor.living_heating_state"}
     assert by_id["sensor.living_heating_state"].unique_id == f"{subentry_id}_state"
     assert by_id["climate.living_heating"].unique_id == f"{subentry_id}_climate"
     assert {e.config_subentry_id for e in entities} == {subentry_id}
@@ -116,46 +110,55 @@ async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
     assert zha_issue(hass) is None
 
 
-async def test_setup_removes_the_operating_mode_select_of_0_4_0(hass, entry) -> None:
+async def test_setup_removes_the_retired_entities(hass, entry) -> None:
     registry = er.async_get(hass)
     subentry_id = next(iter(entry.subentries))
-    orphan = registry.async_get_or_create(
-        "select",
-        DOMAIN,
-        f"{subentry_id}_operating_mode",
-        config_entry=entry,
-        config_subentry_id=subentry_id,
-        suggested_object_id="living_heating_mode",
-    )
-    # Neighbours that must stay: a select of another integration, and an
-    # entity of this one (not a select) whose unique id merely looks similar.
-    lookalike = registry.async_get_or_create(
-        "sensor",
-        DOMAIN,
-        f"{subentry_id}_operating_mode",
-        config_entry=entry,
-        config_subentry_id=subentry_id,
-        suggested_object_id="living_heating_lookalike",
-    )
+
+    def register(domain, platform, suffix, object_id, owner=entry):
+        return registry.async_get_or_create(
+            domain,
+            platform,
+            f"{subentry_id}_{suffix}",
+            config_entry=owner,
+            config_subentry_id=subentry_id if owner is entry else None,
+            suggested_object_id=object_id,
+        )
+
+    # What 0.4.0 and 0.5.0 left behind and no platform provides now: the
+    # operating mode select, and the status sensor.
+    select = register("select", DOMAIN, "operating_mode", "living_heating_mode")
+    status = register("sensor", DOMAIN, "status", "living_heating_status")
+    # Neighbours that must stay: entities of this integration whose domain or
+    # unique id merely look similar (the state sensor included), and the same
+    # unique ids of another integration.
+    sensor_like_select = register("sensor", DOMAIN, "operating_mode", "lookalike")
+    select_like_status = register("select", DOMAIN, "status", "other_lookalike")
+    state = register("sensor", DOMAIN, "state", "living_heating_state")
     other_entry = MockConfigEntry(domain="other")
     other_entry.add_to_hass(hass)
-    foreign = registry.async_get_or_create(
-        "select",
-        "other",
-        f"{subentry_id}_operating_mode",
-        config_entry=other_entry,
-        suggested_object_id="foreign",
+    foreign_select = register(
+        "select", "other", "operating_mode", "foreign_mode", other_entry
     )
-    assert registry.async_get(orphan.entity_id) is not None
+    foreign_status = register("sensor", "other", "status", "foreign", other_entry)
+    for retired in (select, status):
+        assert registry.async_get(retired.entity_id) is not None
 
     await start(hass, entry)
 
-    assert registry.async_get(orphan.entity_id) is None
-    assert hass.states.get(orphan.entity_id) is None
-    assert registry.async_get(foreign.entity_id) is not None
-    assert registry.async_get(lookalike.entity_id) is not None
+    for retired in (select, status):
+        assert registry.async_get(retired.entity_id) is None
+        assert hass.states.get(retired.entity_id) is None
+    for kept in (
+        sensor_like_select,
+        select_like_status,
+        foreign_select,
+        foreign_status,
+    ):
+        assert registry.async_get(kept.entity_id) is not None
+    # The state sensor keeps its registry entry and is live.
+    assert registry.async_get(state.entity_id).id == state.id
+    assert hass.states.get(state.entity_id).state == "heating"
     assert registry.async_get("climate.living_heating") is not None
-    assert registry.async_get("sensor.living_heating_status") is not None
 
 
 async def test_rooms_start_only_when_home_assistant_has_started(
@@ -164,7 +167,7 @@ async def test_rooms_start_only_when_home_assistant_has_started(
     hass.set_state(CoreState.starting)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await settle(hass)
-    state = hass.states.get("sensor.living_heating_status")
+    state = hass.states.get("sensor.living_heating_state")
     assert state is not None
     assert "source" not in state.attributes
     assert fake_gateway.writes == []
@@ -172,7 +175,7 @@ async def test_rooms_start_only_when_home_assistant_has_started(
     hass.set_state(CoreState.running)
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
     await settle(hass)
-    state = hass.states.get("sensor.living_heating_status")
+    state = hass.states.get("sensor.living_heating_state")
     assert state.attributes["source"] == "external"
     assert fake_gateway.writes
 
@@ -208,7 +211,7 @@ async def test_setup_zha_unavailable_retries_and_clears_issue(hass, entry) -> No
     await settle(hass)
     assert entry.state is ConfigEntryState.LOADED
     assert zha_issue(hass) is None
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
 
 
 async def test_profile_auto_selects_builtin_and_rejects_unmatched(
@@ -226,7 +229,7 @@ async def test_profile_auto_selects_builtin_and_rejects_unmatched(
     issue = room_issue(hass, subentry_of(foreign, "Living").subentry_id)
     assert issue is not None
     assert "climate.x (SONOFF TRV-ZBT)" in issue.translation_placeholders["error"]
-    assert hass.states.get("sensor.living_heating_status") is None
+    assert hass.states.get("sensor.living_heating_state") is None
 
 
 async def test_non_zha_thermostat_invalidates_only_its_room(hass) -> None:
@@ -248,7 +251,7 @@ async def test_explicit_profile_is_used(hass) -> None:
     entry = make_entry(hass, [room_data(profile="sonoff_trvzb_native")], FAST_OPTIONS)
     await start(hass, entry)
     assert entry.state is ConfigEntryState.LOADED
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
 
 
 async def test_unknown_explicit_profile_invalidates_only_its_room(hass) -> None:
@@ -268,7 +271,7 @@ async def test_a_room_with_the_global_profile_uses_the_global_choice(hass) -> No
     await start(hass, entry)
 
     assert room_issue(hass, subentry_of(entry, "Living").subentry_id) is None
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
 
 
 async def test_a_room_with_the_global_profile_follows_an_explicit_global_one(
@@ -304,8 +307,8 @@ async def test_one_unresolvable_room_leaves_the_other_rooms_running(
     assert entry.state is ConfigEntryState.LOADED
     living, bedroom = subentry_of(entry, "Living"), subentry_of(entry, "Bedroom")
     assert entry.runtime_data.rooms.keys() == {living.subentry_id}
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
-    assert hass.states.get("sensor.bedroom_heating_status") is None
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
+    assert hass.states.get("sensor.bedroom_heating_state") is None
     assert room_issue(hass, living.subentry_id) is None
     issue = room_issue(hass, bedroom.subentry_id)
     assert issue is not None
@@ -331,7 +334,7 @@ async def test_one_unresolvable_room_leaves_the_other_rooms_running(
     assert entry.state is ConfigEntryState.LOADED
     assert room_issue(hass, bedroom.subentry_id) is None
     assert entry.runtime_data.rooms.keys() == {living.subentry_id, bedroom.subentry_id}
-    assert hass.states.get("sensor.bedroom_heating_status").state == "ok"
+    assert hass.states.get("sensor.bedroom_heating_state").state == "heating"
 
 
 @pytest.mark.parametrize(
@@ -360,8 +363,8 @@ async def test_a_room_with_corrupt_data_is_skipped_like_an_unresolvable_one(
     assert entry.state is ConfigEntryState.LOADED
     living, broken = subentry_of(entry, "Living"), subentry_of(entry, "Bedroom")
     assert entry.runtime_data.rooms.keys() == {living.subentry_id}
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
-    assert hass.states.get("sensor.bedroom_heating_status") is None
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
+    assert hass.states.get("sensor.bedroom_heating_state") is None
     issue = room_issue(hass, broken.subentry_id)
     assert issue is not None
     assert issue.translation_placeholders["room"] == "Bedroom"
@@ -503,10 +506,10 @@ async def test_start_is_logged_and_one_failing_room_does_not_block_the_others(
         caplog.text
     )
     assert (
-        hass.states.get("sensor.bedroom_heating_status").attributes["source"]
+        hass.states.get("sensor.bedroom_heating_state").attributes["source"]
         == "external"
     )
-    assert "source" not in hass.states.get("sensor.living_heating_status").attributes
+    assert "source" not in hass.states.get("sensor.living_heating_state").attributes
 
 
 async def test_subentries_of_other_types_are_ignored(hass) -> None:
@@ -525,8 +528,8 @@ async def test_subentries_of_other_types_are_ignored(hass) -> None:
 
     assert entry.state is ConfigEntryState.LOADED
     assert len(entry.runtime_data.rooms) == 1
-    assert hass.states.get("sensor.living_heating_status") is not None
-    assert hass.states.get("sensor.other_status") is None
+    assert hass.states.get("sensor.living_heating_state") is not None
+    assert hass.states.get("sensor.other_heating_state") is None
 
 
 # --- Reload on change -----------------------------------------------------
@@ -548,12 +551,12 @@ async def test_options_change_reloads(hass, entry) -> None:
     new_room = entry.runtime_data.rooms[subentry_id]
     assert new_room.snapshot()["params"]["refresh"] == 1800.0
     assert (
-        hass.states.get("sensor.living_heating_status").attributes["source"]
+        hass.states.get("sensor.living_heating_state").attributes["source"]
         == "external"
     )
 
 
-async def test_adding_a_room_reloads_and_adds_its_status_sensor(
+async def test_adding_a_room_reloads_and_adds_its_state_sensor(
     hass, entry, fake_gateway
 ) -> None:
     await start(hass, entry)
@@ -575,8 +578,8 @@ async def test_adding_a_room_reloads_and_adds_its_status_sensor(
 
     assert entry.state is ConfigEntryState.LOADED
     assert len(entry.runtime_data.rooms) == 2
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
-    assert hass.states.get("sensor.bedroom_heating_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
+    assert hass.states.get("sensor.bedroom_heating_state").state == "heating"
 
 
 # --- Unload ---------------------------------------------------------------
@@ -591,7 +594,7 @@ async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
     await advance(hass, freezer, 25)
     issues_registry = ir.async_get(hass)
     assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is not None
-    assert hass.states.get("sensor.living_heating_status").state == "error"
+    assert hass.states.get("sensor.living_heating_state").state == "fault"
 
     # Re-paired or fixed: the thermostat answers again, the entry is reloaded.
     del fake_gateway.read_override[("00:11", VALUE)]
@@ -600,7 +603,7 @@ async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
 
     assert entry.state is ConfigEntryState.LOADED
     assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is None
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
 
 
 async def test_setup_removes_issues_of_thermostats_in_no_room(hass, entry) -> None:
@@ -648,7 +651,7 @@ async def test_unload_stops_the_controllers(hass, freezer, entry, fake_gateway) 
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert entry.state is ConfigEntryState.NOT_LOADED
-    assert hass.states.get("sensor.living_heating_status").state == "unavailable"
+    assert hass.states.get("sensor.living_heating_state").state == "unavailable"
 
     fake_gateway.writes.clear()
     fake_gateway.reads.clear()
@@ -830,8 +833,10 @@ async def test_upgrade_from_0_1_0_with_old_and_new_firmware(hass, fake_gateway) 
     assert firmware.translation_placeholders["required"] == "1.4.4"
     assert firmware.translation_placeholders["current"] == "1.3.0"
     assert ir.async_get(hass).async_get_issue(DOMAIN, "trv_firmware_0022") is None
-    assert hass.states.get("sensor.living_heating_status").state == "degraded"
-    assert hass.states.get("sensor.bed_heating_status").state == "ok"
+    assert (
+        hass.states.get("sensor.living_heating_state").state == "restricted_unsupported"
+    )
+    assert hass.states.get("sensor.bed_heating_state").state == "heating"
 
 
 async def test_migration_notice_uses_the_decimal_comma_in_german(hass) -> None:
@@ -858,7 +863,7 @@ async def test_user_profile_without_adaptive_and_frost_is_no_firmware_problem(
     await start(hass, entry)
 
     assert ir.async_get(hass).async_get_issue(DOMAIN, "trv_firmware_0033") is None
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
     assert attribute_writes(fake_gateway, ADAPTIVE) == []
     assert attribute_writes(fake_gateway, 0x6002) == []
     assert attribute_writes(fake_gateway, HYSTERESIS) == [-40]
@@ -942,7 +947,7 @@ async def test_setup_puts_room_device_into_its_area(hass) -> None:
     assert device.area_id == area.id
     # The entities follow their device; Easy TRV gives none an area of its own.
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 3
+    assert len(entities) == 2
     assert {e.area_id for e in entities} == {None}
 
 

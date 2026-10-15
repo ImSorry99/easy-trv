@@ -63,8 +63,10 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-# What the unique id of the 0.4.0 operating mode select ends with.
-_OPERATING_MODE_SUFFIX = "_operating_mode"
+# What the unique ids of the entities that earlier versions registered and no
+# platform provides now end with, by domain: the 0.4.0 operating mode select and
+# the 0.5.0 status sensor.
+_RETIRED_SUFFIXES: Final = {"select": "_operating_mode", "sensor": "_status"}
 
 # The hysteresis choice that version 1 entries could store and version 2 retired.
 _HYSTERESIS_LEAVE = "leave"
@@ -461,7 +463,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> bool:
-    """Set up Easy TRV: one controller and one status sensor per room."""
+    """Set up Easy TRV: one controller and one heating-state sensor per room."""
     try:
         gateway = GATEWAY_FACTORY(hass)
     except ZhaUnavailable as err:
@@ -525,7 +527,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     entry.runtime_data = EasyTrvRuntimeData(
         gateway, profiles, rooms, resolved, areas, labels
     )
-    _remove_operating_mode_selects(hass, entry)
+    _remove_retired_entities(hass, entry)
     _reconcile_hidden_entities(hass, entry, room_profiles, resolved, invalid)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -549,20 +551,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     return True
 
 
-def _remove_operating_mode_selects(
-    hass: HomeAssistant, entry: EasyTrvConfigEntry
-) -> None:
-    """Remove the operating mode selects of 0.4.0, which no platform provides now.
+def _remove_retired_entities(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> None:
+    """Remove the entities of earlier versions that no platform provides now.
 
-    Frost protection moved to the mode ``auto`` of the room thermostat. The
-    registry would keep the select as an unavailable entity otherwise.
+    These are the operating mode selects of 0.4.0 (frost protection moved to the
+    mode ``auto`` of the room thermostat) and the status sensors of 0.5.0 (merged
+    into the heating state sensor, which has its own unique id and stays). The
+    registry would keep them as unavailable entities otherwise.
     """
     registry = er.async_get(hass)
     for registered in er.async_entries_for_config_entry(registry, entry.entry_id):
+        suffix = _RETIRED_SUFFIXES.get(registered.domain)
         if (
-            registered.domain == "select"
+            suffix is not None
             and registered.platform == DOMAIN
-            and registered.unique_id.endswith(_OPERATING_MODE_SUFFIX)
+            and registered.unique_id.endswith(suffix)
         ):
             registry.async_remove(registered.entity_id)
 

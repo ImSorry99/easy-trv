@@ -157,14 +157,6 @@
       }
     },
     "sensor": {
-      "room_status": {
-        "name": "Heizungsstatus",
-        "state": {
-          "ok": "OK",
-          "degraded": "Eingeschränkt",
-          "error": "Fehler"
-        }
-      },
       "room_state": {
         "name": "Heizungszustand",
         "state": {
@@ -185,6 +177,9 @@
           "heating": "Heizbetrieb"
         },
         "state_attributes": {
+          "hint": {
+            "name": "Hinweis"
+          },
           "reasons": {
             "name": "Gründe"
           },
@@ -199,6 +194,21 @@
           },
           "silent_contacts": {
             "name": "Stumme Fensterkontakte"
+          },
+          "active_sensor": {
+            "name": "Aktiver Sensor"
+          },
+          "source": {
+            "name": "Temperaturquelle"
+          },
+          "setpoint_source": {
+            "name": "Sollwert-Quelle"
+          },
+          "in_sync": {
+            "name": "Synchron"
+          },
+          "last_error": {
+            "name": "Letzter Fehler"
           }
         }
       }
@@ -380,6 +390,19 @@
         "set_frost_temperature": "Frostschutztemperatur",
         "set_setpoint": "Solltemperatur",
         "set_hvac_mode": "Modus"
+      }
+    },
+    "hint": {
+      "options": {
+        "fault": "{name}: Fehler",
+        "unavailable": "{name} nicht erreichbar",
+        "contact": "{name} meldet nichts ({why})",
+        "unsupported": "{name}: Funktion fehlt ({functions})",
+        "schedule": "{name} läuft im eigenen Wochenplan",
+        "window_phase": "{name}: eigene Fenstererkennung aktiv",
+        "why_unavailable": "nicht verfügbar",
+        "why_unknown": "unbekannt",
+        "why_missing": "gibt es nicht"
       }
     },
     "outdoor_cutoff": {

@@ -758,6 +758,56 @@ async def test_unsupported_attribute_raises_a_firmware_issue_without_retrying(
     assert controller.status == RoomStatus.DEGRADED
 
 
+async def test_unsupported_functions_name_what_each_thermostat_lacks(
+    hass, make_controller, gateway
+) -> None:
+    gateway.unsupported_write.add((IEEE_A, HYSTERESIS))
+    gateway.unsupported_write.add((IEEE_A, FROST))
+    controller = make_controller()
+    assert controller.unsupported_functions == {}
+    await controller.async_start()
+    await settle(hass)
+
+    # Labelled by intent where the labels know it, else by the capability key;
+    # in the order of the capability keys. The healthy thermostat is absent.
+    assert controller.unsupported_functions == {
+        "climate.a": ("frost_protection", "Hysteresis")
+    }
+
+
+async def test_unsupported_functions_fall_back_to_the_capability_keys(
+    hass, make_controller, gateway
+) -> None:
+    gateway.unsupported_write.add((IEEE_A, HYSTERESIS))
+    controller = make_controller(labels={})
+    await controller.async_start()
+    await settle(hass)
+
+    assert controller.unsupported_functions == {"climate.a": ("hysteresis",)}
+
+
+async def test_unsupported_functions_leave_out_what_the_profile_never_had(
+    hass, make_controller, gateway, profile
+) -> None:
+    bare = without_capabilities(profile, "hysteresis")
+    controller = make_controller(prof=bare)
+    await controller.async_start()
+    await settle(hass)
+    # The profile has no hysteresis setting: no firmware problem, nothing listed.
+    assert controller.snapshot()["not_in_profile"]["climate.a"] == ["set_hysteresis"]
+    assert controller.unsupported_functions == {}
+
+    gateway.unsupported_write.add((IEEE_A, FROST))
+    labels = {**LABELS, "set_frost_temperature": "Frost protection temperature"}
+    other = make_controller(prof=bare, labels=labels)
+    await other.async_start()
+    await settle(hass)
+    assert other.snapshot()["not_in_profile"]["climate.a"] == ["set_hysteresis"]
+    assert other.unsupported_functions == {
+        "climate.a": ("Frost protection temperature",)
+    }
+
+
 async def test_a_failed_setting_is_sent_again_and_the_issue_resolves_itself(
     hass, freezer, make_controller, gateway
 ) -> None:

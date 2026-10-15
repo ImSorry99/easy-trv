@@ -138,7 +138,7 @@ class RoomClimate(ClimateEntity, RestoreEntity):
         self._attr_target_temperature_step = step
         self._thermostats = list(controller.thermostats)
         self._attr_unique_id = f"{subentry.subentry_id}_climate"
-        # Suggest the entity id like the status sensor does: HA would put the
+        # Suggest the entity id like the state sensor does: HA would put the
         # area in front of the device name otherwise.
         self.entity_id = f"climate.{slugify(subentry.title)}_heating"
         self._attr_device_info = DeviceInfo(

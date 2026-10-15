@@ -403,6 +403,23 @@ class RoomController:
         return thermostat_deviations(self._state)
 
     @property
+    def unsupported_functions(self) -> dict[str, tuple[str, ...]]:
+        """Return the plain-language names of what each thermostat lacks.
+
+        Only functions the profile declares count: those it never had are no
+        defect of the thermostat. A thermostat that lacks nothing is absent.
+        """
+        lacking = {
+            trv: sorted(state.unsupported - state.not_in_profile)
+            for trv, state in self._state.trvs.items()
+        }
+        return {
+            trv: tuple(dict.fromkeys(map(self._setting_name, capabilities)))
+            for trv, capabilities in lacking.items()
+            if capabilities
+        }
+
+    @property
     def silent_contacts(self) -> tuple[str, ...]:
         """Return the window contacts that say nothing, sorted."""
         return tuple(sorted(self._holds.silent_contacts))

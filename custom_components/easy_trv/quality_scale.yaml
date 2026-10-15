@@ -59,9 +59,9 @@ rules:
   entity-unavailable:
     status: exempt
     comment: |
-      The status sensor reports a state computed by Easy TRV itself, so it
-      never depends on a device being reachable. A thermostat that is
-      unavailable shows as "degraded".
+      The heating state sensor reports a state computed by Easy TRV itself, so
+      it never depends on a device being reachable. A thermostat that is
+      unavailable shows as "restricted_unavailable".
   integration-owner: done
   log-when-unavailable:
     status: done

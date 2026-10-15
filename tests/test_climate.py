@@ -118,9 +118,9 @@ async def test_room_climate_entity_properties(hass, entry) -> None:
     assert registry_entry.config_subentry_id == subentry_id
     assert registry_entry.translation_key == "room"
     assert registry_entry.unit_of_measurement is None
-    status = er.async_get(hass).async_get("sensor.living_heating_status")
-    assert status is not None
-    assert registry_entry.device_id == status.device_id
+    state_sensor = er.async_get(hass).async_get("sensor.living_heating_state")
+    assert state_sensor is not None
+    assert registry_entry.device_id == state_sensor.device_id
     device = dr.async_get(hass).async_get(registry_entry.device_id)
     assert device is not None
     assert device.name == "Living heating"
@@ -638,13 +638,10 @@ async def test_no_climate_entity_without_setpoint_capability(
     await start(hass, entry)
 
     assert hass.states.get(CLIMATE) is None
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    # The room keeps its two sensors, only the thermostat entity is missing.
-    assert sorted(e.entity_id for e in entities) == [
-        "sensor.living_heating_state",
-        "sensor.living_heating_status",
-    ]
+    # The room keeps its sensor, only the thermostat entity is missing.
+    assert [e.entity_id for e in entities] == ["sensor.living_heating_state"]
     controller = next(iter(entry.runtime_data.rooms.values()))
     assert controller.effective_range is None
 

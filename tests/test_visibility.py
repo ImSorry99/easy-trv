@@ -280,7 +280,7 @@ async def test_hidden_entities_keep_working(hass) -> None:
     await start(hass, entry)
 
     assert entry.state is ConfigEntryState.LOADED
-    assert hass.states.get("sensor.living_heating_status").state == "ok"
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
     assert hass.states.get("climate.living_heating") is not None
 
 
