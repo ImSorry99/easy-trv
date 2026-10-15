@@ -96,10 +96,12 @@ async def test_setup_creates_room_device_and_state_sensor(hass, entry) -> None:
     )
     assert device is not None
     assert device.name == "Living heating"
-    # A thermostat and a state sensor per room, attached to the room's subentry.
+    # A thermostat and a state sensor per room, next to the statistics sensors
+    # (see test_statistics_sensor), attached to the room's subentry.
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     by_id = {e.entity_id: e for e in entities}
-    assert by_id.keys() == {"climate.living_heating", "sensor.living_heating_state"}
+    assert {"climate.living_heating", "sensor.living_heating_state"} <= by_id.keys()
+    assert {e.domain for e in entities} == {"climate", "sensor"}
     assert by_id["sensor.living_heating_state"].unique_id == f"{subentry_id}_state"
     assert by_id["climate.living_heating"].unique_id == f"{subentry_id}_climate"
     assert {e.config_subentry_id for e in entities} == {subentry_id}
@@ -952,7 +954,9 @@ async def test_setup_puts_room_device_into_its_area(hass) -> None:
     assert device.area_id == area.id
     # The entities follow their device; Easy TRV gives none an area of its own.
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 2
+    assert {"climate.living_heating", "sensor.living_heating_state"} <= {
+        e.entity_id for e in entities
+    }
     assert {e.area_id for e in entities} == {None}
 
 

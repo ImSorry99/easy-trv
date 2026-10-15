@@ -378,7 +378,9 @@ class RoomController:
         """Call ``cb`` after every handled event; return a remover.
 
         Unlike ``add_listener`` this fires whether or not the status changed, so
-        an entity can show the room's setpoint, mode and holds.
+        an entity can show the room's setpoint, mode and holds. It also fires on
+        every sent write, on a thermostat starting or stopping to heat, and every
+        minute with the room's tick, so a running duration keeps moving.
         """
         self._update_listeners.append(cb)
 
@@ -660,12 +662,14 @@ class RoomController:
                 if contacts
                 else None
             ),
-            per_thermostat={
-                trv: ThermostatStatistics(
-                    counts["writes"], counts["write_failures"], counts["dropouts"]
-                )
-                for trv, counts in self._trv_counts.items()
-            },
+            per_thermostat=MappingProxyType(
+                {
+                    trv: ThermostatStatistics(
+                        counts["writes"], counts["write_failures"], counts["dropouts"]
+                    )
+                    for trv, counts in self._trv_counts.items()
+                }
+            ),
         )
 
     def restore_statistic(
@@ -676,8 +680,9 @@ class RoomController:
         ``key`` is the sensor's key, ``thermostat`` the climate entity for the
         keys a thermostat has. A duration is given in hours, like the sensor
         shows it. A total never goes down, and a value that is not a number, or
-        for something the room does not have, is ignored. Call it before the
-        value is published; periods that are running keep running.
+        for something the room does not have, is ignored. Call it before
+        ``async_start``: a call after the start would absorb the counts made
+        since then. Periods that are running keep running.
         """
         if not math.isfinite(value):
             return

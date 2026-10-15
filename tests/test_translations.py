@@ -212,8 +212,18 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["entity"]["climate"]) == {"room"}
     assert set(data["entity"]["climate"]["room"]) == {"state"}
     assert set(data["entity"]["climate"]["room"]["state"]) == {"auto"}
-    # The status sensor is merged into the heating state sensor.
-    assert set(data["entity"]["sensor"]) == {"room_state"}
+    # The status sensor is merged into the heating state sensor; the statistics
+    # sensors of 0.6 come next to it.
+    assert set(data["entity"]["sensor"]) == {
+        "room_state",
+        "deviation",
+        "heating_time",
+        "window_openings",
+        "window_open_time",
+        "writes",
+        "write_failures",
+        "dropouts",
+    }
     assert set(data["selector"]["hint"]["options"]) == HINT_KEYS
     assert set(data["issues"]) == {
         "trv_unreachable",

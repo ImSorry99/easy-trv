@@ -4,6 +4,7 @@ import logging
 import math
 from dataclasses import FrozenInstanceError, replace
 from datetime import timedelta
+from types import MappingProxyType
 
 import pytest
 from homeassistant.helpers import device_registry as dr
@@ -2683,6 +2684,10 @@ async def test_statistics_start_at_zero_and_are_frozen(controller) -> None:
         stats.deviation = 1.0  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
         stats.per_thermostat["climate.a"].writes = 1  # type: ignore[misc]
+    # The mapping of a published value cannot be changed from outside either.
+    assert isinstance(stats.per_thermostat, MappingProxyType)
+    with pytest.raises(TypeError):
+        stats.per_thermostat["climate.c"] = ThermostatStatistics(1, 0, 0)  # type: ignore[index]
 
 
 # Writes and failed writes

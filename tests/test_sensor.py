@@ -17,7 +17,6 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.easy_trv.const import CONF_AREA, DOMAIN
 from tests.helpers_entry import (
@@ -26,6 +25,7 @@ from tests.helpers_entry import (
     IEEE_B,
     advance,
     make_entry,
+    name_thermostat,
     patched_gateway,
     room_data,
     settle,
@@ -153,10 +153,9 @@ async def test_each_room_gets_its_sensor_and_one_device(hass) -> None:
     await start(hass, entry)
 
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert sorted(e.entity_id for e in entities if e.domain == "sensor") == [
-        "sensor.bedroom_heating_state",
-        "sensor.living_heating_state",
-    ]
+    assert sorted(
+        e.entity_id for e in entities if e.entity_id.endswith("_heating_state")
+    ) == ["sensor.bedroom_heating_state", "sensor.living_heating_state"]
     by_name = {sub.title: sub_id for sub_id, sub in entry.subentries.items()}
     for name, entity_id in (
         ("Living", "sensor.living_heating_state"),
@@ -233,9 +232,12 @@ async def test_state_sensor_created_per_room(hass, entry) -> None:
     assert device.identifiers == {(DOMAIN, subentry_id)}
     assert device.manufacturer == "Easy TRV"
     assert device.name == "Living heating"
-    # The only sensor of the room: no status sensor next to it.
+    # No status sensor next to it: only the statistics sensors (see
+    # test_statistics_sensor).
     entities = er.async_entries_for_config_entry(registry, entry.entry_id)
-    assert [e.entity_id for e in entities if e.domain == "sensor"] == [STATE_SENSOR]
+    assert [e.entity_id for e in entities if e.translation_key == "room_state"] == [
+        STATE_SENSOR
+    ]
     assert hass.states.get("sensor.living_heating_status") is None
 
     attributes = state.attributes
@@ -426,9 +428,11 @@ async def test_state_sensor_unknown_before_start(hass, entry) -> None:
 async def test_removed_state_sensor_stops_listening(hass, entry) -> None:
     await start(hass, entry)
     controller = next(iter(entry.runtime_data.rooms.values()))
-    # The room thermostat and the state sensor. The sensor hears every event the
-    # room handles, so it needs no listener for the status on top of that.
-    assert len(controller._update_listeners) == 2  # noqa: SLF001
+    # The room thermostat, the state sensor and the statistics sensors (two of
+    # the room, three for each of its two thermostats). The sensor hears every
+    # event the room handles, so it needs no listener for the status on top of
+    # that.
+    assert len(controller._update_listeners) == 2 + 2 + 6  # noqa: SLF001
     assert len(controller._listeners) == 0  # noqa: SLF001
 
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -436,27 +440,6 @@ async def test_removed_state_sensor_stops_listening(hass, entry) -> None:
 
 
 # --- The hint ---------------------------------------------------------------
-
-
-def name_thermostat(hass, entity_id: str, name: str) -> None:
-    """Give a thermostat's climate entity a device with a name."""
-    owner = MockConfigEntry(domain="test")
-    owner.add_to_hass(hass)
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=owner.entry_id, identifiers={("test", entity_id)}, name=name
-    )
-    # The registry will not hand out an entity id whose state exists already.
-    shown = hass.states.get(entity_id)
-    hass.states.async_remove(entity_id)
-    entity = er.async_get(hass).async_get_or_create(
-        "climate",
-        "test",
-        entity_id,
-        suggested_object_id=entity_id.removeprefix("climate."),
-        device_id=device.id,
-    )
-    assert entity.entity_id == entity_id
-    hass.states.async_set(entity_id, shown.state, shown.attributes)
 
 
 @pytest.fixture
@@ -734,7 +717,8 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
     icons = json.loads((COMPONENT / "icons.json").read_text())
 
     assert strings == english
-    assert set(strings["entity"]["sensor"]) == {"room_state"}
+    # The statistics sensors have their own test.
+    assert "room_state" in strings["entity"]["sensor"]
     assert strings["device"]["room"]["name"] == "{room} heating"
     assert set(strings["issues"]) == {
         "trv_unreachable",
@@ -748,7 +732,7 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
         "window_contact_unavailable",
         "schedule_thermostat_off",
     }
-    assert set(icons["entity"]["sensor"]) == {"room_state"}
+    assert "room_state" in icons["entity"]["sensor"]
     state = strings["entity"]["sensor"]["room_state"]
     assert state["name"] == "Heating state"
     assert list(state["state"]) == HEATING_STATES

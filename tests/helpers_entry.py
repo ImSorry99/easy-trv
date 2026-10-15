@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
@@ -142,3 +144,24 @@ async def start(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     await hass.async_block_till_done()
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
     await settle(hass)
+
+
+def name_thermostat(hass: HomeAssistant, entity_id: str, name: str) -> None:
+    """Give a thermostat's climate entity a device with a name."""
+    owner = MockConfigEntry(domain="test")
+    owner.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=owner.entry_id, identifiers={("test", entity_id)}, name=name
+    )
+    # The registry will not hand out an entity id whose state exists already.
+    shown = hass.states.get(entity_id)
+    hass.states.async_remove(entity_id)
+    entity = er.async_get(hass).async_get_or_create(
+        "climate",
+        "test",
+        entity_id,
+        suggested_object_id=entity_id.removeprefix("climate."),
+        device_id=device.id,
+    )
+    assert entity.entity_id == entity_id
+    hass.states.async_set(entity_id, shown.state, shown.attributes)

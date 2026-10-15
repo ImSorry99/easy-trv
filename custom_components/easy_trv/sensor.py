@@ -1,4 +1,4 @@
-"""The heating-state sensor of an Easy TRV room."""
+"""The heating-state sensor of an Easy TRV room and its statistics sensors."""
 
 import re
 from typing import TYPE_CHECKING, Any, Final
@@ -12,6 +12,7 @@ from custom_components.easy_trv.const import DOMAIN
 from custom_components.easy_trv.core.model import Note
 from custom_components.easy_trv.core.room_state import HeatingState
 from custom_components.easy_trv.labels import async_option_labels, thermostat_name
+from custom_components.easy_trv.statistics_sensor import statistics_sensors
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigSubentry
@@ -40,16 +41,27 @@ _PLACEHOLDER: Final = re.compile(r"\{(\w+)\}")
 
 
 async def async_setup_entry(
-    _hass: HomeAssistant,
+    hass: HomeAssistant,
     entry: EasyTrvConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add a heating-state sensor to each room, on the room's subentry."""
+    """Add the heating-state sensor and the statistics sensors to each room.
+
+    They sit on the room's subentry and device.
+    """
     for subentry_id, controller in entry.runtime_data.rooms.items():
         subentry = entry.subentries[subentry_id]
         area_name = entry.runtime_data.areas[subentry_id]
         async_add_entities(
-            [RoomStateSensor(controller, subentry, area_name)],
+            [
+                RoomStateSensor(controller, subentry, area_name),
+                *statistics_sensors(
+                    hass,
+                    controller,
+                    subentry,
+                    _room_device_info(subentry, area_name),
+                ),
+            ],
             config_subentry_id=subentry_id,
         )
 

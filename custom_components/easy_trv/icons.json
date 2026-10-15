@@ -28,6 +28,27 @@
           "frost": "mdi:snowflake-thermometer",
           "heating": "mdi:radiator"
         }
+      },
+      "deviation": {
+        "default": "mdi:thermometer-lines"
+      },
+      "heating_time": {
+        "default": "mdi:fire-circle"
+      },
+      "window_openings": {
+        "default": "mdi:window-open-variant"
+      },
+      "window_open_time": {
+        "default": "mdi:timer-outline"
+      },
+      "writes": {
+        "default": "mdi:upload-network-outline"
+      },
+      "write_failures": {
+        "default": "mdi:alert-circle-outline"
+      },
+      "dropouts": {
+        "default": "mdi:lan-disconnect"
       }
     }
   }

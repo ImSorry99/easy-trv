@@ -211,6 +211,27 @@
             "name": "Letzter Fehler"
           }
         }
+      },
+      "deviation": {
+        "name": "Regelabweichung"
+      },
+      "heating_time": {
+        "name": "Heizzeit"
+      },
+      "window_openings": {
+        "name": "Fensteröffnungen"
+      },
+      "window_open_time": {
+        "name": "Fenster-offen-Zeit"
+      },
+      "writes": {
+        "name": "{thermostat} Schreibvorgänge"
+      },
+      "write_failures": {
+        "name": "{thermostat} Schreibfehler"
+      },
+      "dropouts": {
+        "name": "{thermostat} Ausfälle"
       }
     }
   },

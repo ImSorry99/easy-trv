@@ -211,6 +211,27 @@
             "name": "Last error"
           }
         }
+      },
+      "deviation": {
+        "name": "Control deviation"
+      },
+      "heating_time": {
+        "name": "Heating time"
+      },
+      "window_openings": {
+        "name": "Window openings"
+      },
+      "window_open_time": {
+        "name": "Window open time"
+      },
+      "writes": {
+        "name": "{thermostat} writes"
+      },
+      "write_failures": {
+        "name": "{thermostat} failed writes"
+      },
+      "dropouts": {
+        "name": "{thermostat} dropouts"
       }
     }
   },
