@@ -418,6 +418,8 @@ async def test_state_sensor_unknown_before_start(hass, entry) -> None:
     assert state is not None
     assert state.state == STATE_UNKNOWN
     assert state.attributes["since"] is None
+    # No reasons either: emergency mode next to an unknown state would mislead.
+    assert state.attributes["reasons"] == []
 
     hass.set_state(CoreState.running)
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
@@ -425,6 +427,7 @@ async def test_state_sensor_unknown_before_start(hass, entry) -> None:
     state = hass.states.get(STATE_SENSOR)
     assert state.state == "heating"
     assert state.attributes["since"] is not None
+    assert state.attributes["reasons"] == ["heating"]
 
 
 async def test_removed_state_sensor_stops_listening(hass, entry) -> None:

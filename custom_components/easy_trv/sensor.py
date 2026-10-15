@@ -119,8 +119,8 @@ class RoomStateSensor(SensorEntity):
     The state is the first condition that holds (see ``HeatingState``). The
     attributes carry every condition that holds, the time of the last change,
     the deadline of a running open-window delay, the thermostats that deviate
-    and the window contacts that say nothing. The state is unknown until the
-    room has started.
+    and the window contacts that say nothing. Until the room has started the
+    state is unknown and the reasons and the time of the change are empty.
     """
 
     _attr_has_entity_name = True
@@ -157,7 +157,11 @@ class RoomStateSensor(SensorEntity):
         since = controller.state_since
         window_off_at = controller.window_off_at
         return {
-            "reasons": [reason.value for reason in controller.state_reasons],
+            "reasons": (
+                []
+                if since is None
+                else [reason.value for reason in controller.state_reasons]
+            ),
             "since": None if since is None else since.isoformat(),
             "window_off_at": (
                 None if window_off_at is None else window_off_at.isoformat()
