@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 from homeassistant.exceptions import ConfigEntryError
 
@@ -38,6 +40,12 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
         hysteresis=0.6,
         adaptive_mode="on",
         frost_temperature=5.0,
+        setpoint_range=None,
+        window_contacts=(),
+        window_warn=timedelta(minutes=120),
+        window_check=timedelta(minutes=30),
+        window_check_drop=0.3,
+        outdoor_cutoff=None,
     )
 
 

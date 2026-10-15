@@ -55,6 +55,7 @@ from custom_components.easy_trv.core.model import (
     RoomState,
     RoomStatus,
     ScheduleDebounce,
+    ScheduleKnobSettle,
     ScheduleRetry,
     SensorChanged,
     SensorReading,
@@ -409,6 +410,9 @@ class RoomController:
                 self._schedule_debounce(seconds)
             case ScheduleRetry(trv=trv, capability=capability, seconds=seconds):
                 self._schedule_retry(trv, capability, seconds)
+            case ScheduleKnobSettle():
+                # The controller arms the knob timer once it routes observations.
+                return
             case SetStatus(status=status, attributes=attributes):
                 self._set_status(status, attributes)
             case RaiseIssue():

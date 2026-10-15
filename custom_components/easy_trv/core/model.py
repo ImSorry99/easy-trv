@@ -131,6 +131,27 @@ class RoomStatus(StrEnum):
     ERROR = "error"
 
 
+class RoomMode(StrEnum):
+    """Whether the room heats or is switched off."""
+
+    HEAT = "heat"
+    OFF = "off"
+
+
+class Preset(StrEnum):
+    """Preset of the room thermostat."""
+
+    NONE = "none"
+    FROST = "frost"
+
+
+class Note(StrEnum):
+    """Why a thermostat's reported value is not to be taken as a user change."""
+
+    WINDOW_PHASE = "window_phase"
+    SCHEDULE = "schedule"
+
+
 # --- Configuration -------------------------------------------------------
 
 
@@ -192,6 +213,13 @@ class RoomConfig:
     hysteresis: float  # kelvin
     adaptive_mode: Literal["on", "off", "leave"]
     frost_temperature: float  # celsius
+    # Effective (min, max, step); None = no climate (profile lacks the capabilities).
+    setpoint_range: tuple[float, float, float] | None = None
+    window_contacts: tuple[str, ...] = ()
+    window_warn: timedelta | None = None
+    window_check: timedelta | None = None
+    window_check_drop: float = 0.3
+    outdoor_cutoff: float | None = None
 
 
 # --- State ---------------------------------------------------------------
@@ -223,6 +251,16 @@ class TrvState:
     # are no firmware problem and do not affect the health.
     not_in_profile: frozenset[str] = frozenset()
     settings_applied: bool = False
+    reported_setpoint: float | None = None
+    reported_mode: str | None = None
+    note: Note | None = None
+    note_since: datetime | None = None
+    # capability -> recent writes as (value, at), to tell echoes from user changes
+    written_recently: Mapping[str, tuple[tuple[float | str, datetime], ...]] = field(
+        default_factory=dict
+    )
+    # capability -> last observed value awaiting the knob debounce
+    knob_pending: Mapping[str, float | str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -237,11 +275,28 @@ class RoomState:
     last_value_write: datetime | None = None
     last_value_issued: datetime | None = None
     debounce_pending: bool = False
+    setpoint: float | None = None
+    mode: RoomMode = RoomMode.HEAT
+    preset: Preset = Preset.NONE
+    frost_return: float | None = None
+    # Origin of the setpoint: ha, device:<entity_id>, restore, frost or initial.
+    setpoint_source: str | None = None
+    window_open: bool = False
+    window_opened_at: datetime | None = None
+    window_open_value: float | None = None
+    outdoor_hold: bool = False
+    window_warned: bool = False
+    window_suspect: bool = False
 
     @classmethod
     def initial(cls, cfg: RoomConfig) -> RoomState:
         """Return the state of a room that has not started yet."""
-        return cls(readings={}, trvs={trv.entity_id: TrvState() for trv in cfg.trvs})
+        return cls(
+            readings={},
+            trvs={trv.entity_id: TrvState() for trv in cfg.trvs},
+            mode=RoomMode.HEAT,
+            preset=Preset.NONE,
+        )
 
 
 # --- Outcomes ------------------------------------------------------------
@@ -258,6 +313,8 @@ class Mismatch:
 
     expected: frozenset[int]
     actual: int | None
+    # Decoded actual value, set by the controller for observed capabilities.
+    observed: float | str | None = None
 
 
 @dataclass(frozen=True)
@@ -300,6 +357,10 @@ class Start:
 
     sensors: tuple[SensorReading, ...]
     trv_available: Mapping[str, bool]
+    # trv -> (setpoint, mode) from the Home Assistant states
+    reported: Mapping[str, tuple[float | None, str | None]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -345,6 +406,69 @@ class OperationResult:
     outcome: Outcome
 
 
+@dataclass(frozen=True)
+class SetRoomSetpoint:
+    """The user asked the room for a target temperature."""
+
+    celsius: float
+
+
+@dataclass(frozen=True)
+class SetRoomMode:
+    """The user switched the room on or off."""
+
+    mode: RoomMode
+
+
+@dataclass(frozen=True)
+class SetRoomPreset:
+    """The user selected a preset for the room."""
+
+    preset: Preset
+
+
+@dataclass(frozen=True)
+class RestoreRoom:
+    """Restore the room state remembered across a restart."""
+
+    setpoint: float | None
+    mode: RoomMode | None
+    preset: Preset | None
+
+
+@dataclass(frozen=True)
+class TrvObserved:
+    """A thermostat reported a value of one capability."""
+
+    trv: str
+    capability: str
+    value: float | str | None
+    raw: int
+    kind: str
+
+
+@dataclass(frozen=True)
+class KnobSettled:
+    """The knob debounce of one thermostat capability elapsed."""
+
+    trv: str
+    capability: str
+
+
+@dataclass(frozen=True)
+class WindowChanged:
+    """The window contacts changed between open and closed."""
+
+    open: bool
+
+
+@dataclass(frozen=True)
+class OutdoorChanged:
+    """The outdoor temperature changed; ``None`` means unknown."""
+
+    celsius: float | None
+
+
 Event = (
     Start
     | SensorChanged
@@ -353,6 +477,14 @@ Event = (
     | DebounceElapsed
     | RetryDue
     | OperationResult
+    | SetRoomSetpoint
+    | SetRoomMode
+    | SetRoomPreset
+    | RestoreRoom
+    | TrvObserved
+    | KnobSettled
+    | WindowChanged
+    | OutdoorChanged
 )
 
 # --- Commands ------------------------------------------------------------
@@ -384,6 +516,15 @@ class ScheduleDebounce:
 @dataclass(frozen=True)
 class ScheduleRetry:
     """Arm a retry timer for one thermostat capability."""
+
+    trv: str
+    capability: str
+    seconds: float
+
+
+@dataclass(frozen=True)
+class ScheduleKnobSettle:
+    """Arm the knob debounce timer of one thermostat capability."""
 
     trv: str
     capability: str
@@ -435,6 +576,7 @@ Command = (
     Execute
     | ScheduleDebounce
     | ScheduleRetry
+    | ScheduleKnobSettle
     | SetStatus
     | RaiseIssue
     | ClearIssue

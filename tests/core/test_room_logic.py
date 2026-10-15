@@ -61,6 +61,12 @@ CFG = RoomConfig(
     0.4,
     "leave",
     7.0,
+    setpoint_range=(5.0, 30.0, 0.5),
+    window_contacts=(),
+    window_warn=timedelta(minutes=120),
+    window_check=timedelta(minutes=30),
+    window_check_drop=0.3,
+    outdoor_cutoff=None,
 )
 T0 = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
 BOTH_AVAILABLE = {"climate.a": True, "climate.b": True}

@@ -22,11 +22,14 @@ from custom_components.easy_trv.core.model import (
     Failed,
     FireEvent,
     Intent,
+    KnobSettled,
     Log,
     Mismatch,
     Ok,
     OperationResult,
+    OutdoorChanged,
     RaiseIssue,
+    RestoreRoom,
     RetryDue,
     RoomConfig,
     RoomParams,
@@ -39,6 +42,9 @@ from custom_components.easy_trv.core.model import (
     SetAdaptiveMode,
     SetFrostTemperature,
     SetHysteresis,
+    SetRoomMode,
+    SetRoomPreset,
+    SetRoomSetpoint,
     SetRoomTemperature,
     SetSource,
     SetStatus,
@@ -49,8 +55,10 @@ from custom_components.easy_trv.core.model import (
     Tick,
     TrvAvailabilityChanged,
     TrvHealth,
+    TrvObserved,
     TrvState,
     Unsupported,
+    WindowChanged,
 )
 from custom_components.easy_trv.core.values import is_in_range, round_tenth
 
@@ -145,6 +153,18 @@ class RoomLogic:
                 state, commands = self._on_retry_due(event, state)
             case OperationResult():
                 state, commands = self._on_result(event, now, state)
+            case (
+                SetRoomSetpoint()
+                | SetRoomMode()
+                | SetRoomPreset()
+                | RestoreRoom()
+                | TrvObserved()
+                | KnobSettled()
+                | WindowChanged()
+                | OutdoorChanged()
+            ):
+                # Handled from the room thermostat tasks on; no effect yet.
+                commands = []
             case _:
                 assert_never(event)
         commands = self._drop_unsupported(state, commands)

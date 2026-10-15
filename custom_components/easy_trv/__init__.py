@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,7 @@ from custom_components.easy_trv.const import (
     CONF_PROFILE,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
+    CONF_WINDOW_CONTACTS,
     PLATFORMS,
     PROFILE_AUTO,
     SETTING_GLOBAL,
@@ -98,6 +100,20 @@ def room_config_from_subentry(
         hysteresis=settings.hysteresis,
         adaptive_mode=settings.adaptive_mode,
         frost_temperature=settings.frost_temperature,
+        setpoint_range=None,  # Task 9 derives it from the profile
+        window_contacts=tuple(data.get(CONF_WINDOW_CONTACTS, ())),
+        window_warn=(
+            timedelta(minutes=settings.window_warn_minutes)
+            if settings.window_warn_minutes
+            else None
+        ),
+        window_check=(
+            timedelta(minutes=settings.window_check_minutes)
+            if settings.window_check_minutes
+            else None
+        ),
+        window_check_drop=settings.window_check_drop_kelvin,
+        outdoor_cutoff=settings.outdoor_cutoff_celsius,
     )
 
 
