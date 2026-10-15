@@ -237,6 +237,8 @@ class HoldInputs:
         self._unreliable: frozenset[str] = frozenset()
         # contact -> whether it was open the last time it said anything
         self._last: dict[str, bool] = {}
+        # The timer of a window that is open but not yet counted as such.
+        self._pending_open: CALLBACK_TYPE | None = None
 
     @property
     def contacts_reliable(self) -> bool:
@@ -247,7 +249,9 @@ class HoldInputs:
         """Start tracking; return whether a window is open and the outdoor °C.
 
         The window state is not persisted, so these are the inputs the room
-        starts with; the outdoor temperature is ``None`` when it does not matter.
+        starts with (a contact that is open already is open without the delay: it
+        was open before); the outdoor temperature is ``None`` when it does not
+        matter.
         """
         outdoor: float | None = None
         if self._config.window_contacts:
@@ -271,6 +275,7 @@ class HoldInputs:
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
+        self._cancel_pending_open()
 
     def _resolve(self) -> bool:
         """Return whether any contact is open; note the contacts that say nothing.
@@ -314,14 +319,51 @@ class HoldInputs:
 
     @callback
     def _on_contact(self, _event: Event[EventStateChangedData]) -> None:
-        """Resolve the contacts again; feed the logic when open/closed flips."""
+        """Resolve the contacts again; feed the logic when open/closed flips.
+
+        Closed is fed at once. Open is fed after ``window_open_delay`` if a
+        contact is still open then, so that airing for a moment does not switch
+        the heating off.
+        """
         reliable = self.contacts_reliable
         is_open = self._resolve()
-        if is_open is not self._window_open:
-            self._window_open = is_open
-            self._feed(WindowChanged(open=is_open))
-        elif reliable != self.contacts_reliable:
+        fed = False
+        if is_open and not self._window_open:
+            fed = self._open_after_delay()
+        elif not is_open:
+            self._cancel_pending_open()
+            if self._window_open:
+                self._window_open = False
+                self._feed(WindowChanged(open=False))
+                fed = True
+        if not fed and reliable != self.contacts_reliable:
             self._changed()
+
+    def _open_after_delay(self) -> bool:
+        """Feed an open window now, or arm the delay; return whether it was fed."""
+        delay = self._config.window_open_delay
+        if not delay:
+            self._window_open = True
+            self._feed(WindowChanged(open=True))
+            return True
+        if self._pending_open is None:
+
+            @callback
+            def fire(_now: datetime) -> None:
+                self._pending_open = None
+                self._window_open = True
+                self._feed(WindowChanged(open=True))
+
+            self._pending_open = async_call_later(
+                self._hass, delay.total_seconds(), fire
+            )
+        return False
+
+    def _cancel_pending_open(self) -> None:
+        """Stop the delay of a window that has not been counted as open yet."""
+        if self._pending_open is not None:
+            self._pending_open()
+            self._pending_open = None
 
     @callback
     def _on_outdoor(self, event: Event[EventStateChangedData]) -> None:

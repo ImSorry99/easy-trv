@@ -211,7 +211,11 @@ async def test_status_sensor_has_the_room_attributes(hass, fake_gateway) -> None
     hass.states.async_set("climate.b", "heat", {"temperature": 21.0})
     entry = make_entry(
         hass,
-        [room_data(window_contacts=["binary_sensor.window"])],
+        [
+            room_data(
+                window_contacts=["binary_sensor.window"], window_open_delay_seconds=0
+            )
+        ],
         FAST_OPTIONS,
     )
     await start(hass, entry)

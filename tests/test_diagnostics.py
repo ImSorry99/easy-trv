@@ -114,6 +114,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "window_check_minutes": 30,
         "window_check_drop_kelvin": 0.3,
         "outdoor_cutoff_celsius": None,
+        "window_open_delay_seconds": 30,
     }
 
 
@@ -150,7 +151,13 @@ async def test_diagnostics_include_holds_and_observations(
     freezer.move_to("2026-10-15T08:00:00+00:00")
     hass.states.async_set("binary_sensor.window", "off")
     entry = make_entry(
-        hass, [room_data(window_contacts=["binary_sensor.window"])], OPTIONS
+        hass,
+        [
+            room_data(
+                window_contacts=["binary_sensor.window"], window_open_delay_seconds=0
+            )
+        ],
+        OPTIONS,
     )
     await start(hass, entry)
     subentry_id = next(iter(entry.subentries))

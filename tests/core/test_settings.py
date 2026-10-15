@@ -93,6 +93,27 @@ def test_new_defaults():
     assert (s.window_warn_minutes, s.window_check_minutes) == (120, 30)
     assert s.window_check_drop_kelvin == 0.3
     assert s.outdoor_cutoff_celsius is None
+    assert s.window_open_delay_seconds == 30
+
+
+def test_window_open_delay_follows_room_then_global_and_zero_is_a_value():
+    assert (
+        resolve_settings(
+            {"window_open_delay_seconds": 60}, {}
+        ).window_open_delay_seconds
+        == 60
+    )
+    room = {"window_open_delay_seconds": 0}
+    assert (
+        resolve_settings(
+            {"window_open_delay_seconds": 60}, room
+        ).window_open_delay_seconds
+        == 0
+    )
+    room = {"window_open_delay_seconds": 45.0}
+    delay = resolve_settings({}, room).window_open_delay_seconds
+    assert delay == 45
+    assert isinstance(delay, int)
 
 
 def test_outdoor_cutoff_global_room_number_and_room_off():

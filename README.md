@@ -63,6 +63,7 @@ Every setting exists in three layers, and the most specific one that is set wins
 | Adaptive mode | adaptive on, adaptive off, leave as set in the thermostat | on | The thermostat adapts to the room itself. Needs firmware 1.4.4 or newer. |
 | Frost protection temperature | 4 to 16 °C | 5 | The temperature the thermostat keeps as its own frost protection. It is also the target of the room thermostat's `frost` preset. |
 | Minimum / maximum target temperature | 4 to 35 °C in 0.5 K steps, minimum below maximum | 5 / 30 | The range of the room thermostat's target (see [Room thermostat](#room-thermostat)). |
+| Delay before a window counts as open (seconds) | 0 (immediately) to 600 | 30 | A contact must stay open this long before the heating is switched off; closing is never delayed (see [Window contacts](#window-contacts)). |
 | Open-window warning (minutes) | 0 (never) to 1440 | 120 | A Repairs issue after a window has been open this long. |
 | Window contact check (minutes) | 0 (off) to 240 | 30 | After this long, check whether the room cools (see [Window contacts](#window-contacts)). |
 | Cooling expected by the check (K) | 0.1 to 3.0 | 0.3 | How far the room temperature must have fallen by then. |
@@ -108,6 +109,7 @@ Each room has one `climate.<room>_heating` (for example `climate.living_room_hea
 
 Choose any number of window, door, opening or garage door `binary_sensor` entities in the room form. They may belong to any area: the kitchen's window can belong to the living room when the two are joined.
 
+- **Opening delay.** A contact must stay open for the delay (default 30 seconds, 0 = immediately) before the window counts as open: airing for a moment switches nothing off. Closing is never delayed. A contact that is open when Easy TRV starts counts at once.
 - **Any contact open:** all thermostats are switched off (`system_mode off`), those on their weekly schedule and in their own open-window phase included, and the room remembers its mode and target. `window_open` is true, the event `easy_trv_window_hold` fires.
 - **All contacts closed:** the previous mode and target come back. Changes made in Home Assistant during the hold are applied now. A thermostat that was on its schedule stays off, because Easy TRV never writes `auto`: the Repairs issue `schedule_thermostat_off` asks you to switch it back to its schedule in ZHA and disappears when it reports `auto` or `heat` again.
 - **No time limit.** After the open-window warning (default 120 minutes, 0 = never) a Repairs issue `window_open_long` is raised.

@@ -113,6 +113,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "sensor_timeout_minutes",
         "setpoint_min",
         "setpoint_max",
+        "window_open_delay_seconds",
         "window_warn_minutes",
         "window_check_minutes",
         "window_check_drop_kelvin",
@@ -153,6 +154,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     }
     assert set(options["room_thermostat"]["data"]) == {"setpoint_min", "setpoint_max"}
     assert set(options["windows_outdoor"]["data"]) == {
+        "window_open_delay_seconds",
         "window_warn_minutes",
         "window_check_minutes",
         "window_check_drop_kelvin",
@@ -397,6 +399,7 @@ def test_room_and_options_forms_explain_window_contacts_and_cutoff(path: Path) -
     for key in (
         "setpoint_min",
         "setpoint_max",
+        "window_open_delay_seconds",
         "window_warn_minutes",
         "window_check_minutes",
         "window_check_drop_kelvin",
@@ -410,6 +413,8 @@ def test_room_and_options_forms_explain_window_contacts_and_cutoff(path: Path) -
     windows = sections["windows_outdoor"]["data_description"]
     assert "{default_outdoor_cutoff_celsius}" in windows["outdoor_cutoff_celsius"]
     assert "{default_window_warn_minutes}" in windows["window_warn_minutes"]
+    assert "{default_window_open_delay_seconds}" in windows["window_open_delay_seconds"]
+    assert "{global_window_open_delay_seconds}" in settings["window_open_delay_seconds"]
     assert room["settings"]["data_description"]["setpoint_max"]
 
 
@@ -457,3 +462,24 @@ def test_window_and_outdoor_field_texts_de() -> None:
     assert "0 = aus" in settings["window_check_minutes"]
     assert "0,5 K unter" in settings["outdoor_cutoff_celsius"]
     assert "schaltet" in settings["outdoor_cutoff_celsius"]
+
+
+def test_window_open_delay_texts() -> None:
+    en, de = load(EN), load(DE)
+    en_room = en["config_subentries"]["room"]["step"]["settings"]
+    de_room = de["config_subentries"]["room"]["step"]["settings"]
+    label = "Delay before a window counts as open (seconds, 0 = immediately)"
+    assert en_room["data"]["window_open_delay_seconds"] == label
+    assert de_room["data"]["window_open_delay_seconds"] == (
+        "Verzögerung, bis ein Fenster als offen gilt (Sekunden, 0 = sofort)"
+    )
+    for data in (en, de):
+        section = data["options"]["step"]["init"]["sections"]["windows_outdoor"]
+        assert (
+            section["data"]["window_open_delay_seconds"]
+            == (
+                data["config_subentries"]["room"]["step"]["settings"]["data"][
+                    "window_open_delay_seconds"
+                ]
+            )
+        )

@@ -882,6 +882,7 @@ SETTINGS_FIELDS = [
     "sensor_timeout_minutes",
     "setpoint_min",
     "setpoint_max",
+    "window_open_delay_seconds",
     "window_warn_minutes",
     "window_check_minutes",
     "window_check_drop_kelvin",
@@ -897,6 +898,7 @@ SETTING_NUMBERS = {
     "sensor_timeout_minutes": (0, 1440, 1, "min"),
     "setpoint_min": (4.0, 35.0, 0.5, "°C"),
     "setpoint_max": (4.0, 35.0, 0.5, "°C"),
+    "window_open_delay_seconds": (0, 600, 1, "s"),
     "window_warn_minutes": (0, 1440, 1, "min"),
     "window_check_minutes": (0, 240, 1, "min"),
     "window_check_drop_kelvin": (0.1, 3.0, 0.1, "K"),
@@ -926,6 +928,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_sensor_timeout_minutes": "120 min",
         "global_setpoint_min": "5.0 °C",
         "global_setpoint_max": "30.0 °C",
+        "global_window_open_delay_seconds": "30 s",
         "global_window_warn_minutes": "120 min",
         "global_window_check_minutes": "30 min",
         "global_window_check_drop_kelvin": "0.3 K",
@@ -1119,6 +1122,7 @@ async def test_room_settings_placeholders_show_the_global_window_values(hass) ->
         {
             "setpoint_min": 6.0,
             "setpoint_max": 24.5,
+            "window_open_delay_seconds": 0,
             "window_warn_minutes": 0,
             "window_check_minutes": 45,
             "window_check_drop_kelvin": 0.5,
@@ -1129,6 +1133,7 @@ async def test_room_settings_placeholders_show_the_global_window_values(hass) ->
 
     assert placeholders["global_setpoint_min"] == "6.0 °C"
     assert placeholders["global_setpoint_max"] == "24.5 °C"
+    assert placeholders["global_window_open_delay_seconds"] == "0 s"
     assert placeholders["global_window_warn_minutes"] == "Off"
     assert placeholders["global_window_check_minutes"] == "45 min"
     assert placeholders["global_window_check_drop_kelvin"] == "0.5 K"
@@ -1151,6 +1156,7 @@ async def test_room_settings_store_the_window_and_outdoor_values(hass, entry) ->
         {
             "setpoint_min": 16.0,
             "setpoint_max": 24.0,
+            "window_open_delay_seconds": 45.0,
             "window_warn_minutes": 60.0,
             "window_check_minutes": 0.0,
             "window_check_drop_kelvin": 0.5,
@@ -1169,7 +1175,11 @@ async def test_room_settings_store_the_window_and_outdoor_values(hass, entry) ->
     ):
         assert data[key] == value
         assert type(data[key]) is float
-    for key, value in (("window_warn_minutes", 60), ("window_check_minutes", 0)):
+    for key, value in (
+        ("window_open_delay_seconds", 45),
+        ("window_warn_minutes", 60),
+        ("window_check_minutes", 0),
+    ):
         assert data[key] == value
         assert type(data[key]) is int
     settings = resolve_settings({}, data)
@@ -1184,6 +1194,7 @@ async def test_room_settings_store_nothing_for_empty_new_numbers(hass, entry) ->
     for key in (
         "setpoint_min",
         "setpoint_max",
+        "window_open_delay_seconds",
         "window_warn_minutes",
         "window_check_minutes",
         "window_check_drop_kelvin",
@@ -1570,6 +1581,7 @@ async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
         "setpoint_max",
     ]
     assert list(section_fields(result, "windows_outdoor")) == [
+        "window_open_delay_seconds",
         "window_warn_minutes",
         "window_check_minutes",
         "window_check_drop_kelvin",
@@ -1598,6 +1610,7 @@ async def test_options_form_suggests_only_saved_numbers(hass, entry) -> None:
         "default_frost_temperature": "5.0 °C",
         "default_setpoint_min": "5.0 °C",
         "default_setpoint_max": "30.0 °C",
+        "default_window_open_delay_seconds": "30 s",
         "default_window_warn_minutes": "120 min",
         "default_window_check_minutes": "30 min",
         "default_window_check_drop_kelvin": "0.3 K",
@@ -1797,6 +1810,7 @@ async def test_options_flow_stores_the_new_sections_flat(hass, entry) -> None:
         options_input(
             room_thermostat={"setpoint_min": 16.0, "setpoint_max": 24.5},
             windows_outdoor={
+                "window_open_delay_seconds": 15.0,
                 "window_warn_minutes": 90.0,
                 "window_check_minutes": 20.0,
                 "window_check_drop_kelvin": 0.4,
@@ -1809,6 +1823,8 @@ async def test_options_flow_stores_the_new_sections_flat(hass, entry) -> None:
     options = dict(entry.options)
     assert options["setpoint_min"] == 16.0
     assert options["setpoint_max"] == 24.5
+    assert options["window_open_delay_seconds"] == 15
+    assert type(options["window_open_delay_seconds"]) is int
     assert options["window_warn_minutes"] == 90
     assert type(options["window_warn_minutes"]) is int
     assert options["window_check_minutes"] == 20
@@ -1831,6 +1847,7 @@ async def test_options_new_fields_empty_are_not_stored(hass, entry) -> None:
     for key in (
         "setpoint_min",
         "setpoint_max",
+        "window_open_delay_seconds",
         "window_warn_minutes",
         "window_check_minutes",
         "window_check_drop_kelvin",

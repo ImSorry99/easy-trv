@@ -85,6 +85,7 @@
             "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)",
             "setpoint_min": "Minimum target temperature",
             "setpoint_max": "Maximum target temperature",
+            "window_open_delay_seconds": "Delay before a window counts as open (seconds, 0 = immediately)",
             "window_warn_minutes": "Open-window warning (minutes, 0 = never)",
             "window_check_minutes": "Window contact check (minutes, 0 = off)",
             "window_check_drop_kelvin": "Cooling expected by the check (K)",
@@ -104,6 +105,7 @@
             "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}.",
             "setpoint_min": "The lowest target temperature the room accepts. 4.0 to 35.0 °C and below the maximum. Global is currently {global_setpoint_min}.",
             "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Global is currently {global_setpoint_max}.",
+            "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Global is currently {global_window_open_delay_seconds}.",
             "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Global is currently {global_window_warn_minutes}.",
             "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the cooling below, otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
             "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Global is currently {global_window_check_drop_kelvin}.",
@@ -252,6 +254,7 @@
             "name": "Windows and outdoor",
             "description": "What happens when a window is open for long and when it is warm outside. Number fields left empty use the built-in default.",
             "data": {
+              "window_open_delay_seconds": "Delay before a window counts as open (seconds, 0 = immediately)",
               "window_warn_minutes": "Open-window warning (minutes, 0 = never)",
               "window_check_minutes": "Window contact check (minutes, 0 = off)",
               "window_check_drop_kelvin": "Cooling expected by the check (K)",
@@ -259,6 +262,7 @@
               "outdoor_cutoff_celsius": "Outdoor cut-off temperature"
             },
             "data_description": {
+              "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Empty = {default_window_open_delay_seconds}.",
               "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Empty = {default_window_warn_minutes}.",
               "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the cooling below, otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Empty = {default_window_check_minutes}.",
               "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Empty = {default_window_check_drop_kelvin}.",

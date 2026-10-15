@@ -158,6 +158,11 @@ def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shape
         ),
         window_check_drop=settings.window_check_drop_kelvin,
         outdoor_cutoff=settings.outdoor_cutoff_celsius,
+        window_open_delay=(
+            timedelta(seconds=settings.window_open_delay_seconds)
+            if settings.window_open_delay_seconds
+            else None
+        ),
     )
 
 

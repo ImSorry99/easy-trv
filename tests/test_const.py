@@ -47,3 +47,5 @@ def test_new_setting_constants() -> None:
     assert const.DEFAULT_WINDOW_CHECK_MINUTES == 30
     assert const.DEFAULT_WINDOW_CHECK_DROP == 0.3
     assert const.DEFAULT_OUTDOOR_CUTOFF_CELSIUS is None
+    assert const.CONF_WINDOW_OPEN_DELAY == "window_open_delay_seconds"
+    assert const.DEFAULT_WINDOW_OPEN_DELAY == 30

@@ -220,6 +220,9 @@ class RoomConfig:
     window_check: timedelta | None = None
     window_check_drop: float = 0.3
     outdoor_cutoff: float | None = None
+    # How long a contact must stay open before the window counts as open;
+    # ``None``: at once.
+    window_open_delay: timedelta | None = None
 
 
 # --- State ---------------------------------------------------------------

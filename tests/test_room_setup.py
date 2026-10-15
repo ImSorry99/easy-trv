@@ -47,6 +47,7 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
         window_check=timedelta(minutes=30),
         window_check_drop=0.3,
         outdoor_cutoff=None,
+        window_open_delay=timedelta(seconds=30),
     )
 
 
@@ -228,3 +229,19 @@ def test_window_settings_reach_the_room_config() -> None:
 
     assert config.window_contacts == ("binary_sensor.w1", "binary_sensor.w2")
     assert config.window_warn is None
+
+
+@pytest.mark.parametrize(
+    ("seconds", "delay"),
+    [(0, None), (45, timedelta(seconds=45)), (600, timedelta(minutes=10))],
+)
+def test_the_window_open_delay_reaches_the_room_config(seconds, delay) -> None:
+    gateway = FakeGateway()
+    refs = {"climate.a": gateway.add_device("climate.a", IEEE_A)}
+    data = room_data(trvs=["climate.a"], window_open_delay_seconds=seconds)
+
+    config = room_config_from_subentry(
+        "sub1", "Living", data, refs, resolve_settings({}, data), NATIVE
+    )
+
+    assert config.window_open_delay == delay

@@ -1802,6 +1802,120 @@ async def test_an_open_contact_that_turns_unavailable_keeps_the_hold(
     assert [e.data["state"] for e in window_events] == ["open", "closed"]
 
 
+# Window open delay
+
+
+@pytest.fixture
+def climate_delay(make_controller, config) -> RoomController:
+    return make_controller(
+        cfg=with_climate(
+            config,
+            window_contacts=(CONTACT, "binary_sensor.w2"),
+            window_open_delay=timedelta(seconds=30),
+        )
+    )
+
+
+async def start_delayed(hass, controller, gateway) -> list:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, controller, gateway)
+    return async_capture_events(hass, "easy_trv_window_hold")
+
+
+async def test_a_window_opened_for_less_than_the_delay_changes_nothing(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    window_events = await start_delayed(hass, climate_delay, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 10, step=5)
+    hass.states.async_set(CONTACT, "off")
+    await advance(hass, freezer, 60, step=5)
+    assert climate_delay.window_open is False
+    assert gateway.writes == []
+    assert window_events == []
+
+
+async def test_a_window_open_for_the_delay_switches_the_room_off_after_it(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    window_events = await start_delayed(hass, climate_delay, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 25, step=5)
+    assert climate_delay.window_open is False
+    assert gateway.writes == []
+    await advance(hass, freezer, 10, step=5)
+    assert climate_delay.window_open is True
+    assert writes_to(gateway, IEEE_A, MODE) == [0]
+    assert [e.data["state"] for e in window_events] == ["open"]
+    # Closing is not delayed.
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert climate_delay.window_open is False
+    assert writes_to(gateway, IEEE_A, MODE) == [0, 4]
+
+
+async def test_the_delay_starts_again_for_a_window_opened_a_second_time(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    await start_delayed(hass, climate_delay, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 20, step=5)
+    hass.states.async_set(CONTACT, "off")
+    await advance(hass, freezer, 5, step=5)
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 25, step=5)
+    assert climate_delay.window_open is False
+    await advance(hass, freezer, 10, step=5)
+    assert climate_delay.window_open is True
+
+
+async def test_a_second_contact_opening_does_not_restart_the_delay(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    await start_delayed(hass, climate_delay, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 20, step=5)
+    hass.states.async_set("binary_sensor.w2", "on")
+    # One of the two closing again leaves the other one open.
+    hass.states.async_set(CONTACT, "off")
+    await advance(hass, freezer, 15, step=5)
+    assert climate_delay.window_open is True
+
+
+async def test_a_contact_open_at_start_applies_without_the_delay(
+    hass, climate_delay
+) -> None:
+    hass.states.async_set(CONTACT, "on")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await climate_delay.async_start()
+    await settle(hass)
+    assert climate_delay.window_open is True
+
+
+async def test_without_a_delay_an_open_window_applies_at_once(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert climate_window.window_open is True
+
+
+async def test_stopping_cancels_the_delay(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    await start_delayed(hass, climate_delay, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 5, step=5)
+    await climate_delay.async_stop()
+    await advance(hass, freezer, 60, step=5)
+    assert climate_delay.window_open is False
+    assert gateway.writes == []
+
+
 async def test_a_contact_attribute_change_is_not_a_window_event(
     hass, climate_window, gateway
 ) -> None:

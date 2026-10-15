@@ -129,6 +129,7 @@ def test_room_config_new_fields_default_to_off() -> None:
     assert cfg.window_warn is None
     assert cfg.window_check is None
     assert cfg.window_check_drop == 0.3
+    assert cfg.window_open_delay is None
     assert cfg.outdoor_cutoff is None
 
 
