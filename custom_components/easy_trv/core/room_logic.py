@@ -9,6 +9,7 @@ Assistant imports, so it can be tested without a running instance.
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, assert_never
 
+from custom_components.easy_trv.core import setpoint
 from custom_components.easy_trv.core.model import (
     EVENT_FAILSAFE,
     EVENT_RECOVERED,
@@ -32,6 +33,7 @@ from custom_components.easy_trv.core.model import (
     RestoreRoom,
     RetryDue,
     RoomConfig,
+    RoomMode,
     RoomParams,
     RoomState,
     RoomStatus,
@@ -153,17 +155,10 @@ class RoomLogic:
                 state, commands = self._on_retry_due(event, state)
             case OperationResult():
                 state, commands = self._on_result(event, now, state)
-            case (
-                SetRoomSetpoint()
-                | SetRoomMode()
-                | SetRoomPreset()
-                | RestoreRoom()
-                | TrvObserved()
-                | KnobSettled()
-                | WindowChanged()
-                | OutdoorChanged()
-            ):
-                # Handled from the room thermostat tasks on; no effect yet.
+            case SetRoomSetpoint() | SetRoomMode() | SetRoomPreset() | RestoreRoom():
+                state, commands = self._on_room_event(event, now, state)
+            case TrvObserved() | KnobSettled() | WindowChanged() | OutdoorChanged():
+                # Handled from the observation tasks on; no effect yet.
                 commands = []
             case _:
                 assert_never(event)
@@ -185,8 +180,51 @@ class RoomLogic:
         readings = {**state.readings, **{r.entity_id: r for r in event.sensors}}
         state = replace(state, readings=readings, trvs=trvs)
         state, commands = self._apply_settings(state, self._writable(state))
+        # Before the source: a room that starts switched off writes no value.
+        state, setpoint_commands = setpoint.reconcile_start(
+            self._cfg, state, now, event.reported, self._capability_of
+        )
         state, source_commands = self._reconcile_source(state, now)
-        return state, [*commands, *source_commands]
+        return state, [*commands, *setpoint_commands, *source_commands]
+
+    def _on_room_event(
+        self,
+        event: SetRoomSetpoint | SetRoomMode | SetRoomPreset | RestoreRoom,
+        now: datetime,
+        state: RoomState,
+    ) -> _Step:
+        """Route the events that set what the room owns to ``setpoint``."""
+        cfg, capability_of = self._cfg, self._capability_of
+        match event:
+            case SetRoomSetpoint():
+                return setpoint.on_set_setpoint(
+                    cfg, state, now, event.celsius, capability_of
+                )
+            case SetRoomMode():
+                return self._on_set_mode(event, now, state)
+            case SetRoomPreset():
+                return setpoint.on_set_preset(
+                    cfg, state, now, event.preset, capability_of
+                )
+            case RestoreRoom():
+                return setpoint.on_restore(cfg, state, now, event, capability_of)
+            case _:
+                assert_never(event)
+
+    def _on_set_mode(
+        self, event: SetRoomMode, now: datetime, state: RoomState
+    ) -> _Step:
+        """Switch the room on or off; switching on resyncs source and value first."""
+        resync: list[Intent] = []
+        if (
+            event.mode is RoomMode.HEAT
+            and self._cfg.setpoint_range is not None
+            and not setpoint.holding(state)
+        ):
+            state, resync = self._source_intents(state, now)
+        return setpoint.on_set_mode(
+            self._cfg, state, now, event.mode, self._capability_of, resync
+        )
 
     def _on_sensor_changed(
         self, event: SensorChanged, now: datetime, state: RoomState
@@ -268,6 +306,10 @@ class RoomLogic:
             current, pending_retry=_without(current.pending_retry, capability)
         )
         if trv in self._writable(state):
+            if setpoint.suspended(state) and isinstance(
+                intent, SetRoomTemperature | SetSource
+            ):
+                return self._with_trv(state, trv, updated), []
             return self._with_trv(state, trv, updated), [Execute(trv, intent)]
         if isinstance(intent, SETTING_INTENTS):
             # Dropped while the thermostat is away: re-apply on its return.
@@ -484,6 +526,10 @@ class RoomLogic:
             return state, [Log("debug", note)]
         current = state.trvs[trv]
         state = self._with_trv(state, trv, replace(current, failsafe_seen_at=now))
+        if setpoint.suspended(state):
+            return state, [
+                Log("debug", f"{trv}: fail-safe not re-enabled, room is idle")
+            ]
         blocker = self._reenable_blocker(current)
         if blocker is not None:
             note = f"{trv}: fail-safe not re-enabled, {blocker}"
@@ -533,21 +579,31 @@ class RoomLogic:
     def _use_internal(self, state: RoomState) -> _Step:
         """Tell every writable thermostat to regulate on its own sensor."""
         commands: list[Command] = [
-            Execute(trv, SetSource("internal")) for trv in self._writable(state)
+            Execute(trv, SetSource("internal"))
+            for trv in self._writable(state)
+            if not setpoint.suspended(state)
         ]
         return replace(state, source=Source.INTERNAL, active_sensor=None), commands
 
     def _use_external(self, state: RoomState, active: _Active, now: datetime) -> _Step:
         """Switch to the external source and send the current value at once."""
         commands: list[Command] = [
-            Execute(trv, SetSource("external")) for trv in self._writable(state)
+            Execute(trv, SetSource("external"))
+            for trv in self._writable(state)
+            if not setpoint.suspended(state)
         ]
         state = replace(state, source=Source.EXTERNAL, active_sensor=active.entity_id)
         state, value_commands = self._write_value(state, active, now)
         return state, [*commands, *value_commands]
 
     def _write_value(self, state: RoomState, active: _Active, now: datetime) -> _Step:
-        """Send the rounded active value to every writable thermostat."""
+        """Send the rounded active value to every writable thermostat.
+
+        A room that is off or on hold writes nothing; the value follows with the
+        resync when it heats again.
+        """
+        if setpoint.suspended(state):
+            return replace(state, debounce_pending=False), []
         celsius = round_tenth(active.value)
         commands: list[Command] = [
             Execute(trv, SetRoomTemperature(celsius)) for trv in self._writable(state)
@@ -619,6 +675,7 @@ class RoomLogic:
                 # A chain of retries is still running: let it finish first.
                 or capability in current.pending_retry
                 or 0 < attempts < self._params.max_attempts
+                or (setpoint.suspended(state) and isinstance(intent, SetSource))
             ):
                 continue
             trvs[trv] = replace(
@@ -670,6 +727,8 @@ class RoomLogic:
     def _resync_trv(self, state: RoomState, now: datetime, trv: str) -> _Step:
         """Bring a returning thermostat in line with the room's current state."""
         state, commands = self._apply_settings(state, [trv])
+        if setpoint.suspended(state):
+            return state, commands
         if state.source is Source.EXTERNAL:
             commands.append(Execute(trv, SetSource("external")))
             active = self._active(state, now)
@@ -679,6 +738,27 @@ class RoomLogic:
         elif state.source is Source.INTERNAL:
             commands.append(Execute(trv, SetSource("internal")))
         return state, commands
+
+    def _source_intents(
+        self, state: RoomState, now: datetime
+    ) -> tuple[RoomState, list[Intent]]:
+        """Return the source and value writes that bring a thermostat up to date."""
+        if state.source is Source.INTERNAL:
+            return state, [SetSource("internal")]
+        if state.source is not Source.EXTERNAL:
+            return state, []
+        intents: list[Intent] = [SetSource("external")]
+        active = self._active(state, now)
+        if active is not None:
+            celsius = round_tenth(active.value)
+            intents.append(SetRoomTemperature(celsius))
+            state = replace(
+                state,
+                last_written=celsius,
+                last_value_issued=now,
+                debounce_pending=False,
+            )
+        return state, intents
 
     # --- Helpers ---------------------------------------------------------
 
