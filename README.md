@@ -4,7 +4,7 @@ Easy TRV is a Home Assistant integration that lets Sonoff TRVZB radiator thermos
 
 It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one status sensor and one thin room thermostat (`climate`) that sets the same target and mode on all its thermostats.
 
-Status: version 0.2.0 is released (settings, adaptive mode, frost protection); the room thermostat, window contacts and outdoor cut-off are listed under Unreleased in the [`CHANGELOG`](CHANGELOG.md). See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
+Status: version 0.3.0 is released (room thermostat, window contacts, outdoor cut-off); see the [`CHANGELOG`](CHANGELOG.md) for what each version brought. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
 
 ## Supported devices
 
