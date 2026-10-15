@@ -202,7 +202,8 @@ def test_auto_range_takes_the_limits_the_thermostats_show() -> None:
     # Limits beyond the profile's are cut back to the profile's.
     assert _range(NATIVE, (2.0, 40.0)) == (4.0, 35.0, 0.5)
     # The numbers of the room do not count in auto.
-    assert _range(NATIVE, (7.0, 28.0), setpoint_min=10.0) == (7.0, 28.0, 0.5)
+    auto = {"setpoint_range": "auto", "setpoint_min": 10.0}
+    assert _range(NATIVE, (7.0, 28.0), **auto) == (7.0, 28.0, 0.5)
 
 
 def test_auto_range_without_limits_is_the_profile_range() -> None:
