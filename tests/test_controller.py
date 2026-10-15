@@ -2249,7 +2249,7 @@ async def test_silent_contact_issue_after_ten_minutes(
     await start_closed(hass, climate_window, gateway)
     silence(hass, CONTACT)
     await settle(hass)
-    assert climate_window.heating_state is HeatingState.RESTRICTED
+    assert climate_window.heating_state is HeatingState.RESTRICTED_CONTACT
     assert climate_window.silent_contacts == (CONTACT,)
     assert issue(hass, SILENT_ISSUE) is None
     await advance(hass, freezer, 9 * 60, step=60)
@@ -2351,7 +2351,7 @@ async def test_silent_set_change_reraises_issue(
     raised = issue(hass, SILENT_ISSUE)
     assert raised is not None
     assert raised.translation_placeholders["contacts"] == BATH
-    assert climate_window.heating_state is HeatingState.RESTRICTED
+    assert climate_window.heating_state is HeatingState.RESTRICTED_CONTACT
 
 
 async def test_a_state_change_that_keeps_the_silent_set_does_not_raise_it_again(
@@ -2378,7 +2378,7 @@ async def test_contact_reports_again_clears_issue(
     silence(hass, CONTACT)
     await advance(hass, freezer, 10 * 60, step=60)
     assert issue(hass, SILENT_ISSUE) is not None
-    assert climate_window.heating_state is HeatingState.RESTRICTED
+    assert climate_window.heating_state is HeatingState.RESTRICTED_CONTACT
     hass.states.async_set(CONTACT, "off", {"friendly_name": BALCONY})
     await settle(hass)
     assert issue(hass, SILENT_ISSUE) is None
@@ -2558,5 +2558,8 @@ async def test_deviations_name_the_thermostats_that_deviate(
     hass.states.async_set("climate.a", "unavailable")
     await settle(hass)
     assert climate.deviations == {"climate.a": "unavailable"}
-    assert climate.heating_state is HeatingState.RESTRICTED
-    assert climate.state_reasons == (HeatingState.RESTRICTED, HeatingState.HEATING)
+    assert climate.heating_state is HeatingState.RESTRICTED_UNAVAILABLE
+    assert climate.state_reasons == (
+        HeatingState.RESTRICTED_UNAVAILABLE,
+        HeatingState.HEATING,
+    )

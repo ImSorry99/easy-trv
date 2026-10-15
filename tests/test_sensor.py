@@ -269,7 +269,11 @@ HEATING_STATES = [
     "off_away",
     "window_pending",
     "emergency",
-    "restricted",
+    "restricted_unavailable",
+    "restricted_contact",
+    "restricted_unsupported",
+    "restricted_schedule",
+    "restricted_window_phase",
     "boost",
     "frost",
     "heating",
@@ -379,9 +383,9 @@ async def test_state_sensor_silent_contact_attributes(hass) -> None:
     await start(hass, entry)
 
     state = hass.states.get(STATE_SENSOR)
-    assert state.state == "restricted"
+    assert state.state == "restricted_contact"
     assert state.attributes["silent_contacts"] == ["binary_sensor.window"]
-    assert state.attributes["reasons"] == ["restricted", "heating"]
+    assert state.attributes["reasons"] == ["restricted_contact", "heating"]
 
     hass.states.async_set("binary_sensor.window", "off")
     await settle(hass)
@@ -398,7 +402,7 @@ async def test_state_sensor_thermostat_deviation(hass, entry) -> None:
     await settle(hass)
 
     state = hass.states.get(STATE_SENSOR)
-    assert state.state == "restricted"
+    assert state.state == "restricted_unavailable"
     assert state.attributes["thermostats"] == {"climate.a": "unavailable"}
 
     hass.states.async_set("climate.a", "heat")
@@ -485,7 +489,11 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
         "off_away": "mdi:home-export-outline",
         "window_pending": "mdi:timer-sand",
         "emergency": "mdi:thermometer-alert",
-        "restricted": "mdi:alert",
+        "restricted_unavailable": "mdi:lan-disconnect",
+        "restricted_contact": "mdi:signal-off",
+        "restricted_unsupported": "mdi:puzzle-remove-outline",
+        "restricted_schedule": "mdi:calendar-clock",
+        "restricted_window_phase": "mdi:window-open",
         "boost": "mdi:fire",
         "frost": "mdi:snowflake-thermometer",
         "heating": "mdi:radiator",

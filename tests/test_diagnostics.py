@@ -232,8 +232,12 @@ async def test_diagnostics_carry_the_room_state(hass, freezer) -> None:
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     room = diag["rooms"][subentry_id]
-    assert room["heating_state"] == "restricted"
-    assert room["state_reasons"] == ["restricted", "heating"]
+    assert room["heating_state"] == "restricted_unavailable"
+    assert room["state_reasons"] == [
+        "restricted_unavailable",
+        "restricted_contact",
+        "heating",
+    ]
     assert room["state_since"] == "2026-10-15T08:00:00+00:00"
     assert room["window_off_at"] is None
     assert room["silent_contacts"] == ["binary_sensor.window"]

@@ -25,7 +25,11 @@
           "off_away": "mdi:home-export-outline",
           "window_pending": "mdi:timer-sand",
           "emergency": "mdi:thermometer-alert",
-          "restricted": "mdi:alert",
+          "restricted_unavailable": "mdi:lan-disconnect",
+          "restricted_contact": "mdi:signal-off",
+          "restricted_unsupported": "mdi:puzzle-remove-outline",
+          "restricted_schedule": "mdi:calendar-clock",
+          "restricted_window_phase": "mdi:window-open",
           "boost": "mdi:fire",
           "frost": "mdi:snowflake-thermometer",
           "heating": "mdi:radiator"

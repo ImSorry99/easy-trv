@@ -175,7 +175,11 @@
           "off_away": "Aus: Abwesenheit",
           "window_pending": "Fenster offen, schaltet gleich ab",
           "emergency": "Notbetrieb",
-          "restricted": "Eingeschränkt",
+          "restricted_unavailable": "Eingeschränkt: TRV nicht erreichbar",
+          "restricted_contact": "Eingeschränkt: Fensterkontakt meldet nichts",
+          "restricted_unsupported": "Eingeschränkt: TRV-Funktion fehlt",
+          "restricted_schedule": "Eingeschränkt: TRV im Wochenplan",
+          "restricted_window_phase": "Eingeschränkt: TRV-Fenstererkennung aktiv",
           "boost": "Handbetrieb (Boost)",
           "frost": "Frostschutz",
           "heating": "Heizbetrieb"

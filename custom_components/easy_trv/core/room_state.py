@@ -35,7 +35,11 @@ class HeatingState(StrEnum):
     OFF_AWAY = "off_away"
     WINDOW_PENDING = "window_pending"
     EMERGENCY = "emergency"
-    RESTRICTED = "restricted"
+    RESTRICTED_UNAVAILABLE = "restricted_unavailable"
+    RESTRICTED_CONTACT = "restricted_contact"
+    RESTRICTED_UNSUPPORTED = "restricted_unsupported"
+    RESTRICTED_SCHEDULE = "restricted_schedule"
+    RESTRICTED_WINDOW_PHASE = "restricted_window_phase"
     BOOST = "boost"
     FROST = "frost"
     HEATING = "heating"
@@ -53,9 +57,10 @@ class StateFacts:
     failsafe_recent: bool
     # Thermostat climate entity -> why it deviates (see ``thermostat_deviations``).
     deviations: Mapping[str, str]
-    # A thermostat is unavailable, unsupported or carries a note, whatever else
-    # ails it (``deviations`` keeps only the first reason, for display).
-    thermostat_restricted: bool
+    # Every one of ``unavailable``, ``unsupported``, ``schedule`` and
+    # ``window_phase`` that holds for at least one thermostat, whatever else ails
+    # it (``deviations`` keeps only the first reason, for display).
+    thermostat_reasons: frozenset[str]
     silent_contacts: frozenset[str]
 
 
@@ -72,11 +77,18 @@ def internal_source(state: RoomState, config: RoomConfig) -> bool:
     return bool(config.temp_sensors) and state.source is not Source.EXTERNAL
 
 
-def _restricts(trv: TrvState) -> bool:
-    """Return whether the thermostat is unavailable, unsupported or carries a note."""
-    return trv.health in {TrvHealth.UNAVAILABLE, TrvHealth.UNSUPPORTED} or (
-        trv.note in {Note.SCHEDULE, Note.WINDOW_PHASE}
-    )
+def _restrictions(trv: TrvState) -> set[str]:
+    """Return every way the thermostat restricts the room (an error is none)."""
+    reasons: set[str] = set()
+    if trv.health is TrvHealth.UNAVAILABLE:
+        reasons.add("unavailable")
+    if trv.health is TrvHealth.UNSUPPORTED:
+        reasons.add("unsupported")
+    if trv.note is Note.SCHEDULE:
+        reasons.add("schedule")
+    if trv.note is Note.WINDOW_PHASE:
+        reasons.add("window_phase")
+    return reasons
 
 
 def _deviation(trv: TrvState) -> str | None:
@@ -122,7 +134,9 @@ def state_facts(  # noqa: PLR0913 - the room, its config, the clock and the two 
         internal_source=internal_source(state, config),
         failsafe_recent=failsafe_recent(state, now, refresh),
         deviations=thermostat_deviations(state),
-        thermostat_restricted=any(_restricts(trv) for trv in state.trvs.values()),
+        thermostat_reasons=frozenset().union(
+            *(_restrictions(trv) for trv in state.trvs.values())
+        ),
         silent_contacts=silent_contacts,
     )
 
@@ -142,8 +156,13 @@ def heating_state(facts: StateFacts) -> tuple[HeatingState, tuple[HeatingState, 
         HeatingState.OFF_AWAY: False,
         HeatingState.WINDOW_PENDING: facts.window_pending,
         HeatingState.EMERGENCY: facts.internal_source or facts.failsafe_recent,
-        HeatingState.RESTRICTED: facts.thermostat_restricted
-        or bool(facts.silent_contacts),
+        HeatingState.RESTRICTED_UNAVAILABLE: "unavailable" in facts.thermostat_reasons,
+        HeatingState.RESTRICTED_CONTACT: bool(facts.silent_contacts),
+        HeatingState.RESTRICTED_UNSUPPORTED: "unsupported" in facts.thermostat_reasons,
+        HeatingState.RESTRICTED_SCHEDULE: "schedule" in facts.thermostat_reasons,
+        HeatingState.RESTRICTED_WINDOW_PHASE: (
+            "window_phase" in facts.thermostat_reasons
+        ),
         HeatingState.BOOST: False,
         HeatingState.FROST: facts.operation is OperatingMode.FROST,
         HeatingState.HEATING: facts.operation is OperatingMode.HEAT,

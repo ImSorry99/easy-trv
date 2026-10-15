@@ -50,7 +50,7 @@ def facts(**overrides: object) -> StateFacts:
         "internal_source": False,
         "failsafe_recent": False,
         "deviations": {},
-        "thermostat_restricted": False,
+        "thermostat_reasons": frozenset(),
         "silent_contacts": frozenset(),
     }
     return StateFacts(**{**base, **overrides})  # type: ignore[arg-type]
@@ -146,39 +146,99 @@ def test_emergency_from_failsafe() -> None:
     assert reasons == (HeatingState.EMERGENCY, HeatingState.HEATING)
 
 
-def test_restricted_from_thermostat() -> None:
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("unavailable", HeatingState.RESTRICTED_UNAVAILABLE),
+        ("unsupported", HeatingState.RESTRICTED_UNSUPPORTED),
+        ("schedule", HeatingState.RESTRICTED_SCHEDULE),
+        ("window_phase", HeatingState.RESTRICTED_WINDOW_PHASE),
+    ],
+)
+def test_restricted_from_each_thermostat_reason_alone(
+    reason: str, expected: HeatingState
+) -> None:
+    state, reasons = heating_state(facts(thermostat_reasons=frozenset({reason})))
+    assert state is expected
+    assert reasons == (expected, HeatingState.HEATING)
+
+
+def test_restricted_from_silent_contact() -> None:
     state, reasons = heating_state(
-        facts(deviations={"climate.a": "schedule"}, thermostat_restricted=True)
+        facts(silent_contacts=frozenset({"binary_sensor.w"}))
     )
-    assert state is HeatingState.RESTRICTED
-    assert reasons == (HeatingState.RESTRICTED, HeatingState.HEATING)
+    assert state is HeatingState.RESTRICTED_CONTACT
+    assert reasons == (HeatingState.RESTRICTED_CONTACT, HeatingState.HEATING)
+
+
+def test_the_five_restrictions_in_priority_order() -> None:
+    state, reasons = heating_state(
+        facts(
+            thermostat_reasons=frozenset(
+                {"window_phase", "schedule", "unsupported", "unavailable"}
+            ),
+            silent_contacts=frozenset({"binary_sensor.w"}),
+        )
+    )
+    assert state is HeatingState.RESTRICTED_UNAVAILABLE
+    assert reasons == (
+        HeatingState.RESTRICTED_UNAVAILABLE,
+        HeatingState.RESTRICTED_CONTACT,
+        HeatingState.RESTRICTED_UNSUPPORTED,
+        HeatingState.RESTRICTED_SCHEDULE,
+        HeatingState.RESTRICTED_WINDOW_PHASE,
+        HeatingState.HEATING,
+    )
+
+
+def test_a_contact_restricts_before_a_schedule() -> None:
+    state, reasons = heating_state(
+        facts(
+            thermostat_reasons=frozenset({"schedule"}),
+            silent_contacts=frozenset({"binary_sensor.w"}),
+        )
+    )
+    assert state is HeatingState.RESTRICTED_CONTACT
+    assert reasons == (
+        HeatingState.RESTRICTED_CONTACT,
+        HeatingState.RESTRICTED_SCHEDULE,
+        HeatingState.HEATING,
+    )
 
 
 @pytest.mark.parametrize(
-    ("health", "note"),
+    ("health", "note", "expected"),
     [
-        (TrvHealth.UNAVAILABLE, None),
-        (TrvHealth.UNSUPPORTED, None),
-        (TrvHealth.OK, Note.SCHEDULE),
-        (TrvHealth.OK, Note.WINDOW_PHASE),
+        (TrvHealth.UNAVAILABLE, None, HeatingState.RESTRICTED_UNAVAILABLE),
+        (TrvHealth.UNSUPPORTED, None, HeatingState.RESTRICTED_UNSUPPORTED),
+        (TrvHealth.OK, Note.SCHEDULE, HeatingState.RESTRICTED_SCHEDULE),
+        (TrvHealth.OK, Note.WINDOW_PHASE, HeatingState.RESTRICTED_WINDOW_PHASE),
     ],
 )
-def test_restricted_from_each_deviation(health: TrvHealth, note: Note | None) -> None:
+def test_restricted_from_each_deviation(
+    health: TrvHealth, note: Note | None, expected: HeatingState
+) -> None:
     st = with_trv(RoomState.initial(CFG), "climate.a", health=health, note=note)
     assert heating_state(room_facts(st)) == (
-        HeatingState.RESTRICTED,
-        (HeatingState.RESTRICTED, HeatingState.HEATING),
+        expected,
+        (expected, HeatingState.HEATING),
     )
 
 
-@pytest.mark.parametrize("note", [Note.SCHEDULE, Note.WINDOW_PHASE])
-def test_fault_and_note_both_in_reasons(note: Note) -> None:
+@pytest.mark.parametrize(
+    ("note", "expected"),
+    [
+        (Note.SCHEDULE, HeatingState.RESTRICTED_SCHEDULE),
+        (Note.WINDOW_PHASE, HeatingState.RESTRICTED_WINDOW_PHASE),
+    ],
+)
+def test_fault_and_note_both_in_reasons(note: Note, expected: HeatingState) -> None:
     st = with_trv(
         RoomState.initial(CFG), "climate.a", health=TrvHealth.ERROR, note=note
     )
     assert heating_state(room_facts(st)) == (
         HeatingState.FAULT,
-        (HeatingState.FAULT, HeatingState.RESTRICTED, HeatingState.HEATING),
+        (HeatingState.FAULT, expected, HeatingState.HEATING),
     )
 
 
@@ -188,26 +248,48 @@ def test_fault_and_schedule_note_both_in_reasons() -> None:
     st = with_trv(st, "climate.b", health=TrvHealth.OK)
     facts_ = room_facts(st)
     assert facts_.deviations == {"climate.a": "error"}
+    assert facts_.thermostat_reasons == {"schedule"}
     assert heating_state(facts_) == (
         HeatingState.FAULT,
-        (HeatingState.FAULT, HeatingState.RESTRICTED, HeatingState.HEATING),
+        (HeatingState.FAULT, HeatingState.RESTRICTED_SCHEDULE, HeatingState.HEATING),
     )
 
 
 def test_fault_alone_does_not_restrict() -> None:
     st = with_trv(RoomState.initial(CFG), "climate.a", health=TrvHealth.ERROR)
+    assert room_facts(st).thermostat_reasons == frozenset()
     assert heating_state(room_facts(st)) == (
         HeatingState.FAULT,
         (HeatingState.FAULT, HeatingState.HEATING),
     )
 
 
-def test_restricted_from_silent_contact() -> None:
-    state, reasons = heating_state(
-        facts(silent_contacts=frozenset({"binary_sensor.w"}))
+def test_every_reason_of_a_thermostat_counts() -> None:
+    # Unavailable with a note: both reasons hold, though ``deviations`` shows one.
+    st = with_trv(
+        RoomState.initial(CFG),
+        "climate.a",
+        health=TrvHealth.UNAVAILABLE,
+        note=Note.SCHEDULE,
     )
-    assert state is HeatingState.RESTRICTED
-    assert reasons == (HeatingState.RESTRICTED, HeatingState.HEATING)
+    facts_ = room_facts(st)
+    assert facts_.deviations == {"climate.a": "unavailable"}
+    assert facts_.thermostat_reasons == {"unavailable", "schedule"}
+    assert heating_state(facts_) == (
+        HeatingState.RESTRICTED_UNAVAILABLE,
+        (
+            HeatingState.RESTRICTED_UNAVAILABLE,
+            HeatingState.RESTRICTED_SCHEDULE,
+            HeatingState.HEATING,
+        ),
+    )
+
+
+def test_the_reasons_of_all_thermostats_are_collected() -> None:
+    st = RoomState.initial(CFG)
+    st = with_trv(st, "climate.a", health=TrvHealth.UNSUPPORTED)
+    st = with_trv(st, "climate.b", note=Note.WINDOW_PHASE)
+    assert room_facts(st).thermostat_reasons == {"unsupported", "window_phase"}
 
 
 def test_emergency_before_restricted() -> None:
@@ -215,7 +297,11 @@ def test_emergency_before_restricted() -> None:
         facts(internal_source=True, silent_contacts=frozenset({"binary_sensor.w"}))
     ) == (
         HeatingState.EMERGENCY,
-        (HeatingState.EMERGENCY, HeatingState.RESTRICTED, HeatingState.HEATING),
+        (
+            HeatingState.EMERGENCY,
+            HeatingState.RESTRICTED_CONTACT,
+            HeatingState.HEATING,
+        ),
     )
 
 
@@ -227,7 +313,7 @@ def test_placeholders_never_hold() -> None:
         facts(window_pending=True, internal_source=True, failsafe_recent=True),
         facts(
             deviations={"climate.a": "error", "climate.b": "schedule"},
-            thermostat_restricted=True,
+            thermostat_reasons=frozenset({"schedule"}),
             silent_contacts=frozenset({"binary_sensor.w"}),
         ),
     ]
@@ -246,7 +332,11 @@ def test_enum_order() -> None:
         "off_away",
         "window_pending",
         "emergency",
-        "restricted",
+        "restricted_unavailable",
+        "restricted_contact",
+        "restricted_unsupported",
+        "restricted_schedule",
+        "restricted_window_phase",
         "boost",
         "frost",
         "heating",
@@ -325,7 +415,7 @@ def test_state_facts_collects_the_room() -> None:
         internal_source=False,
         failsafe_recent=False,
         deviations={"climate.b": "schedule"},
-        thermostat_restricted=True,
+        thermostat_reasons=frozenset({"schedule"}),
         silent_contacts=silent,
     )
 

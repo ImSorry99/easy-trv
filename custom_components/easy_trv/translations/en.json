@@ -175,7 +175,11 @@
           "off_away": "Off: away",
           "window_pending": "Window open, switching off soon",
           "emergency": "Emergency mode",
-          "restricted": "Restricted",
+          "restricted_unavailable": "Restricted: thermostat not reachable",
+          "restricted_contact": "Restricted: window contact silent",
+          "restricted_unsupported": "Restricted: thermostat lacks a function",
+          "restricted_schedule": "Restricted: thermostat on its schedule",
+          "restricted_window_phase": "Restricted: thermostat's window detection active",
           "boost": "Manual (boost)",
           "frost": "Frost protection",
           "heating": "Heating"
