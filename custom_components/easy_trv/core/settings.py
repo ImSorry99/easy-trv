@@ -32,6 +32,7 @@ DEFAULT_OUTDOOR_CUTOFF_CELSIUS: Final[float | None] = None  # None = off
 DEFAULT_WINDOW_OPEN_DELAY_SECONDS: Final = 30
 
 _KEY_HYSTERESIS: Final = "hysteresis"
+_KEY_SETPOINT_RANGE: Final = "setpoint_range"
 _KEY_SETPOINT_MIN: Final = "setpoint_min"
 _KEY_SETPOINT_MAX: Final = "setpoint_max"
 _KEY_OUTDOOR_CUTOFF: Final = "outdoor_cutoff"  # room-only switch: global / off
@@ -52,7 +53,7 @@ DEFAULTS: Final[Mapping[str, Any]] = {
     "adaptive_mode": DEFAULT_ADAPTIVE_MODE,
     "frost_temperature": DEFAULT_FROST_TEMPERATURE,
     "profile": DEFAULT_PROFILE,
-    "setpoint_range": DEFAULT_SETPOINT_RANGE,
+    _KEY_SETPOINT_RANGE: DEFAULT_SETPOINT_RANGE,
     _KEY_SETPOINT_MIN: DEFAULT_SETPOINT_MIN,
     _KEY_SETPOINT_MAX: DEFAULT_SETPOINT_MAX,
     "window_warn_minutes": DEFAULT_WINDOW_WARN_MINUTES,
@@ -137,6 +138,19 @@ def _coerce(key: str, value: Any) -> Any:
     return value
 
 
+def _with_range_choice(layer: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return ``layer`` with ``setpoint_range: manual`` if it predates that choice.
+
+    Options and rooms saved before 0.4.0 have no range choice; their own
+    minimum or maximum was meant as the range, so they count as manual.
+    """
+    if _KEY_SETPOINT_RANGE in layer or not any(
+        _is_set(key, layer.get(key)) for key in (_KEY_SETPOINT_MIN, _KEY_SETPOINT_MAX)
+    ):
+        return layer
+    return {**layer, _KEY_SETPOINT_RANGE: "manual"}
+
+
 def resolve_settings(
     options: Mapping[str, Any], room: Mapping[str, Any]
 ) -> RoomSettings:
@@ -150,8 +164,8 @@ def resolve_settings(
         ValueError: ``setpoint_min`` is not below ``setpoint_max``.
 
     """
-    room_values = overrides(room)
-    global_values = overrides(options)
+    room_values = overrides(_with_range_choice(room))
+    global_values = overrides(_with_range_choice(options))
     resolved = {
         key: _coerce(key, room_values.get(key, global_values.get(key, default)))
         for key, default in DEFAULTS.items()

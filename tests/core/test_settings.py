@@ -185,3 +185,28 @@ def test_setpoint_min_must_be_below_max():
     with pytest.raises(ValueError, match="setpoint_min"):
         resolve_settings({"setpoint_max": 4.0}, {})
     assert resolve_settings({}, {"setpoint_min": 29.5}).setpoint_min == 29.5
+
+
+def test_the_setpoint_range_is_auto_by_default():
+    assert resolve_settings({}, {}).setpoint_range == "auto"
+    assert resolve_settings({"setpoint_range": "manual"}, {}).setpoint_range == "manual"
+    room = {"setpoint_range": "auto"}
+    assert resolve_settings({"setpoint_range": "manual"}, room).setpoint_range == "auto"
+
+
+@pytest.mark.parametrize(
+    ("options", "room", "expected"),
+    [
+        # Saved before the choice existed: own limits mean manual.
+        ({"setpoint_max": 24.0}, {}, "manual"),
+        ({}, {"setpoint_min": 16.0}, "manual"),
+        # The room's limits make only that room manual.
+        ({"setpoint_range": "auto"}, {"setpoint_min": 16.0}, "manual"),
+        # A saved choice wins over the limits, also "global" in a room.
+        ({"setpoint_range": "auto", "setpoint_max": 24.0}, {}, "auto"),
+        ({}, {"setpoint_range": "global", "setpoint_min": 16.0}, "auto"),
+        ({"setpoint_max": 24.0}, {"setpoint_range": "auto"}, "auto"),
+    ],
+)
+def test_limits_saved_before_the_range_choice_count_as_manual(options, room, expected):
+    assert resolve_settings(options, room).setpoint_range == expected
