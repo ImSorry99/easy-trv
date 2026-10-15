@@ -346,7 +346,7 @@ The diagnostics contain the thermostats' IEEE addresses and entity ids. Remove o
 | Window contact: off, restore, long-open and suspect issues, restart | | |
 | Outdoor cut-off with template sensor, deadband | | |
 | Heating state: heating / frost / off, window pending and off, event on change, restart | | |
-| Silent window contact: `restricted` at once, Repairs issue after 10 minutes, clears on return | | |
+| Silent window contact: `restricted` (or among the `reasons` when a state with higher priority holds), Repairs issue after 10 minutes, clears on return | | |
 | Area of the room device: set at start, moved on change, empty field, hand-set area kept | | |
 | Hiding: six entities and the climate entity hidden, still working, hand choices kept, shown again on off / room override / thermostat removed | | |
 | S1: off thermostat after reload / after value write | | |

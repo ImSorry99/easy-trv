@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Sensor **Heating state** per room (`sensor.<room>_heating_state`): one of eleven states (`fault`, `off_manual`, `off_window`, `off_outdoor`, `off_away`, `window_pending`, `emergency`, `restricted`, `boost`, `frost`, `heating`) with the attributes `reasons`, `since`, `window_off_at`, `thermostats` and `silent_contacts`; `off_away` and `boost` are reserved and do not occur yet
 - Event `easy_trv_state_changed` (`room`, `state`, `previous`, `reasons`) when the heating state changes
 - Diagnostics carry the room state: `heating_state`, `state_reasons`, `state_since`, `window_off_at`, `silent_contacts` and `deviations` for every room
-- Repairs issue `window_contact_unavailable`: a window contact that has said nothing (unavailable or unknown) for 10 minutes is reported; the room shows `restricted` from the first moment
+- Repairs issue `window_contact_unavailable`: a window contact that has said nothing (unavailable, unknown or missing) for 10 minutes is reported; the room shows `restricted`, or lists it among the `reasons` when a state with higher priority holds
 - Optional area for custom rooms and when editing a room; the room's device is put into the room's area at every start when it has none (so rooms from older versions get theirs), and moved when the area is changed in the edit form
 - Setting **Hide thermostat entities** (global and per room, default off): hides the climate entity of each thermostat and the six device settings Easy TRV writes (a setting left as set in the thermostat stays visible); they keep working and are shown again when the setting is turned off, the thermostat or room is removed, or the integration is removed
 - Profile key `entity` (`domain` and `translation_key`, both required) on a capability, naming the entity that shows it; only used for hiding
@@ -23,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- An unavailable window contact is no longer invisible: the room shows `restricted` at once and Repairs reports it after 10 minutes. The behaviour is unchanged: the contact keeps its last state, and one never seen counts as closed
+- An unavailable window contact is no longer invisible: the room shows `restricted`, or lists it among the `reasons` when a state with higher priority holds, and Repairs reports it after 10 minutes. The behaviour is unchanged: the contact keeps its last state, and one never seen counts as closed
 
 ## [0.4.1] - 2026-10-15
 

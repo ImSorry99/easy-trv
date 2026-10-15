@@ -2293,7 +2293,7 @@ async def test_a_missing_contact_is_named_by_its_entity_id(
     assert raised.translation_placeholders["contacts"] == CONTACT
 
 
-async def test_silent_contact_flapping_does_not_restart_timer(
+async def test_silent_contact_timer_restarts_only_after_recovery(
     hass, freezer, climate_window, gateway
 ) -> None:
     await start_closed(hass, climate_window, gateway)
