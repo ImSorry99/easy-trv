@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-15
+
 ### Added
 
 - Attribute `hint` on the heating state sensor: plain text in the language of Home Assistant that names the thermostats and window contacts behind a fault or a restriction, for example "Sofa valve not reachable; Balcony door reports nothing (unavailable)"
@@ -123,7 +125,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/ImSorry99/easy-trv/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ImSorry99/easy-trv/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/ImSorry99/easy-trv/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ImSorry99/easy-trv/compare/v0.3.0...v0.4.0
