@@ -331,7 +331,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
     async def async_step_custom(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        """Ask for the name of a room that does not come from an area."""
+        """Ask for the name, and optionally the area, of a room not from an area."""
         errors: dict[str, str] = {}
         if user_input is not None:
             name = user_input[CONF_NAME].strip()
@@ -341,8 +341,14 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                 errors[CONF_NAME] = _ERR_NAME_EXISTS
             else:
                 self._name = name
+                self._area_id = user_input.get(CONF_AREA) or None
                 return await self.async_step_entities()
-        schema = vol.Schema({vol.Required(CONF_NAME): TextSelector()})
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_NAME): TextSelector(),
+                vol.Optional(CONF_AREA): AreaSelector(),
+            }
+        )
         return self.async_show_form(
             step_id=_STEP_CUSTOM,
             data_schema=self.add_suggested_values_to_schema(schema, user_input),
@@ -374,7 +380,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        """Edit the name, thermostats and sensors of a room, then its settings."""
+        """Edit the name, area, thermostats and sensors of a room, then its settings."""
         subentry = self._get_reconfigure_subentry()
         entry = self._get_entry()
         profiles = await self._async_profiles()
@@ -391,10 +397,15 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                 )
             if not errors:
                 self._name = name
+                self._area_id = user_input.get(CONF_AREA) or None
                 self._entities = {key: user_input[key] for key in _ENTITY_KEYS}
                 return await self.async_step_settings()
         schema = vol.Schema(
-            {vol.Required(CONF_NAME): TextSelector(), **_entity_fields()}
+            {
+                vol.Required(CONF_NAME): TextSelector(),
+                vol.Optional(CONF_AREA): AreaSelector(),
+                **_entity_fields(),
+            }
         )
         return self.async_show_form(
             step_id=_STEP_RECONFIGURE,
@@ -425,9 +436,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
             if not errors:
                 data = {
                     CONF_NAME: self._name,
-                    CONF_AREA: subentry.data.get(CONF_AREA)
-                    if subentry
-                    else self._area_id,
+                    CONF_AREA: self._area_id,
                     **self._entities,
                     **settings,
                 }
@@ -437,6 +446,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                         data=data,
                         unique_id=self._name.casefold(),
                     )
+                self._move_device_to_new_area(entry, subentry)
                 # The update listener of the entry reloads it. The data is
                 # replaced, not merged: a number the user emptied must go.
                 return self.async_update_and_abort(
@@ -465,6 +475,30 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                 f"global_{key}": text for key, text in global_texts.items()
             },
         )
+
+    def _move_device_to_new_area(
+        self, entry: ConfigEntry, subentry: ConfigSubentry
+    ) -> None:
+        """Put the room's device into the area the person just chose.
+
+        Only a different area that exists moves the device; leaving the field
+        empty or unchanged keeps the device where it is, so an area the person
+        gave the device by hand stays. A room that never ran has no device yet:
+        the setup puts it into the area.
+        """
+        area_id = self._area_id
+        if (
+            not area_id
+            or area_id == subentry.data.get(CONF_AREA)
+            or ar.async_get(self.hass).async_get_area(area_id) is None
+        ):
+            return
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device_by_identifier(
+            (DOMAIN, subentry.subentry_id), entry.entry_id
+        )
+        if device is not None:
+            registry.async_update_device(device.id, area_id=area_id)
 
     def _profile_errors(
         self,

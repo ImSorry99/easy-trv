@@ -11,6 +11,7 @@ from homeassistant.components.climate.const import ATTR_MAX_TEMP, ATTR_MIN_TEMP
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
 
@@ -341,6 +342,28 @@ def _area_name(hass: HomeAssistant, subentry: ConfigSubentry) -> str | None:
     return area.name if area is not None else None
 
 
+def _assign_room_areas(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> None:
+    """Put the device of every room into the room's area, where it has none.
+
+    ``suggested_area`` only places a device when Home Assistant creates it, so
+    the devices that exist already (and those of rooms that got an area later)
+    are placed here, after the platforms have created them. A device that has
+    an area stays there: the person may have chosen it. A room whose area was
+    deleted is left alone. The entities follow their device.
+    """
+    areas = ar.async_get(hass)
+    devices = dr.async_get(hass)
+    for subentry_id in entry.runtime_data.rooms:
+        area_id = entry.subentries[subentry_id].data.get(CONF_AREA)
+        if not area_id or areas.async_get_area(area_id) is None:
+            continue
+        device = devices.async_get_device_by_identifier(
+            (DOMAIN, subentry_id), entry.entry_id
+        )
+        if device is not None and device.area_id is None:
+            devices.async_update_device(device.id, area_id=area_id)
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate an entry to the current version.
 
@@ -435,6 +458,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     _remove_operating_mode_selects(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _assign_room_areas(hass, entry)
 
     async def _start_rooms(_hass: HomeAssistant) -> None:
         for subentry_id, controller in rooms.items():

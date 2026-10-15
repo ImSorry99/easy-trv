@@ -124,11 +124,18 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     }
     entity_fields = {"trvs", "temp_sensors", "humidity_sensors", "window_contacts"}
     assert set(room["step"]["entities"]["data"]) == entity_fields
-    assert set(room["step"]["reconfigure"]["data"]) == {"name", *entity_fields}
+    assert set(room["step"]["reconfigure"]["data"]) == {
+        "name",
+        "area_id",
+        *entity_fields,
+    }
     assert set(room["step"]["settings"]["data"]) == settings_fields
     assert set(room["step"]["settings"]["data_description"]) == settings_fields
     assert set(room["step"]["from_area"]["data"]) == {"area_id"}
-    assert set(room["step"]["custom"]["data"]) == {"name"}
+    assert set(room["step"]["custom"]["data"]) == {"name", "area_id"}
+    # The optional area field says what it does.
+    assert "area_id" in room["step"]["custom"]["data_description"]
+    assert "area_id" in room["step"]["reconfigure"]["data_description"]
     assert set(room["step"]["user"]["menu_options"]) == {"from_area", "custom"}
     assert set(room["initiate_flow"]) == {"user", "reconfigure"}
     options = data["options"]["step"]["init"]["sections"]

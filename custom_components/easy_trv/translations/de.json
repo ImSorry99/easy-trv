@@ -35,7 +35,11 @@
         "custom": {
           "title": "Eigener Raum",
           "data": {
-            "name": "Raumname"
+            "name": "Raumname",
+            "area_id": "Bereich"
+          },
+          "data_description": {
+            "area_id": "Die Easy-TRV-Entitäten des Raums kommen in diesen Bereich."
           }
         },
         "entities": {
@@ -57,12 +61,14 @@
           "title": "Raum bearbeiten",
           "data": {
             "name": "Raumname",
+            "area_id": "Bereich",
             "trvs": "Thermostate (ZHA)",
             "temp_sensors": "Temperatursensoren",
             "humidity_sensors": "Feuchtesensoren",
             "window_contacts": "Fenster- und Türkontakte"
           },
           "data_description": {
+            "area_id": "Die Easy-TRV-Entitäten des Raums kommen in diesen Bereich.",
             "trvs": "Die ZHA-Thermostate, die diesen Raum heizen. Ein Thermostat kann nur zu einem Raum gehören.",
             "temp_sensors": "Reihenfolge = Priorität; der erste brauchbare Sensor wird verwendet.",
             "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet.",

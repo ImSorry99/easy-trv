@@ -6,6 +6,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import CoreState
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
@@ -14,6 +15,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.easy_trv import issues
 from custom_components.easy_trv.adapters.zha_gateway import ZhaUnavailable
 from custom_components.easy_trv.const import (
+    CONF_AREA,
     CONF_OUTDOOR_CUTOFF_CELSIUS,
     CONF_OUTDOOR_SENSOR,
     DOMAIN,
@@ -901,3 +903,89 @@ async def test_deleting_a_room_removes_its_climate_entity(hass) -> None:
     assert registry.async_get("climate.bedroom_heating") is None
     assert hass.states.get("climate.bedroom_heating") is None
     assert registry.async_get("climate.living_heating") is not None
+
+
+# --- Areas ----------------------------------------------------------------
+
+
+def pre_register_room_device(hass, entry, subentry_id: str):
+    """Create the room device the way an older version did: without an area.
+
+    ``suggested_area`` only places a device when Home Assistant creates it, so
+    a device that exists already stays where it is.
+    """
+    return dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        config_subentry_id=subentry_id,
+        identifiers={(DOMAIN, subentry_id)},
+        manufacturer="Easy TRV",
+        name="Living heating",
+    )
+
+
+def room_device(hass, entry, subentry_id: str):
+    return dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, subentry_id), entry.entry_id
+    )
+
+
+async def test_setup_puts_room_device_into_its_area(hass) -> None:
+    area = ar.async_get(hass).async_create("Wohnzimmer")
+    entry = make_entry(hass, [room_data(**{CONF_AREA: area.id})], FAST_OPTIONS)
+    subentry_id = next(iter(entry.subentries))
+    assert pre_register_room_device(hass, entry, subentry_id).area_id is None
+
+    await start(hass, entry)
+
+    device = room_device(hass, entry, subentry_id)
+    assert device is not None
+    assert device.area_id == area.id
+    # The entities follow their device; Easy TRV gives none an area of its own.
+    entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    assert len(entities) == 3
+    assert {e.area_id for e in entities} == {None}
+
+
+async def test_setup_keeps_a_device_area_set_by_hand(hass) -> None:
+    areas = ar.async_get(hass)
+    room_area = areas.async_create("Wohnzimmer")
+    hand_area = areas.async_create("Flur")
+    entry = make_entry(hass, [room_data(**{CONF_AREA: room_area.id})], FAST_OPTIONS)
+    subentry_id = next(iter(entry.subentries))
+    device = pre_register_room_device(hass, entry, subentry_id)
+    dr.async_get(hass).async_update_device(device.id, area_id=hand_area.id)
+
+    await start(hass, entry)
+
+    device = room_device(hass, entry, subentry_id)
+    assert device is not None
+    assert device.area_id == hand_area.id
+
+
+async def test_setup_ignores_a_deleted_area(hass) -> None:
+    areas = ar.async_get(hass)
+    area = areas.async_create("Wohnzimmer")
+    entry = make_entry(hass, [room_data(**{CONF_AREA: area.id})], FAST_OPTIONS)
+    subentry_id = next(iter(entry.subentries))
+    pre_register_room_device(hass, entry, subentry_id)
+    areas.async_delete(area.id)
+
+    await start(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    device = room_device(hass, entry, subentry_id)
+    assert device is not None
+    assert device.area_id is None
+    assert not areas.async_list_areas()
+
+
+async def test_setup_leaves_a_room_without_an_area_alone(hass) -> None:
+    entry = make_entry(hass, [room_data()], FAST_OPTIONS)
+    subentry_id = next(iter(entry.subentries))
+    pre_register_room_device(hass, entry, subentry_id)
+
+    await start(hass, entry)
+
+    device = room_device(hass, entry, subentry_id)
+    assert device is not None
+    assert device.area_id is None

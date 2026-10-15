@@ -11,6 +11,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.selector import AreaSelector
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.easy_trv import const
@@ -1310,6 +1311,7 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
     assert result["step_id"] == "reconfigure"
     assert list(fields(result)) == [
         "name",
+        "area_id",
         "trvs",
         "temp_sensors",
         "humidity_sensors",
@@ -1418,9 +1420,16 @@ async def test_reconfigure_renames_and_keeps_the_area(hass, area_with_trvs) -> N
     sub = next(iter(entry.subentries.values()))
 
     result = await start_reconfigure(hass, entry, sub.subentry_id)
+    # The form shows the stored area; the person leaves it as it is.
+    assert suggested_values(result)["area_id"] == area_with_trvs.id
     result = await room_flows(hass).async_configure(
         result["flow_id"],
-        entities_input(name="  Lounge ", trvs=["climate.a"], temp_sensors=[]),
+        entities_input(
+            name="  Lounge ",
+            area_id=area_with_trvs.id,
+            trvs=["climate.a"],
+            temp_sensors=[],
+        ),
     )
     assert result["step_id"] == "settings"
     result = await room_flows(hass).async_configure(
@@ -1448,6 +1457,207 @@ async def test_reconfigure_renames_and_keeps_the_area(hass, area_with_trvs) -> N
         result["flow_id"], {"name": "Living"}
     )
     assert result["step_id"] == "entities"
+
+
+# --- Room flow: areas ------------------------------------------------------
+
+
+def area_key(result):
+    """Return the schema marker of the area field of a form."""
+    return next(key for key in result["data_schema"].schema if str(key) == "area_id")
+
+
+def device_area(hass, entry, subentry_id):
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, subentry_id), entry.entry_id
+    )
+    assert device is not None
+    return device.area_id
+
+
+@pytest.mark.usefixtures("gateway")
+async def test_custom_room_with_area(hass, entry) -> None:
+    bedroom = ar.async_get(hass).async_create("Bedroom")
+    result = await open_room_flow(hass, entry, "custom")
+    assert result["step_id"] == "custom"
+    assert list(fields(result)) == ["name", "area_id"]
+    # Optional, and any area: the room does not have to match one.
+    assert isinstance(area_key(result), vol.Optional)
+    assert isinstance(fields(result)["area_id"], AreaSelector)
+    assert fields(result)["area_id"].config == AreaSelector().config
+
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"name": "Bedroom", "area_id": bedroom.id}
+    )
+    assert result["step_id"] == "entities"
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(trvs=["climate.a"])
+    )
+    assert result["step_id"] == "settings"
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    sub = next(iter(entry.subentries.values()))
+    assert sub.data["area_id"] == bedroom.id
+
+    await start(hass, entry)
+    assert device_area(hass, entry, sub.subentry_id) == bedroom.id
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_custom_room_keeps_the_area_when_the_name_is_rejected(
+    hass, entry_with_room
+) -> None:
+    bedroom = ar.async_get(hass).async_create("Bedroom")
+    result = await open_room_flow(hass, entry_with_room, "custom")
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"name": "living", "area_id": bedroom.id}
+    )
+    assert result["errors"] == {"name": "name_exists"}
+    assert suggested_values(result) == {"name": "living", "area_id": bedroom.id}
+
+
+@pytest.mark.usefixtures("gateway")
+async def test_reconfigure_changes_area_moves_device(hass, area_with_trvs) -> None:
+    lounge = ar.async_get(hass).async_create("Lounge")
+    entry = make_entry(hass, [room_data(area_id=area_with_trvs.id)], {})
+    await start(hass, entry)
+    sub = next(iter(entry.subentries.values()))
+    assert device_area(hass, entry, sub.subentry_id) == area_with_trvs.id
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    assert suggested_values(result)["area_id"] == area_with_trvs.id
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living", area_id=lounge.id)
+    )
+    assert result["step_id"] == "settings"
+    # Nothing moves before the settings are confirmed too.
+    assert device_area(hass, entry, sub.subentry_id) == area_with_trvs.id
+
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.subentries[sub.subentry_id].data["area_id"] == lounge.id
+    assert device_area(hass, entry, sub.subentry_id) == lounge.id
+
+    # The reload that follows leaves the device where the flow put it.
+    await settle(hass)
+    assert entry.state is ConfigEntryState.LOADED
+    assert device_area(hass, entry, sub.subentry_id) == lounge.id
+
+
+@pytest.mark.usefixtures("gateway")
+async def test_reconfigure_adds_an_area_to_a_room_without_one(hass) -> None:
+    lounge = ar.async_get(hass).async_create("Lounge")
+    entry = make_entry(hass, [room_data()], {})
+    await start(hass, entry)
+    sub = next(iter(entry.subentries.values()))
+    assert device_area(hass, entry, sub.subentry_id) is None
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living", area_id=lounge.id)
+    )
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.subentries[sub.subentry_id].data["area_id"] == lounge.id
+    assert device_area(hass, entry, sub.subentry_id) == lounge.id
+
+
+@pytest.mark.usefixtures("gateway")
+async def test_reconfigure_empty_area_leaves_device(hass, area_with_trvs) -> None:
+    entry = make_entry(hass, [room_data(area_id=area_with_trvs.id)], {})
+    await start(hass, entry)
+    sub = next(iter(entry.subentries.values()))
+    assert device_area(hass, entry, sub.subentry_id) == area_with_trvs.id
+
+    # The field is emptied: the form leaves the key out.
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living")
+    )
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.subentries[sub.subentry_id].data["area_id"] is None
+
+    await settle(hass)
+    assert device_area(hass, entry, sub.subentry_id) == area_with_trvs.id
+
+
+@pytest.mark.usefixtures("gateway")
+async def test_reconfigure_same_area_keeps_a_device_area_set_by_hand(
+    hass, area_with_trvs
+) -> None:
+    hall = ar.async_get(hass).async_create("Hall")
+    entry = make_entry(hass, [room_data(area_id=area_with_trvs.id)], {})
+    await start(hass, entry)
+    sub = next(iter(entry.subentries.values()))
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, sub.subentry_id), entry.entry_id
+    )
+    dr.async_get(hass).async_update_device(device.id, area_id=hall.id)
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living", area_id=area_with_trvs.id)
+    )
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+
+    await settle(hass)
+    assert device_area(hass, entry, sub.subentry_id) == hall.id
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_a_room_that_never_ran_stores_the_area(hass) -> None:
+    lounge = ar.async_get(hass).async_create("Lounge")
+    entry = make_entry(hass, [room_data()], {})
+    sub = next(iter(entry.subentries.values()))
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living", area_id=lounge.id)
+    )
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+    # There is no device yet: the setup puts it into the area.
+    assert entry.subentries[sub.subentry_id].data["area_id"] == lounge.id
+    assert (
+        dr.async_get(hass).async_get_device_by_identifier(
+            (DOMAIN, sub.subentry_id), entry.entry_id
+        )
+        is None
+    )
+
+
+@pytest.mark.usefixtures("gateway")
+async def test_reconfigure_form_with_stale_area_id(hass) -> None:
+    entry = make_entry(hass, [room_data(area_id="gone")], {})
+    await start(hass, entry)
+    sub = next(iter(entry.subentries.values()))
+    assert device_area(hass, entry, sub.subentry_id) is None
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert not result["errors"]
+    assert suggested_values(result)["area_id"] == "gone"
+
+    # Saving it as shown is fine; so is picking an area that vanished meanwhile.
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living", area_id="gone")
+    )
+    assert result["step_id"] == "settings"
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+    assert device_area(hass, entry, sub.subentry_id) is None
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living", area_id="vanished")
+    )
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+    assert device_area(hass, entry, sub.subentry_id) is None
 
 
 @pytest.mark.usefixtures("area_with_trvs", "foreign_trvs")

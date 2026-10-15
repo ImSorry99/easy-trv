@@ -35,7 +35,11 @@
         "custom": {
           "title": "Custom room",
           "data": {
-            "name": "Room name"
+            "name": "Room name",
+            "area_id": "Area"
+          },
+          "data_description": {
+            "area_id": "The room's Easy TRV entities go into this area."
           }
         },
         "entities": {
@@ -57,12 +61,14 @@
           "title": "Edit room",
           "data": {
             "name": "Room name",
+            "area_id": "Area",
             "trvs": "Thermostats (ZHA)",
             "temp_sensors": "Temperature sensors",
             "humidity_sensors": "Humidity sensors",
             "window_contacts": "Window and door contacts"
           },
           "data_description": {
+            "area_id": "The room's Easy TRV entities go into this area.",
             "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
             "humidity_sensors": "Stored for later use; not evaluated yet.",
