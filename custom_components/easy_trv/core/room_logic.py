@@ -27,6 +27,7 @@ from custom_components.easy_trv.core.model import (
     Log,
     Mismatch,
     Ok,
+    OperatingMode,
     OperationResult,
     OutdoorChanged,
     RaiseIssue,
@@ -46,7 +47,7 @@ from custom_components.easy_trv.core.model import (
     SetHvacMode,
     SetHysteresis,
     SetRoomMode,
-    SetRoomPreset,
+    SetRoomOperation,
     SetRoomSetpoint,
     SetRoomTemperature,
     SetSetpoint,
@@ -158,7 +159,7 @@ class RoomLogic:
                 state, commands = self._on_retry_due(event, now, state)
             case OperationResult():
                 state, commands = self._on_result(event, now, state)
-            case SetRoomSetpoint() | SetRoomMode() | SetRoomPreset() | RestoreRoom():
+            case SetRoomSetpoint() | SetRoomMode() | SetRoomOperation() | RestoreRoom():
                 state, commands = self._on_room_event(event, now, state)
             case TrvObserved():
                 state, commands = observe.on_observed(
@@ -231,7 +232,7 @@ class RoomLogic:
 
     def _on_room_event(
         self,
-        event: SetRoomSetpoint | SetRoomMode | SetRoomPreset | RestoreRoom,
+        event: SetRoomSetpoint | SetRoomMode | SetRoomOperation | RestoreRoom,
         now: datetime,
         state: RoomState,
     ) -> _Step:
@@ -244,10 +245,8 @@ class RoomLogic:
                 )
             case SetRoomMode():
                 return self._on_set_mode(event, now, state)
-            case SetRoomPreset():
-                return setpoint.on_set_preset(
-                    cfg, state, now, event.preset, capability_of
-                )
+            case SetRoomOperation():
+                return self._on_set_operation(event, now, state)
             case RestoreRoom():
                 resync: list[Intent] = []
                 if setpoint.leaving_off(cfg, state, event.mode):
@@ -275,6 +274,19 @@ class RoomLogic:
             state, resync = self._source_intents(state, now)
         return setpoint.on_set_mode(
             self._cfg, state, now, event.mode, self._capability_of, resync
+        )
+
+    def _on_set_operation(
+        self, event: SetRoomOperation, now: datetime, state: RoomState
+    ) -> _Step:
+        """Select off, frost or heat; leaving off resyncs source and value first."""
+        resync: list[Intent] = []
+        if event.operation is not OperatingMode.OFF and setpoint.leaving_off(
+            self._cfg, state, RoomMode.HEAT
+        ):
+            state, resync = self._source_intents(state, now)
+        return setpoint.on_set_operation(
+            self._cfg, state, now, event.operation, self._capability_of, resync
         )
 
     def _on_knob_settled(

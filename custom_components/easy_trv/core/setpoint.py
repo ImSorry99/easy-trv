@@ -1,4 +1,4 @@
-"""Setpoint, mode and preset of a room: what the room owns and writes.
+"""Setpoint, mode and operation of a room: what the room owns and writes.
 
 The functions are pure. Each takes the room configuration, the current state and
 time and returns the next state with the commands to run, in the shape of
@@ -17,6 +17,7 @@ from custom_components.easy_trv.core.model import (
     Execute,
     Intent,
     Note,
+    OperatingMode,
     Preset,
     RestoreRoom,
     RoomConfig,
@@ -106,6 +107,8 @@ def on_set_mode(  # noqa: PLR0913
     if mode is RoomMode.OFF:
         # A setpoint turned just before must not wake the room when it settles.
         state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
+        # Off ends frost protection: switched on again, the room heats as before.
+        state = _with_frost(cfg, state, frost=False)
     heating = state.mode is RoomMode.HEAT
     state = replace(state, mode=mode)
     if holding(state) or (heating and mode is RoomMode.HEAT):
@@ -184,35 +187,64 @@ def retry(
     return write(state, now, [(trv, newest)], capability_of)
 
 
-def on_set_preset(
-    cfg: RoomConfig,
-    state: RoomState,
-    now: datetime,
-    preset: Preset,
-    capability_of: _Capabilities,
-) -> _Step:
-    """Switch the frost preset on (remembering the setpoint) or off (restoring it)."""
-    if cfg.setpoint_range is None or preset is state.preset:
-        return state, []
-    state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
-    if preset is Preset.FROST:
-        state = replace(
+def operation(state: RoomState) -> OperatingMode:
+    """Return the operating mode of the room: off, frost protection or heat."""
+    if state.mode is RoomMode.OFF:
+        return OperatingMode.OFF
+    return OperatingMode.FROST if state.preset is Preset.FROST else OperatingMode.HEAT
+
+
+def _with_frost(cfg: RoomConfig, state: RoomState, *, frost: bool) -> RoomState:
+    """Start frost protection (remembering the setpoint) or end it (restoring it).
+
+    Only the state changes; the caller writes.
+    """
+    if frost is (state.preset is Preset.FROST) or cfg.setpoint_range is None:
+        return state
+    if frost:
+        return replace(
             state,
             preset=Preset.FROST,
             frost_return=state.setpoint,
             setpoint=clamp(cfg.frost_temperature, cfg.setpoint_range),
             setpoint_source="frost",
         )
-    else:
-        state = replace(
-            state,
-            preset=Preset.NONE,
-            setpoint=state.setpoint
-            if state.frost_return is None
-            else state.frost_return,
-            frost_return=None,
-            setpoint_source="ha",
-        )
+    return replace(
+        state,
+        preset=Preset.NONE,
+        setpoint=state.setpoint if state.frost_return is None else state.frost_return,
+        frost_return=None,
+        setpoint_source="ha",
+    )
+
+
+def on_set_operation(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    selected: OperatingMode,
+    capability_of: _Capabilities,
+    resync: Sequence[Intent] = (),
+) -> _Step:
+    """Switch the room off, to frost protection only, or to heating.
+
+    ``off`` is the room mode ``off`` (which ends frost protection). From ``off``,
+    ``frost`` and ``heat`` switch the room on with their setpoint; the
+    ``resync`` intents are written as for ``on_set_mode``. On a heating room
+    they only write the setpoint, and nothing if the operation does not change.
+    """
+    if cfg.setpoint_range is None:
+        return state, []
+    if selected is OperatingMode.OFF:
+        return on_set_mode(cfg, state, now, RoomMode.OFF, capability_of)
+    frost = selected is OperatingMode.FROST
+    if state.mode is RoomMode.OFF:
+        state = _with_frost(cfg, state, frost=frost)
+        return on_set_mode(cfg, state, now, RoomMode.HEAT, capability_of, resync)
+    if frost is (state.preset is Preset.FROST):
+        return state, []
+    state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
+    state = _with_frost(cfg, state, frost=frost)
     return _write_setpoint(cfg, state, now, capability_of)
 
 
@@ -247,6 +279,9 @@ def on_restore(  # noqa: PLR0913
         state = replace(state, preset=restore.preset)
     if restore.frost_return is not None:
         state = replace(state, frost_return=restore.frost_return)
+    if state.mode is RoomMode.OFF:
+        # A room remembered off with frost protection (0.3.0 allowed that) is off.
+        state = _with_frost(cfg, state, frost=False)
     if leaving:
         return resume(cfg, state, now, capability_of, resync)
     return _sync_differing(cfg, state, now, capability_of, with_mode=True)

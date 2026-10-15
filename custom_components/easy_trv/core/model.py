@@ -139,10 +139,18 @@ class RoomMode(StrEnum):
 
 
 class Preset(StrEnum):
-    """Preset of the room thermostat."""
+    """Whether the room holds its frost protection temperature (internal)."""
 
     NONE = "none"
     FROST = "frost"
+
+
+class OperatingMode(StrEnum):
+    """Operating mode of a room: off, frost protection only, or heating."""
+
+    OFF = "off"
+    FROST = "frost"
+    HEAT = "heat"
 
 
 class Note(StrEnum):
@@ -445,10 +453,10 @@ class SetRoomMode:
 
 
 @dataclass(frozen=True)
-class SetRoomPreset:
-    """The user selected a preset for the room."""
+class SetRoomOperation:
+    """The user selected the operating mode of the room."""
 
-    preset: Preset
+    operation: OperatingMode
 
 
 @dataclass(frozen=True)
@@ -458,7 +466,7 @@ class RestoreRoom:
     setpoint: float | None
     mode: RoomMode | None
     preset: Preset | None
-    # The setpoint to return to when the preset ``frost`` ends.
+    # The setpoint to return to when frost protection ends.
     frost_return: float | None = None
 
 
@@ -505,7 +513,7 @@ Event = (
     | OperationResult
     | SetRoomSetpoint
     | SetRoomMode
-    | SetRoomPreset
+    | SetRoomOperation
     | RestoreRoom
     | TrvObserved
     | KnobSettled

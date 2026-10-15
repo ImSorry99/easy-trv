@@ -6,6 +6,7 @@ from custom_components.easy_trv.core.model import (
     Execute,
     Failed,
     Note,
+    OperatingMode,
     Preset,
     RestoreRoom,
     RetryDue,
@@ -15,7 +16,7 @@ from custom_components.easy_trv.core.model import (
     SensorChanged,
     SetHvacMode,
     SetRoomMode,
-    SetRoomPreset,
+    SetRoomOperation,
     SetRoomSetpoint,
     SetRoomTemperature,
     SetSetpoint,
@@ -29,7 +30,7 @@ from custom_components.easy_trv.core.model import (
 )
 from custom_components.easy_trv.core.observe import shown
 from custom_components.easy_trv.core.room_logic import RoomLogic
-from custom_components.easy_trv.core.setpoint import clamp
+from custom_components.easy_trv.core.setpoint import clamp, operation
 from tests.core.test_room_logic import (
     BOTH_AVAILABLE,
     CFG,
@@ -103,9 +104,9 @@ def test_setpoint_skips_unavailable_thermostats() -> None:
     assert executes(cmds) == [("climate.a", SetSetpoint(22.0))]
 
 
-def test_ha_setpoint_leaves_the_frost_preset() -> None:
+def test_ha_setpoint_leaves_frost_protection() -> None:
     st = started_with_setpoint(21.0)
-    st, _ = logic().handle(SetRoomPreset(Preset.FROST), T0, st)
+    st, _ = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
     st, _ = logic().handle(SetRoomSetpoint(19.0), T0, st)
     assert st.preset is Preset.NONE
     assert st.setpoint == 19.0
@@ -220,21 +221,23 @@ def test_mode_during_a_hold_only_updates_the_state() -> None:
     assert executes(cmds) == []
 
 
-# --- preset --------------------------------------------------------------
+# --- operation -----------------------------------------------------------
 
 
-def test_frost_preset_remembers_and_restores_the_setpoint() -> None:
+def test_frost_remembers_and_heat_restores_the_setpoint() -> None:
     st = started_with_setpoint(21.0)
-    st, cmds = logic().handle(SetRoomPreset(Preset.FROST), T0, st)
+    st, cmds = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
     assert (st.setpoint, st.preset, st.frost_return) == (7.0, Preset.FROST, 21.0)
+    assert operation(st) is OperatingMode.FROST
     assert st.setpoint_source == "frost"
-    assert executes(cmds) == [
+    assert writes(cmds) == [
         ("climate.a", SetSetpoint(7.0)),
         ("climate.b", SetSetpoint(7.0)),
     ]
-    st, cmds = logic().handle(SetRoomPreset(Preset.NONE), T0, st)
+    st, cmds = logic().handle(SetRoomOperation(OperatingMode.HEAT), T0, st)
     assert (st.setpoint, st.preset, st.frost_return) == (21.0, Preset.NONE, None)
-    assert executes(cmds) == [
+    assert operation(st) is OperatingMode.HEAT
+    assert writes(cmds) == [
         ("climate.a", SetSetpoint(21.0)),
         ("climate.b", SetSetpoint(21.0)),
     ]
@@ -242,10 +245,17 @@ def test_frost_preset_remembers_and_restores_the_setpoint() -> None:
 
 def test_frost_twice_keeps_the_remembered_setpoint() -> None:
     st = started_with_setpoint(21.0)
-    st, _ = logic().handle(SetRoomPreset(Preset.FROST), T0, st)
-    st, cmds = logic().handle(SetRoomPreset(Preset.FROST), T0, st)
+    st, _ = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
+    st, cmds = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
     assert st.frost_return == 21.0
-    assert executes(cmds) == []
+    assert writes(cmds) == []
+
+
+def test_heat_on_a_heating_room_writes_nothing() -> None:
+    st = started_with_setpoint(21.0)
+    st, cmds = logic().handle(SetRoomOperation(OperatingMode.HEAT), T0, st)
+    assert operation(st) is OperatingMode.HEAT
+    assert writes(cmds) == []
 
 
 def test_frost_temperature_is_clamped_into_the_range() -> None:
@@ -254,17 +264,59 @@ def test_frost_temperature_is_clamped_into_the_range() -> None:
     st, _ = room.handle(
         Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )
-    st, cmds = room.handle(SetRoomPreset(Preset.FROST), T0, st)
+    st, cmds = room.handle(SetRoomOperation(OperatingMode.FROST), T0, st)
     assert st.setpoint == 5.0
     assert executes(cmds)[0] == ("climate.a", SetSetpoint(5.0))
 
 
-def test_frost_while_off_only_updates_the_state() -> None:
+def test_frost_from_off_switches_the_room_on_at_the_frost_temperature() -> None:
     st = started_with_setpoint(21.0)
+    st, _ = logic().handle(SetRoomOperation(OperatingMode.OFF), T0, st)
+    assert operation(st) is OperatingMode.OFF
+    st, cmds = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
+    assert (st.mode, st.setpoint, st.frost_return) == (RoomMode.HEAT, 7.0, 21.0)
+    assert operation(st) is OperatingMode.FROST
+    assert writes(cmds) == [
+        ("climate.a", SetHvacMode("heat")),
+        ("climate.a", SetSetpoint(7.0)),
+        ("climate.b", SetHvacMode("heat")),
+        ("climate.b", SetSetpoint(7.0)),
+    ]
+
+
+def test_off_ends_frost_and_heat_comes_back_at_the_setpoint_from_before() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
+    st, cmds = logic().handle(SetRoomOperation(OperatingMode.OFF), T0, st)
+    assert (st.mode, st.preset, st.setpoint) == (RoomMode.OFF, Preset.NONE, 21.0)
+    assert st.frost_return is None
+    assert writes(cmds) == [
+        ("climate.a", SetHvacMode("off")),
+        ("climate.b", SetHvacMode("off")),
+    ]
+    st, cmds = logic().handle(SetRoomOperation(OperatingMode.HEAT), T0, st)
+    assert writes(cmds) == [
+        ("climate.a", SetHvacMode("heat")),
+        ("climate.a", SetSetpoint(21.0)),
+        ("climate.b", SetHvacMode("heat")),
+        ("climate.b", SetSetpoint(21.0)),
+    ]
+
+
+def test_switching_the_room_off_ends_frost_too() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
     st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
-    st, cmds = logic().handle(SetRoomPreset(Preset.FROST), T0, st)
-    assert st.setpoint == 7.0
-    assert executes(cmds) == []
+    assert (st.preset, st.setpoint, st.frost_return) == (Preset.NONE, 21.0, None)
+    assert operation(st) is OperatingMode.OFF
+
+
+def test_frost_during_a_hold_only_updates_the_state() -> None:
+    st = started_with_setpoint(21.0)
+    st = replace(st, window_open=True)
+    st, cmds = logic().handle(SetRoomOperation(OperatingMode.FROST), T0, st)
+    assert (st.setpoint, operation(st)) == (7.0, OperatingMode.FROST)
+    assert writes(cmds) == []
 
 
 # --- restore and start ---------------------------------------------------
@@ -466,7 +518,7 @@ def test_room_without_climate_ignores_setpoint_events() -> None:
     for event in (
         SetRoomSetpoint(22.0),
         SetRoomMode(RoomMode.OFF),
-        SetRoomPreset(Preset.FROST),
+        SetRoomOperation(OperatingMode.FROST),
         RestoreRoom(22.0, RoomMode.OFF, Preset.FROST),
     ):
         after, cmds = room.handle(event, T0, st)
@@ -662,7 +714,7 @@ def test_restore_remembers_the_setpoint_before_frost() -> None:
         RoomState.initial(CFG),
     )
     assert (st.preset, st.setpoint, st.frost_return) == (Preset.FROST, 7.0, 21.0)
-    st, _ = logic().handle(SetRoomPreset(Preset.NONE), T0, st)
+    st, _ = logic().handle(SetRoomOperation(OperatingMode.HEAT), T0, st)
     assert st.setpoint == 21.0
 
 

@@ -34,7 +34,7 @@ Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is der
 - **F3** Per-room settings with a global default and a per-setting override: built-in open-window detection (on / off / leave), hysteresis (0.2–1.0 K, default 0.4, written only while adaptive mode is not on), adaptive mode (Phase 2; on / off / leave, firmware ≥ 1.4.4, default on), frost protection temperature (Phase 2; 4–16 °C, default 5).
 - **F4** Per room, the profile is *auto* (the shipped profile matching the thermostats) or an explicit choice from all shipped and user profiles that match. Per-thermostat choice later.
 - **F5** User profiles live in `<config>/easy_trv/profiles/*.yaml`. They are validated at start; an invalid file produces a Repairs issue naming the file and the problem, and is ignored.
-- **F6 Room thermostat (Phase 2).** Each room offers one thin `climate` entity (heat / off, frost preset, setpoint range) that stores what a person asked for and feeds it to the thermostats, without regulating; see `docs/specs/2026-10-14-easy-trv-phase2-design.md`, section 5.
+- **F6 Room thermostat (Phase 2).** Each room offers one thin `climate` entity (heat / off, setpoint range) and an operating mode (off / frost protection / heating enabled) that stores what a person asked for and feeds it to the thermostats, without regulating; see `docs/specs/2026-10-14-easy-trv-phase2-design.md`, section 5.
 - **F7 Window contacts and outdoor cut-off (Phase 2).** Window contacts and an outdoor temperature threshold switch a room off and restore it afterwards, including a check for contacts that report open while the room does not cool; see `docs/specs/2026-10-14-easy-trv-phase2-design.md`, section 6.
 
 ## Robustness

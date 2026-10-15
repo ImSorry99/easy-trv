@@ -185,8 +185,9 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["selector"]["capability"]["options"]) == INTENTS
     assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
     assert set(data["selector"]["sensor_timeout"]["options"]) == {"off"}
-    presets = data["entity"]["climate"]["room"]["state_attributes"]["preset_mode"]
-    assert set(presets["state"]) == {"none", "frost"}
+    assert "climate" not in data["entity"]
+    modes = data["entity"]["select"]["operating_mode"]["state"]
+    assert set(modes) == {"off", "frost", "heat"}
     # Existing sections of the earlier tasks stay in place.
     assert set(data["entity"]["sensor"]["room_status"]["state"]) == {
         "ok",
@@ -237,9 +238,14 @@ def test_german_translation_is_actually_german() -> None:
         "from_area": "Aus Bereich",
         "custom": "Eigener Raum",
     }
-    assert de["entity"]["climate"]["room"]["state_attributes"]["preset_mode"][
-        "state"
-    ] == {"none": "Keine", "frost": "Frostschutz"}
+    assert de["entity"]["select"]["operating_mode"] == {
+        "name": "Betriebsart",
+        "state": {
+            "off": "Aus",
+            "frost": "Frostschutz",
+            "heat": "Heizbetrieb freigegeben",
+        },
+    }
     assert de["entity"]["sensor"]["room_status"]["state"] == {
         "ok": "OK",
         "degraded": "Eingeschränkt",
@@ -509,12 +515,10 @@ def test_the_room_cutoff_text_shows_the_global_value_and_the_own_threshold() -> 
         assert not text.startswith(("Global uses", "Global verwendet"))
 
 
-def test_german_setpoint_labels_and_preset() -> None:
+def test_german_setpoint_labels() -> None:
     de = load(DE)
     settings = de["config_subentries"]["room"]["step"]["settings"]["data"]
     section = de["options"]["step"]["init"]["sections"]["room_thermostat"]["data"]
     for texts in (settings, section):
         assert texts["setpoint_min"] == "Minimale Solltemperatur (°C)"
         assert texts["setpoint_max"] == "Maximale Solltemperatur (°C)"
-    preset = de["entity"]["climate"]["room"]["state_attributes"]["preset_mode"]
-    assert preset["state"]["none"] == "Keine"

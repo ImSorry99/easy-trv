@@ -24,7 +24,7 @@ SETTING_GLOBAL: Final = _settings.GLOBAL
 # Config subentries
 SUBENTRY_ROOM: Final = "room"
 
-PLATFORMS: Final = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS: Final = [Platform.CLIMATE, Platform.SELECT, Platform.SENSOR]
 
 # Room configuration keys
 CONF_TRVS: Final = "trvs"

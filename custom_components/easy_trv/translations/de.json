@@ -137,15 +137,13 @@
     }
   },
   "entity": {
-    "climate": {
-      "room": {
-        "state_attributes": {
-          "preset_mode": {
-            "state": {
-              "none": "Keine",
-              "frost": "Frostschutz"
-            }
-          }
+    "select": {
+      "operating_mode": {
+        "name": "Betriebsart",
+        "state": {
+          "off": "Aus",
+          "frost": "Frostschutz",
+          "heat": "Heizbetrieb freigegeben"
         }
       }
     },

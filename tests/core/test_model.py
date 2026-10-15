@@ -9,6 +9,7 @@ from custom_components.easy_trv.core.model import (
     KnobSettled,
     Mismatch,
     Note,
+    OperatingMode,
     OutdoorChanged,
     Preset,
     RestoreRoom,
@@ -22,7 +23,7 @@ from custom_components.easy_trv.core.model import (
     SetHvacMode,
     SetHysteresis,
     SetRoomMode,
-    SetRoomPreset,
+    SetRoomOperation,
     SetRoomSetpoint,
     SetSetpoint,
     SetWindowDetection,
@@ -119,6 +120,11 @@ def config() -> RoomConfig:
 def test_the_new_enums_have_stable_values() -> None:
     assert (RoomMode.HEAT, RoomMode.OFF) == ("heat", "off")
     assert (Preset.NONE, Preset.FROST) == ("none", "frost")
+    assert (OperatingMode.OFF, OperatingMode.FROST, OperatingMode.HEAT) == (
+        "off",
+        "frost",
+        "heat",
+    )
     assert (Note.WINDOW_PHASE, Note.SCHEDULE) == ("window_phase", "schedule")
 
 
@@ -181,7 +187,7 @@ def test_mismatch_observed_defaults_to_none() -> None:
 def test_the_new_events_are_constructible() -> None:
     assert SetRoomSetpoint(21.0).celsius == 21.0
     assert SetRoomMode(RoomMode.OFF).mode is RoomMode.OFF
-    assert SetRoomPreset(Preset.FROST).preset is Preset.FROST
+    assert SetRoomOperation(OperatingMode.FROST).operation is OperatingMode.FROST
     restore = RestoreRoom(20.0, RoomMode.HEAT, Preset.NONE)
     assert (restore.setpoint, restore.mode, restore.preset) == (
         20.0,
@@ -215,7 +221,7 @@ def test_the_unions_contain_the_new_types() -> None:
     for cls in (
         SetRoomSetpoint,
         SetRoomMode,
-        SetRoomPreset,
+        SetRoomOperation,
         RestoreRoom,
         TrvObserved,
         KnobSettled,
