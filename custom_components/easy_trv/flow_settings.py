@@ -324,11 +324,11 @@ def room_settings(user_input: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def options_schema(current: Mapping[str, Any]) -> vol.Schema:
-    """Return the form of the global options in four sections.
+    """Return the form of the global options in four collapsed sections.
 
     The selects default to what is saved (else the built-in default). The
-    numbers have neither a default nor a suggestion unless they are saved: an
-    empty number is not stored, and the built-in default applies.
+    numbers get no default: they are suggested by ``options_suggestions``, and
+    an empty number is not stored, so the built-in default applies.
     """
     effective = {**DEFAULTS, **overrides(current)}
 
@@ -343,7 +343,7 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
                 fields[vol.Optional(key)] = _outdoor_sensor_selector()
             else:
                 fields[vol.Optional(key)] = _number_selector(key)
-        return section(vol.Schema(fields), {"collapsed": False})
+        return section(vol.Schema(fields), {"collapsed": True})
 
     return vol.Schema(
         {vol.Required(name): group(keys) for name, keys in SECTIONS.items()}
@@ -351,17 +351,21 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
 
 
 def options_suggestions(current: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """Return the numbers and the sensor the options form shows: only those saved."""
-    saved = {
-        **overrides(current),
+    """Return the numbers and the sensor the options form shows.
+
+    A number shows its saved value, else its built-in default; the sensor and
+    the outdoor cut-off only when they are saved.
+    """
+    shown = {
+        **effective_settings(current, list(NUMBERS)),
         CONF_OUTDOOR_SENSOR: current.get(CONF_OUTDOOR_SENSOR),
     }
     return {
         name: {
-            key: saved[key]
+            key: shown[key]
             for key in keys
             if (key in NUMBERS or key == CONF_OUTDOOR_SENSOR)
-            and saved.get(key) is not None
+            and shown.get(key) is not None
         }
         for name, keys in SECTIONS.items()
     }
@@ -370,13 +374,16 @@ def options_suggestions(current: Mapping[str, Any]) -> dict[str, dict[str, Any]]
 def stored_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Return what the options store of a submitted form.
 
-    The selects, the filled numbers and the outdoor sensor if there is one. The
-    sections only lay the form out; the options are stored flat.
+    The selects, the filled numbers that differ from their built-in default and
+    the outdoor sensor if there is one. A number left at its default is not
+    stored, so it follows a later change of the default. The sections only lay
+    the form out; the options are stored flat.
     """
     flat = {key: value for name in SECTIONS for key, value in user_input[name].items()}
+    numbers = stored_numbers(flat, list(NUMBERS))
     options = {
         **{key: flat[key] for key in SELECT_VALUES},
-        **stored_numbers(flat, list(NUMBERS)),
+        **{key: value for key, value in numbers.items() if value != DEFAULTS[key]},
     }
     if flat.get(CONF_OUTDOOR_SENSOR):
         options[CONF_OUTDOOR_SENSOR] = flat[CONF_OUTDOOR_SENSOR]

@@ -48,7 +48,7 @@ A room is a device named **Heizung <room>** in German and **<room> heating** in 
 Every setting exists in three layers, and the most specific one that is set wins:
 
 1. **Built-in default**, the value in the table below.
-2. **Global**: the integration's options (**Configure** on the integration page). They apply to all rooms. A number field left empty uses the built-in default.
+2. **Global**: the integration's options (**Configure** on the integration page). They apply to all rooms. Every number field shows its value, the built-in default until you change it. A field left at its default or emptied is not stored and follows the built-in default. The sections of the form start collapsed.
 3. **Room**: the **Room settings** page of a room. Every choice there has the first option **Global**, and a number field left empty means global too. Only what you change is stored for the room, so a later change of the global value reaches every room that does not set its own.
 
 | Setting | Range | Built-in default | Meaning |
