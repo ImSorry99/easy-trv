@@ -37,30 +37,36 @@ tested_firmware: ["1.3.0", "1.4.4"]
 capabilities:
   external_temperature:
     intent: set_room_temperature
+    entity: { domain: number, translation_key: external_temperature_sensor_value }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x600D, encode: temperature_centi, range: [0, 99.9] }
     verify: { rule: equals }
     also_read: [0x600E]              # read in the same request; signals apply
   source_select:
     intent: set_source
+    entity: { domain: switch, translation_key: external_temperature_sensor }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x600E, encode: { map: { external: 1, internal: 0 } } }
     verify: { rule: one_of, external: [1, 3], internal: [0] }
     signals: { 2: failsafe }
   window_detection_flag:
     intent: set_window_detection
+    entity: { domain: switch, translation_key: open_window }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6000, encode: bool }
     verify: { rule: equals }
   hysteresis:
     intent: set_hysteresis
     min_firmware: "1.3.0"
+    entity: { domain: number, translation_key: temperature_control_accuracy }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6011, encode: kelvin_centi_negative, range: [0.2, 1.0] }
     verify: { rule: equals }
   adaptive_mode:
     intent: set_adaptive_mode
     min_firmware: "1.4.4"
+    entity: { domain: switch, translation_key: adaptive_mode }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6017, encode: { map: { "true": 2, "false": 0 } } }
     verify: { rule: one_of, "true": [2], "false": [0, 1] }   # the device reports 1 as a read-only alias of off
   frost_protection:
     intent: set_frost_temperature
+    entity: { domain: number, translation_key: frost_protection_temperature }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6002, encode: temperature_centi, range: [4, 35] }
     verify: { rule: equals }
   setpoint:
@@ -79,6 +85,8 @@ capabilities:
 The vocabulary is small on purpose: a fixed set of intents (`set_room_temperature`, `set_source`, `set_window_detection`, `set_hysteresis`, `set_adaptive_mode`, `set_frost_temperature`, `set_setpoint`, `set_hvac_mode`), a fixed set of encoders (`temperature_centi`, `kelvin_centi_negative`, `bool`, `map`, `const`), two verify rules (`equals`, `one_of`) and named signals. New vocabulary is added in code when a new device needs it; profiles only combine it.
 
 Two optional keys support room state. `write.step` (a positive number) makes the engine round the intent value half-up to that grid before the range check and the encoder (21.25 → 21.5 with `step: 0.5`); without it nothing is rounded. `observe: true` marks a capability whose device value the room follows; `Profile.observed()` lists those. `Profile.decode(capability, raw)` is the inverse of the encoder (`temperature_centi` → °C, `map` → the key, an unmapped raw value → `None`) and `Profile.limits(intent)` returns `(low, high, step)` from `range` and `step` (step 0.5 when absent; it only matters for the setpoint). `set_setpoint` and `set_hvac_mode` are room state, not thermostat settings, so a room never applies them as settings. Existing user profiles stay valid: `step` and `observe` are optional.
+
+One more optional key names the Home Assistant entity that shows a capability: `entity: { domain: <str>, translation_key: <str> }`. Both fields are required when `entity` is present. Easy TRV uses it for one thing only, hiding: with the setting **Hide thermostat entities** on, it hides the thermostat's climate entity and, on the same device, the ZHA entities whose `domain` and `translation_key` match an `entity` of the room's profile. Reading and writing a capability never goes through this entity. A capability without `entity` hides nothing; `setpoint` and `hvac_mode` have none because the climate entity, which is hidden anyway, shows them. The shipped profile names the entities of six settings: `external_temperature`, `source_select`, `window_detection_flag`, `hysteresis`, `adaptive_mode` and `frost_protection`. Existing user profiles stay valid, since the key is optional; a user profile without it hides only the climate entity.
 
 Details that matter when writing a profile:
 
