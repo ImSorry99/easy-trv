@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import CoreState
 from homeassistant.helpers.json import ExtendedJSONEncoder
 from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
@@ -78,6 +79,12 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
         "notes",
         "observations",
         "settings",
+        "heating_state",
+        "state_reasons",
+        "state_since",
+        "window_off_at",
+        "silent_contacts",
+        "deviations",
     }
     assert room["config"]["name"] == "Living"
     assert room["config"]["trvs"][0]["ieee"] == IEEE_A
@@ -209,3 +216,75 @@ async def test_diagnostics_show_the_notes_of_a_thermostat(
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diag["rooms"][subentry_id]["notes"] == {"climate.a": "schedule"}
+
+
+async def test_diagnostics_carry_the_room_state(hass, freezer) -> None:
+    freezer.move_to("2026-10-15T08:00:00+00:00")
+    hass.states.async_set("binary_sensor.window", "unavailable")
+    entry = make_entry(
+        hass, [room_data(window_contacts=["binary_sensor.window"])], OPTIONS
+    )
+    await start(hass, entry)
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    subentry_id = next(iter(entry.subentries))
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    room = diag["rooms"][subentry_id]
+    assert room["heating_state"] == "restricted"
+    assert room["state_reasons"] == ["restricted", "heating"]
+    assert room["state_since"] == "2026-10-15T08:00:00+00:00"
+    assert room["window_off_at"] is None
+    assert room["silent_contacts"] == ["binary_sensor.window"]
+    assert room["deviations"] == {"climate.a": "unavailable"}
+    json.dumps(diag, cls=ExtendedJSONEncoder)
+
+
+async def test_diagnostics_show_the_deadline_of_the_open_delay(hass, freezer) -> None:
+    freezer.move_to("2026-10-15T08:00:00+00:00")
+    hass.states.async_set("binary_sensor.window", "off")
+    entry = make_entry(
+        hass,
+        [
+            room_data(
+                window_contacts=["binary_sensor.window"], window_open_delay_seconds=30
+            )
+        ],
+        OPTIONS,
+    )
+    await start(hass, entry)
+    hass.states.async_set("binary_sensor.window", "on")
+    await settle(hass)
+    subentry_id = next(iter(entry.subentries))
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    room = diag["rooms"][subentry_id]
+    assert room["heating_state"] == "window_pending"
+    assert room["state_reasons"] == ["window_pending", "heating"]
+    assert room["state_since"] == "2026-10-15T08:00:00+00:00"
+    assert room["window_off_at"] == "2026-10-15T08:00:30+00:00"
+    assert room["silent_contacts"] == []
+    assert room["deviations"] == {}
+    json.dumps(diag, cls=ExtendedJSONEncoder)
+
+
+async def test_diagnostics_have_no_heating_state_before_the_room_started(
+    hass, entry
+) -> None:
+    hass.set_state(CoreState.starting)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await settle(hass)
+    subentry_id = next(iter(entry.subentries))
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    room = diag["rooms"][subentry_id]
+    assert room["heating_state"] is None
+    assert room["state_reasons"] == []
+    assert room["state_since"] is None
+    assert room["window_off_at"] is None
+    assert room["silent_contacts"] == []
+    assert room["deviations"] == {}
+    json.dumps(diag, cls=ExtendedJSONEncoder)

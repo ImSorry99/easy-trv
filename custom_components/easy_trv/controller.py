@@ -529,8 +529,14 @@ class RoomController:
         self._dispatch(RestoreRoom(setpoint, mode, preset, frost_return))
 
     def snapshot(self) -> dict[str, Any]:
-        """Return configuration, tunables and state as JSON-able data."""
+        """Return configuration, tunables and state as JSON-able data.
+
+        The heating state, its reasons and the time of its last change are
+        ``None`` or empty until the room has started, like on the state sensor.
+        """
         room = self._state
+        since = self._state_since
+        window_off_at = self._holds.window_off_at
         return {
             "config": _jsonable(self._config),
             "params": _jsonable(self._params),
@@ -551,6 +557,16 @@ class RoomController:
             },
             "notes": {trv: note.value for trv, note in self.notes.items()},
             "observations": self._subscriptions.recent(),
+            "heating_state": None if since is None else self.heating_state.value,
+            "state_reasons": (
+                [] if since is None else [r.value for r in self.state_reasons]
+            ),
+            "state_since": None if since is None else since.isoformat(),
+            "window_off_at": (
+                None if window_off_at is None else window_off_at.isoformat()
+            ),
+            "silent_contacts": list(self.silent_contacts),
+            "deviations": self.deviations,
         }
 
     async def async_start(self) -> None:

@@ -1035,6 +1035,12 @@ async def test_snapshot_is_json_able(hass, controller, gateway) -> None:
         "hold",
         "notes",
         "observations",
+        "heating_state",
+        "state_reasons",
+        "state_since",
+        "window_off_at",
+        "silent_contacts",
+        "deviations",
     }
     assert snapshot["config"]["room_id"] == "room1"
     assert snapshot["config"]["trvs"][0] == {
