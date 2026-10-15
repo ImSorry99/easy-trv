@@ -1716,7 +1716,7 @@ async def test_a_contact_that_is_open_at_start_opens_the_hold_after_the_start(
     assert writes_to(gateway, IEEE_A, MODE) == [0]
 
 
-async def test_unavailable_contacts_count_as_closed_and_break_the_sync(
+async def test_unavailable_contacts_break_the_sync_and_say_so_once(
     hass, climate_window, gateway, caplog
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="custom_components.easy_trv.observation")
@@ -1728,9 +1728,19 @@ async def test_unavailable_contacts_count_as_closed_and_break_the_sync(
     await settle(hass)
     assert climate_window.window_open is False
     assert climate_window.in_sync is False
-    assert any(
-        CONTACT in r.getMessage() and r.levelno == logging.DEBUG for r in caplog.records
-    )
+
+    def contact_lines() -> list[str]:
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if CONTACT in r.getMessage() and r.levelno == logging.DEBUG
+        ]
+
+    assert len(contact_lines()) == 1
+    # Another contact changing does not repeat the line for the silent one.
+    hass.states.async_set("binary_sensor.w2", "off", {"battery": 80})
+    await settle(hass)
+    assert len(contact_lines()) == 1
     hass.states.async_set(CONTACT, "off")
     await settle(hass)
     assert climate_window.in_sync is True
@@ -1744,18 +1754,52 @@ async def test_unavailable_contacts_count_as_closed_and_break_the_sync(
     assert gateway.writes == []
 
 
-async def test_an_open_contact_that_turns_unavailable_ends_the_hold(
+async def test_a_contact_that_was_never_seen_counts_as_closed(
     hass, climate_window, gateway
 ) -> None:
+    hass.states.async_set(CONTACT, "unavailable")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    assert climate_window.window_open is False
+    assert climate_window.in_sync is False
+    assert gateway.writes == []
+
+
+async def test_an_open_contact_that_turns_unavailable_keeps_the_hold(
+    hass, freezer, climate_window, gateway
+) -> None:
+    window_events = async_capture_events(hass, "easy_trv_window_hold")
     hass.states.async_set(CONTACT, "off")
     hass.states.async_set("binary_sensor.w2", "off")
     await start_with_setpoint(hass, climate_window, gateway)
     hass.states.async_set(CONTACT, "on")
     await settle(hass)
     assert climate_window.window_open is True
+    assert len(window_events) == 1
+    await advance(hass, freezer, 35 * 60, step=60)
+    assert issue(hass, "window_open_long_room1") is not None
     hass.states.async_set(CONTACT, "unavailable")
     await settle(hass)
+    # It was open and nobody said it closed: the hold and its issues stay.
+    assert climate_window.window_open is True
+    assert climate_window.in_sync is False
+    assert issue(hass, "window_open_long_room1") is not None
+    assert len(window_events) == 1
+    assert writes_to(gateway, IEEE_A, MODE) == [0]
+    # Unavailable and back, still open: nothing changes either.
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert climate_window.window_open is True
+    assert climate_window.in_sync is True
+    assert len(window_events) == 1
+    # Only a contact that reports closed ends the hold.
+    hass.states.async_set(CONTACT, "unavailable")
+    await settle(hass)
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
     assert climate_window.window_open is False
+    assert issue(hass, "window_open_long_room1") is None
+    assert [e.data["state"] for e in window_events] == ["open", "closed"]
 
 
 async def test_a_contact_attribute_change_is_not_a_window_event(

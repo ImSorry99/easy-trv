@@ -112,7 +112,7 @@ Choose any number of window, door, opening or garage door `binary_sensor` entiti
 - **All contacts closed:** the previous mode and target come back. Changes made in Home Assistant during the hold are applied now. A thermostat that was on its schedule stays off, because Easy TRV never writes `auto`: the Repairs issue `schedule_thermostat_off` asks you to switch it back to its schedule in ZHA and disappears when it reports `auto` or `heat` again.
 - **No time limit.** After the open-window warning (default 120 minutes, 0 = never) a Repairs issue `window_open_long` is raised.
 - **Stuck contact hint.** If the room temperature has not fallen by the expected cooling (default 0.3 K) after the window contact check (default 30 minutes, 0 = off), the Repairs issue `window_contact_suspect` says the contact may be stuck or its battery flat. The hold continues; you decide.
-- **Unavailable contacts count as closed**, and `in_sync` is false while a contact says neither open nor closed.
+- **A contact that becomes unavailable or unknown keeps its last state:** one that was open stays open (nobody said it was closed), so the hold and its Repairs issues stay. A contact that has never reported a state counts as closed. `in_sync` is false while a contact says neither open nor closed; the log notes the change once at debug level.
 
 <details>
 <summary>Restart and Home Assistant down</summary>

@@ -56,7 +56,7 @@ _LOGGER = logging.getLogger(__name__)
 # How many of the latest observations per thermostat diagnostics keep.
 OBSERVATIONS_KEPT: Final = 10
 _FAHRENHEIT: Final = frozenset({"°F", "F"})
-# A contact in one of these states says nothing; it counts as closed.
+# A contact in one of these states says nothing; it keeps its last state.
 _SILENT: Final = frozenset({STATE_UNAVAILABLE, STATE_UNKNOWN})
 
 
@@ -235,6 +235,8 @@ class HoldInputs:
         self._unsubscribers: list[CALLBACK_TYPE] = []
         self._window_open = False
         self._unreliable: frozenset[str] = frozenset()
+        # contact -> whether it was open the last time it said anything
+        self._last: dict[str, bool] = {}
 
     @property
     def contacts_reliable(self) -> bool:
@@ -271,21 +273,42 @@ class HoldInputs:
         self._unsubscribers.clear()
 
     def _resolve(self) -> bool:
-        """Return whether any contact is open; note the contacts that say nothing."""
+        """Return whether any contact is open; note the contacts that say nothing.
+
+        A contact that says nothing keeps the state it last had: one that was
+        open stays open (it did not report closing), and one never seen with a
+        state counts as closed.
+        """
         is_open = False
         silent: set[str] = set()
         for entity_id in self._config.window_contacts:
             state = self._hass.states.get(entity_id)
             if state is None or state.state in _SILENT:
                 silent.add(entity_id)
-                _LOGGER.debug(
-                    "%s: window contact %s is %s, counting it as closed",
-                    self._config.name,
-                    entity_id,
-                    "missing" if state is None else state.state,
-                )
-            elif state.state == STATE_ON:
-                is_open = True
+                kept = self._last.get(entity_id)
+                if entity_id not in self._unreliable:
+                    _LOGGER.debug(
+                        "%s: window contact %s is %s, keeping its last state (%s)",
+                        self._config.name,
+                        entity_id,
+                        "missing" if state is None else state.state,
+                        "never seen, closed"
+                        if kept is None
+                        else "open"
+                        if kept
+                        else "closed",
+                    )
+                is_open = is_open or bool(kept)
+            else:
+                self._last[entity_id] = state.state == STATE_ON
+                is_open = is_open or self._last[entity_id]
+                if entity_id in self._unreliable:
+                    _LOGGER.debug(
+                        "%s: window contact %s reports again (%s)",
+                        self._config.name,
+                        entity_id,
+                        state.state,
+                    )
         self._unreliable = frozenset(silent)
         return is_open
 
