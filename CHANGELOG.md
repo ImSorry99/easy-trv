@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The heating state `restricted` is split into five states that say what restricts the room: `restricted_unavailable`, `restricted_contact`, `restricted_unsupported`, `restricted_schedule` and `restricted_window_phase`. When several hold, the first of them is the state and all are in the `reasons`
 - A write that does not arrive is retried every refresh interval for every value, settings included, until it arrives; the Repairs notice stays until every one of them arrived (or is not written to that thermostat any more, like the mode of a thermostat on its own schedule) and names the one that is still missing
 
+### Fixed
+
+- A write whose retry was no longer needed (the room went off, the thermostat went on its own schedule or away) kept its failed attempts, so the next failure of that value raised the Repairs notice at once without retries
+
 ## [0.5.0] - 2026-10-15
 
 ### Added
