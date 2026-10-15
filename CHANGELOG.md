@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-15
+
 ### Added
 
 - Room thermostat: one `climate` entity per room with heat and off, a frost preset and a setpoint range
@@ -55,6 +57,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ImSorry99/easy-trv/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ImSorry99/easy-trv/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ImSorry99/easy-trv/releases/tag/v0.1.0
