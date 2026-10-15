@@ -24,6 +24,8 @@ from custom_components.easy_trv.const import (
 )
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.core.model import (
+    ClearIssue,
+    RaiseIssue,
     RoomConfig,
     RoomParams,
     RoomStatus,
@@ -484,6 +486,16 @@ async def test_start_clears_stale_thermostat_issues(hass, controller, gateway) -
     # A thermostat of another room keeps its issues.
     assert issue(hass, "trv_unreachable_0099") is not None
     assert issue(hass, "trv_firmware_0099") is not None
+
+
+async def test_room_issues_are_ignored_until_they_are_mapped(hass, controller) -> None:
+    await controller.async_start()
+    await settle(hass)
+    placeholders = {"room": "Living", "minutes": "130"}
+    for kind in ("window_open_long", "window_contact_suspect"):
+        controller._execute(RaiseIssue(kind, "room1", placeholders))  # noqa: SLF001
+        controller._execute(ClearIssue(kind, "room1"))  # noqa: SLF001
+    assert controller.status is not RoomStatus.ERROR
 
 
 OPERATION_LOGGER = "custom_components.easy_trv.controller"

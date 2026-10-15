@@ -145,6 +145,7 @@ def test_initial_room_state_is_heating_without_a_hold() -> None:
     assert state.outdoor_hold is False
     assert state.window_warned is False
     assert state.window_suspect is False
+    assert state.window_checked is False
 
 
 def test_trv_state_new_fields_are_empty_by_default() -> None:

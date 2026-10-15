@@ -293,6 +293,8 @@ class RoomState:
     outdoor_hold: bool = False
     window_warned: bool = False
     window_suspect: bool = False
+    # Whether the stuck-contact check already ran for the current opening.
+    window_checked: bool = False
 
     @classmethod
     def initial(cls, cfg: RoomConfig) -> RoomState:
@@ -504,7 +506,11 @@ EVENT_RECOVERED: Final = "easy_trv_recovered"
 EVENT_FAILSAFE: Final = "easy_trv_failsafe_detected"
 EVENT_SETPOINT_ADOPTED: Final = "easy_trv_setpoint_adopted"
 
-IssueKind = Literal["unreachable", "firmware"]
+# ``unreachable`` and ``firmware`` belong to a thermostat (``trv`` is its entity);
+# the window kinds belong to the room (``trv`` is the room id).
+IssueKind = Literal[
+    "unreachable", "firmware", "window_open_long", "window_contact_suspect"
+]
 
 
 @dataclass(frozen=True)

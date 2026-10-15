@@ -415,6 +415,11 @@ class RoomController:
                 return
             case SetStatus(status=status, attributes=attributes):
                 self._set_status(status, attributes)
+            case RaiseIssue(kind="window_open_long" | "window_contact_suspect"):
+                # The room's own issues (``trv`` is the room id) are mapped later.
+                return
+            case ClearIssue(kind="window_open_long" | "window_contact_suspect"):
+                return
             case RaiseIssue():
                 self._raise_issue(command)
             case ClearIssue():
@@ -487,6 +492,9 @@ class RoomController:
                     required=found["required"],
                     current=found["installed"],
                 )
+            case "window_open_long" | "window_contact_suspect":  # pragma: no cover
+                msg = f"room issue {command.kind} reached the thermostat issues"
+                raise AssertionError(msg)
             case _:
                 assert_never(command.kind)
 
@@ -509,6 +517,9 @@ class RoomController:
                 issues.clear_unreachable(self._hass, ieee)
             case "firmware":
                 issues.clear_firmware(self._hass, ieee)
+            case "window_open_long" | "window_contact_suspect":  # pragma: no cover
+                msg = f"room issue {command.kind} reached the thermostat issues"
+                raise AssertionError(msg)
             case _:
                 assert_never(command.kind)
 

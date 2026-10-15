@@ -9,7 +9,7 @@ Assistant imports, so it can be tested without a running instance.
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, assert_never
 
-from custom_components.easy_trv.core import observe, setpoint
+from custom_components.easy_trv.core import hold, observe, setpoint
 from custom_components.easy_trv.core.model import (
     EVENT_FAILSAFE,
     EVENT_RECOVERED,
@@ -166,8 +166,7 @@ class RoomLogic:
             case KnobSettled():
                 state, commands = self._on_knob_settled(event, now, state)
             case WindowChanged() | OutdoorChanged():
-                # Handled from the window tasks on; no effect yet.
-                commands = []
+                state, commands = self._on_hold_event(event, now, state)
             case _:
                 assert_never(event)
         commands = self._drop_unsupported(state, commands)
@@ -288,13 +287,32 @@ class RoomLogic:
             return state, []
         return self._write_value(state, active, now)
 
+    def _on_hold_event(
+        self, event: WindowChanged | OutdoorChanged, now: datetime, state: RoomState
+    ) -> _Step:
+        """Route a window or outdoor change to ``hold``."""
+        cfg, capability_of = self._cfg, self._capability_of
+        if isinstance(event, WindowChanged):
+            active = self._active(state, now)
+            value = None if active is None else active.value
+            return hold.on_window(
+                cfg, state, now, event.open, value, capability_of, self._source_intents
+            )
+        return hold.on_outdoor(
+            cfg, state, now, event.celsius, capability_of, self._source_intents
+        )
+
     def _on_tick(self, now: datetime, state: RoomState) -> _Step:
-        """Handle sensor timeouts and window phases, then resend what is due."""
+        """Handle sensor timeouts, window phases and holds, then resend what is due."""
         state, phase = observe.expire_window_phase(
             self._cfg, state, now, self._capability_of
         )
+        active = self._active(state, now)
+        state, holds = hold.on_tick(
+            self._cfg, state, now, None if active is None else active.value
+        )
         state, commands = self._on_tick_sensors(now, state)
-        return state, [*phase, *commands]
+        return state, [*phase, *holds, *commands]
 
     def _on_tick_sensors(self, now: datetime, state: RoomState) -> _Step:
         """Handle sensor timeouts, then resend what is due: failed writes, the value."""
