@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Diagnostic statistics sensors per room, recorded as long-term statistics: **Control deviation** (`sensor.<room>_deviation`, K: the active sensor minus the target while the room's mode is heat and no hold is active) and **Heating time** (`sensor.<room>_heating_time`, h: while at least one thermostat reports `hvac_action: heating`; unavailable until one has reported an `hvac_action`). Rooms with window contacts also get **Window openings** (`sensor.<room>_window_openings`, counted when the contacts go from all closed to any open, before the opening delay) and **Window open time** (`sensor.<room>_window_open_time`, h)
+- Diagnostic statistics sensors per thermostat: `<thermostat> writes` (every write request sent, retries included), `<thermostat> failed writes` (an error, a timeout or a read-back that differs) and `<thermostat> dropouts` (the climate entity going from available to unavailable, which a ZHA reload also causes), for example `sensor.<trv>_writes` for `climate.<trv>`. They show data Home Assistant does not record by itself
+- The counters and hours are totals that only grow and continue after a restart or a reload of the integration. Removing a thermostat from a room, or moving it, removes its statistics sensors from the old room; removing the last window contact removes the two window sensors
+
 ## [0.5.1] - 2026-10-15
 
 ### Added

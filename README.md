@@ -2,7 +2,7 @@
 
 Easy TRV is a Home Assistant integration that lets Sonoff TRVZB radiator thermostats regulate on the temperature of the room instead of the temperature at the radiator. It groups thermostats and temperature sensors into rooms, writes the room temperature to the thermostats' own external-sensor input, and checks by read-back that every write arrived.
 
-It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one diagnostic sensor for what it is doing and why (Heating state) and one thin room thermostat (`climate`) that sets the same target and mode (off, heat, frost protection) on all its thermostats.
+It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one diagnostic sensor for what it is doing and why (Heating state) and one thin room thermostat (`climate`) that sets the same target and mode (off, heat, frost protection) on all its thermostats. Diagnostic [statistics sensors](#statistics) count writes, failed writes, dropouts, window openings and heating time, for later analysis.
 
 Status: version 0.5.1 is released (room thermostat with frost protection in its mode list, window contacts, outdoor cut-off, one diagnostic heating state sensor per room with a plain-text hint, a report of silent window contacts, endless retries of writes that did not arrive, an area for every room and optional hiding of the thermostat entities); see the [`CHANGELOG`](CHANGELOG.md) for what each version brought. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
 
@@ -165,7 +165,7 @@ Rooms start once Home Assistant has fully started.
 
 ## What you see
 
-Each room is a device ("Heizung Wohnzimmer", see above) with one sensor, **Heating state** (German "Heizungszustand"), which says what the room is doing and why.
+Each room is a device ("Heizung Wohnzimmer", see above) with the sensor **Heating state** (German "Heizungszustand"), which says what the room is doing and why, and the diagnostic [statistics sensors](#statistics).
 
 ### Heating state
 
@@ -261,6 +261,77 @@ With debug logging on for `custom_components.easy_trv` (Settings > Devices & ser
 ### Diagnostics
 
 **Settings > Devices & services > Easy TRV > Download diagnostics** contains the options, the loaded profiles and skipped profile files, and for every room its configuration, the resolved settings (what the room runs with after the three layers), its full state (including timestamps and attempt counters), the holds (window and outdoor), the heating state with its reasons, the time of its last change, the deadline of a running open-window delay, the silent window contacts and the thermostats that deviate, the notes of thermostats on a schedule or in a window phase, and the latest observations per thermostat (kind, capability, raw value, time). It includes the thermostats' IEEE addresses and entity ids, so look through it before posting it publicly.
+
+## Statistics
+
+Home Assistant records what a state does, but not what Easy TRV does. The statistics sensors fill that gap. They count the writes Easy TRV sends to a thermostat, the writes that failed and the times a thermostat dropped out. They also add up the heating time and the time a window was open, and show how far the room is from its target. This is data for later analysis of control quality, Zigbee stability and heating habits.
+
+Home Assistant keeps the long-term statistics of a sensor with a state class for ever. The statistics sensors have one, so their values stay long after the raw history is purged.
+
+All of them are diagnostic sensors on the room's device. They collect whether or not you show them anywhere.
+
+### Room sensors
+
+| Sensor | Entity id | Unit | Value |
+|---|---|---|---|
+| Control deviation / Regelabweichung | `sensor.<room>_deviation` | K | The temperature of the active sensor minus the target, to 0.1 K, while the room's mode is heat and no window or outdoor hold is active. Positive: the room is warmer than the target. At any other time it is unknown. Not a total: Home Assistant keeps its mean, minimum and maximum. |
+| Heating time / Heizzeit | `sensor.<room>_heating_time` | h | Hours in which at least one thermostat of the room reports `hvac_action: heating`. A thermostat that is unavailable does not heat. The sensor is unavailable until a thermostat of the room has reported an `hvac_action`. |
+| Window openings / Fensteröffnungen | `sensor.<room>_window_openings` | count | How often the window contacts went from all closed to at least one open. It counts at once, before the opening delay, so a short airing counts too. A contact that is open when Easy TRV starts is not an opening. |
+| Window open time / Fenster-offen-Zeit | `sensor.<room>_window_open_time` | h | Hours in which at least one window contact was open, also before the opening delay. |
+
+The two window sensors exist only for rooms with window contacts. A silent contact counts with its last state, as everywhere else (see [Window contacts](#window-contacts)).
+
+### Thermostat sensors
+
+Each thermostat of a room has three sensors. `<thermostat>` is the name of the thermostat's device as on its device page, the same name as in the hint of the heating state. In the entity ids, `<trv>` is the part of the thermostat's climate entity id after `climate.`: the sensors of `climate.trv_1` are `sensor.trv_1_writes`, `sensor.trv_1_write_failures` and `sensor.trv_1_dropouts`. Like the room sensors, an existing entity keeps its id.
+
+| Sensor | Entity id | Value |
+|---|---|---|
+| `<thermostat>` writes / `<thermostat>` Schreibvorgänge | `sensor.<trv>_writes` | Every write request Easy TRV sends to the thermostat: room temperature, source, mode, target and settings. A retry counts again. The read-back after a write does not count, and neither does a write that is not sent because ZHA reports the device as unavailable. |
+| `<thermostat>` failed writes / `<thermostat>` Schreibfehler | `sensor.<trv>_write_failures` | Writes the thermostat did not accept: an error, a timeout, or a read-back that shows another value than the one written. A write the device does not support and a fail-safe fallback found by the read-back are not failed writes. |
+| `<thermostat>` dropouts / `<thermostat>` Ausfälle | `sensor.<trv>_dropouts` | How often the thermostat's climate entity went from available to unavailable. |
+
+### Totals
+
+Everything except the control deviation is a total (state class `total_increasing`): it only grows. It continues after a restart of Home Assistant and after a reload of the integration, from the last value the sensor showed. A new sensor starts counting when it is created. Easy TRV counts only while Home Assistant runs. A duration that is running is updated about once a minute.
+
+### Notes
+
+- **Heating time needs `hvac_action`.** The heating time follows the `hvac_action` attribute of the thermostats' climate entities. Whether the Sonoff TRVZB reports it through ZHA is not yet verified on hardware (spike S11 in [`docs/testing-on-device.md`](docs/testing-on-device.md)). If it does not, the heating time stays unavailable; the other sensors do not depend on it.
+- **A ZHA reload counts as a dropout.** Reloading ZHA sets the thermostats unavailable for a moment. Each of them gets one dropout.
+- **A renamed thermostat.** The name of a thermostat is read when the sensors are created. If you rename its device, the sensor names show the new name after the next reload of the integration. Entity ids do not change.
+- **A thermostat that leaves a room.** If you remove a thermostat from a room, or move it to another room, its three sensors are removed from the old room when the integration reloads (saving the room does that). In the new room they are new sensors. The same holds for the two window sensors when the last window contact is removed from a room.
+
+### Using the values
+
+**Statistics graph card.** Put a sensor on a dashboard with the statistics graph card. For a total, choose the statistic `change` to see the value per period, for example the heating time per day:
+
+```yaml
+type: statistics-graph
+title: Heating time per day
+entities:
+  - sensor.living_room_heating_time
+chart_type: bar
+period: day
+days_to_show: 30
+stat_types:
+  - change
+```
+
+For the control deviation choose `mean`, `min` and `max` instead.
+
+**Utility meter.** The helper **Utility meter** (Settings > Devices & services > Helpers > Create helper) turns a total into a value that starts at zero every day, week or month. Choose the sensor as the source and the meter reset cycle. The helper counts from the moment you create it; the statistics graph card also shows the time before.
+
+### Keeping the raw history
+
+By default the recorder keeps the raw history of every entity for 10 days (`purge_keep_days`). Long-term statistics stay for ever, but the raw history does not: the exact state changes of the room temperatures, the thermostats' target, mode and `hvac_action`, the window contacts and the heating state. To keep them for analysis, raise the value in `configuration.yaml`, for example:
+
+```yaml
+recorder:
+  purge_keep_days: 365
+```
+
+The database grows with it. For raw data over many years, the optional InfluxDB integration of Home Assistant is one way. It is not part of Easy TRV.
 
 ## Profiles
 
