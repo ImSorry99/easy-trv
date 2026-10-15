@@ -413,7 +413,12 @@ class RoomLogic:
         return state, [*commands, *climate]
 
     def _on_retry_due(self, event: RetryDue, now: datetime, state: RoomState) -> _Step:
-        """Resend the newest intent that is still waiting for its retry."""
+        """Resend the newest intent that is still waiting for its retry.
+
+        A retry that sends nothing (the room is off, the thermostat runs its own
+        schedule or is away) ends its chain: the attempts are forgotten, so the
+        next write of the capability starts a fresh chain with the backoff.
+        """
         trv, capability = event.trv, event.capability
         current = state.trvs[trv]
         intent = current.pending_retry.get(capability)
@@ -425,16 +430,40 @@ class RoomLogic:
         if trv in self._writable(state):
             state = self._with_trv(state, trv, updated)
             if isinstance(intent, SetSetpoint | SetHvacMode):
-                return setpoint.retry(state, now, trv, intent, self._capability_of)
+                state, commands = setpoint.retry(
+                    state, now, trv, intent, self._capability_of
+                )
+                if not any(
+                    isinstance(command, Execute)
+                    and command.trv == trv
+                    and self._capability_of(command.intent) == capability
+                    for command in commands
+                ):
+                    state = self._forget_attempts(state, trv, capability)
+                return state, commands
             if setpoint.suspended(state) and isinstance(
                 intent, SetRoomTemperature | SetSource
             ):
-                return state, []
+                return self._forget_attempts(state, trv, capability), []
             return state, [Execute(trv, intent)]
         if isinstance(intent, SETTING_INTENTS):
             # Dropped while the thermostat is away: re-apply on its return.
             updated = replace(updated, settings_applied=False)
-        return self._with_trv(state, trv, updated), []
+        state = self._with_trv(state, trv, updated)
+        return self._forget_attempts(state, trv, capability), []
+
+    def _forget_attempts(
+        self, state: RoomState, trv: str, capability: str
+    ) -> RoomState:
+        """Return ``state`` without the attempts of a chain that ended unsent."""
+        current = state.trvs[trv]
+        if capability not in current.attempts:
+            return state
+        return self._with_trv(
+            state,
+            trv,
+            replace(current, attempts=_without(current.attempts, capability)),
+        )
 
     def _on_result(
         self, event: OperationResult, now: datetime, state: RoomState

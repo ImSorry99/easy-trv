@@ -2966,3 +2966,22 @@ def test_a_device_unsupported_outcome_still_raises_the_firmware_issue() -> None:
     assert [i.kind for i in of_type(cmds, RaiseIssue)] == ["firmware"]
     assert st.trvs["climate.a"].health == TrvHealth.UNSUPPORTED
     assert st.trvs["climate.a"].not_in_profile == frozenset()
+
+
+def test_a_retry_that_sends_nothing_forgets_its_attempts() -> None:
+    st = started_with_setpoint()
+    # Two attempts fail; the third is waiting for its retry.
+    for _ in range(2):
+        st, _ = logic().handle(result("climate.a", SETPOINT, Failed("busy")), T0, st)
+    assert st.trvs["climate.a"].attempts == {"setpoint": 2}
+    # The room goes off before the retry is due: the retry writes nothing.
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
+    st, cmds = logic().handle(RetryDue("climate.a", "setpoint"), T0, st)
+    assert climate_writes(cmds) == []
+    assert "setpoint" not in st.trvs["climate.a"].attempts
+
+    # Back on: a single failure gets the backoff, not a notice at once.
+    st, _ = logic().handle(SetRoomMode(RoomMode.HEAT), T0, st)
+    st, cmds = logic().handle(result("climate.a", SETPOINT, Failed("busy")), T0, st)
+    assert of_type(cmds, ScheduleRetry) == [ScheduleRetry("climate.a", "setpoint", 5.0)]
+    assert not any(isinstance(c, (RaiseIssue, FireEvent)) for c in cmds)
