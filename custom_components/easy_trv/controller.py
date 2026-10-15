@@ -436,24 +436,24 @@ class RoomController:
 
     def snapshot(self) -> dict[str, Any]:
         """Return configuration, tunables and state as JSON-able data."""
-        state = self._state
+        room = self._state
         return {
             "config": _jsonable(self._config),
             "params": _jsonable(self._params),
-            "state": _jsonable(self._state),
+            "state": _jsonable(room),
             "not_in_profile": {
                 trv: sorted(state.not_in_profile)
                 for trv, state in self._state.trvs.items()
                 if state.not_in_profile
             },
             "hold": {
-                "window_open": state.window_open,
+                "window_open": room.window_open,
                 "window_opened_at": (
                     None
-                    if state.window_opened_at is None
-                    else state.window_opened_at.isoformat()
+                    if room.window_opened_at is None
+                    else room.window_opened_at.isoformat()
                 ),
-                "outdoor_hold": state.outdoor_hold,
+                "outdoor_hold": room.outdoor_hold,
             },
             "notes": {trv: note.value for trv, note in self.notes.items()},
             "observations": self._subscriptions.recent(),
@@ -498,6 +498,7 @@ class RoomController:
         issues.clear_window_open_long(self._hass, config.room_id)
         issues.clear_window_contact_suspect(self._hass, config.room_id)
         self._subscriptions.subscribe_all()
+        window_open, outdoor = self._holds.start()
         self._dispatch(
             Start(
                 sensors=tuple(
@@ -510,10 +511,10 @@ class RoomController:
                 reported={
                     entity_id: self._reported(entity_id) for entity_id in self._firmware
                 },
+                window_open=window_open,
+                outdoor=outdoor,
             )
         )
-        for event in self._holds.start():
-            self._dispatch(event)
 
     async def async_stop(self) -> None:
         """Cancel listeners, timers and the worker; later callbacks are ignored."""

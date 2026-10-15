@@ -138,11 +138,24 @@ async def test_set_temperature_service_writes_the_thermostats(
     assert state.attributes["in_sync"] is True
 
 
-async def test_set_temperature_is_clamped_into_the_range(hass, entry) -> None:
+async def test_set_temperature_is_rounded_to_the_step(hass, entry) -> None:
     await start(hass, entry)
 
-    await call(hass, SERVICE_SET_TEMPERATURE, **{ATTR_TEMPERATURE: 29.9})
+    await call(hass, SERVICE_SET_TEMPERATURE, **{ATTR_TEMPERATURE: 21.7})
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 21.5
+
+
+async def test_set_setpoint_is_clamped_into_the_range(hass, entry) -> None:
+    await start(hass, entry)
+    controller = next(iter(entry.runtime_data.rooms.values()))
+
+    await controller.async_set_setpoint(40.0)
+    await settle(hass)
     assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 30.0
+
+    await controller.async_set_setpoint(1.0)
+    await settle(hass)
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 5.0
 
 
 async def test_turn_off_and_on(hass, entry, fake_gateway) -> None:
@@ -421,3 +434,68 @@ async def test_each_room_has_its_own_climate_entity(hass, fake_gateway) -> None:
     assert hass.states.get("climate.kitchen_heating") is not None
     kitchen = hass.states.get("climate.kitchen_heating")
     assert kitchen.attributes[ATTR_TEMPERATURE] == 19.0
+
+
+# --- A restart during a hold --------------------------------------------------
+
+
+def thermostats_report_off(hass) -> None:
+    for entity_id in ("climate.a", "climate.b"):
+        hass.states.async_set(entity_id, "off", {"temperature": 18.0})
+
+
+async def test_restart_during_window_hold_writes_no_heat(hass, fake_gateway) -> None:
+    thermostats_report_off(hass)
+    hass.states.async_set("binary_sensor.window", "on")
+    entry = make_entry(
+        hass, [room_data(window_contacts=["binary_sensor.window"])], FAST_OPTIONS
+    )
+    remember(hass, "heat", 21.0)
+
+    await start(hass, entry)
+
+    # The hold is in force from the first moment: nothing but off is written,
+    # and no setpoint, whatever the thermostats show.
+    assert {raw for _, raw in writes(fake_gateway, MODE)} == {OFF}
+    assert writes(fake_gateway, SETPOINT) == []
+    state = hass.states.get(CLIMATE)
+    # The room still wishes to heat at 21.
+    assert state.state == "heat"
+    assert state.attributes[ATTR_TEMPERATURE] == 21.0
+    assert state.attributes["window_open"] is True
+
+    hass.states.async_set("binary_sensor.window", "off")
+    await settle(hass)
+
+    assert sorted(writes(fake_gateway, MODE)[-2:]) == [(IEEE_A, HEAT), (IEEE_B, HEAT)]
+    assert sorted(writes(fake_gateway, SETPOINT)) == [(IEEE_A, 2100), (IEEE_B, 2100)]
+    assert hass.states.get(CLIMATE).attributes["window_open"] is False
+
+
+async def test_restart_during_outdoor_hold_writes_no_heat(hass, fake_gateway) -> None:
+    thermostats_report_off(hass)
+    hass.states.async_set("sensor.outdoor", "25", {"unit_of_measurement": "°C"})
+    entry = make_entry(
+        hass,
+        [room_data()],
+        {
+            **FAST_OPTIONS,
+            "outdoor_sensor": "sensor.outdoor",
+            "outdoor_cutoff_celsius": 18.0,
+        },
+    )
+    remember(hass, "heat", 21.0)
+
+    await start(hass, entry)
+
+    assert {raw for _, raw in writes(fake_gateway, MODE)} == {OFF}
+    assert writes(fake_gateway, SETPOINT) == []
+    state = hass.states.get(CLIMATE)
+    assert state.state == "heat"
+    assert state.attributes["outdoor_cutoff"] is True
+
+    hass.states.async_set("sensor.outdoor", "10", {"unit_of_measurement": "°C"})
+    await settle(hass)
+
+    assert sorted(writes(fake_gateway, MODE)[-2:]) == [(IEEE_A, HEAT), (IEEE_B, HEAT)]
+    assert sorted(writes(fake_gateway, SETPOINT)) == [(IEEE_A, 2100), (IEEE_B, 2100)]

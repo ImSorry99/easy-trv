@@ -793,3 +793,38 @@ async def test_user_profile_without_adaptive_and_frost_is_no_firmware_problem(
     assert room.snapshot()["not_in_profile"] == {
         "climate.x": ["set_adaptive_mode", "set_frost_temperature"]
     }
+
+
+async def test_disjoint_setpoint_range_invalidates_the_room(hass) -> None:
+    entry = make_entry(
+        hass, [room_data(setpoint_min=36.0, setpoint_max=40.0)], FAST_OPTIONS
+    )
+
+    await start(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.rooms == {}
+    issue = room_issue(hass, subentry_of(entry, "Living").subentry_id)
+    assert issue is not None
+    assert "setpoint range is empty" in issue.translation_placeholders["error"]
+    assert hass.states.get("climate.living_heating") is None
+
+
+async def test_deleting_a_room_removes_its_climate_entity(hass) -> None:
+    entry = make_entry(
+        hass,
+        [room_data("Living"), room_data("Bedroom", trvs=["climate.b"])],
+        FAST_OPTIONS,
+    )
+    await start(hass, entry)
+    registry = er.async_get(hass)
+    assert registry.async_get("climate.bedroom_heating") is not None
+
+    hass.config_entries.async_remove_subentry(
+        entry, subentry_of(entry, "Bedroom").subentry_id
+    )
+    await settle(hass)
+
+    assert registry.async_get("climate.bedroom_heating") is None
+    assert hass.states.get("climate.bedroom_heating") is None
+    assert registry.async_get("climate.living_heating") is not None

@@ -241,13 +241,13 @@ class HoldInputs:
         """Return whether every window contact reports open or closed."""
         return not self._unreliable
 
-    def start(self) -> list[LogicEvent]:
-        """Start tracking and return the events that describe the state now.
+    def start(self) -> tuple[bool, float | None]:
+        """Start tracking; return whether a window is open and the outdoor °C.
 
-        The window state is not persisted, so an open window at start is an
-        event of its own; the outdoor temperature is one whenever it matters.
+        The window state is not persisted, so these are the inputs the room
+        starts with; the outdoor temperature is ``None`` when it does not matter.
         """
-        events: list[LogicEvent] = []
+        outdoor: float | None = None
         if self._config.window_contacts:
             self._unsubscribers.append(
                 async_track_state_change_event(
@@ -255,18 +255,14 @@ class HoldInputs:
                 )
             )
             self._window_open = self._resolve()
-            if self._window_open:
-                events.append(WindowChanged(open=True))
         if self._outdoor is not None:
             self._unsubscribers.append(
                 async_track_state_change_event(
                     self._hass, [self._outdoor], self._on_outdoor
                 )
             )
-            events.append(
-                OutdoorChanged(_outdoor_celsius(self._hass.states.get(self._outdoor)))
-            )
-        return events
+            outdoor = _outdoor_celsius(self._hass.states.get(self._outdoor))
+        return self._window_open, outdoor
 
     def stop(self) -> None:
         """Stop tracking."""

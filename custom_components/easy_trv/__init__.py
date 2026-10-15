@@ -96,8 +96,12 @@ def effective_range(
     intents = {spec.intent for spec in profile.capabilities.values()}
     if not {_INTENT_SETPOINT, _INTENT_MODE} <= intents:
         return None
-    limits = profile.limits(_INTENT_SETPOINT)
-    low, high, step = (-math.inf, math.inf, _DEFAULT_STEP) if limits is None else limits
+    spec = next(
+        s for s in profile.capabilities.values() if s.intent == _INTENT_SETPOINT
+    )
+    # A capability without a declared range leaves the room's limits alone.
+    low, high = spec.value_range or (-math.inf, math.inf)
+    step = _DEFAULT_STEP if spec.step is None else spec.step
     low = max(settings.setpoint_min, low)
     high = min(settings.setpoint_max, high)
     if low >= high:

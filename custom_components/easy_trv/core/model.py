@@ -371,6 +371,11 @@ class Start:
     reported: Mapping[str, tuple[float | None, str | None]] = field(
         default_factory=dict
     )
+    # The hold inputs at start: a window contact already open, the outdoor
+    # temperature (``None``: unknown or not watched). They hold the room before
+    # it compares the thermostats with its values.
+    window_open: bool = False
+    outdoor: float | None = None
 
 
 @dataclass(frozen=True)

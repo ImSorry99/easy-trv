@@ -184,7 +184,7 @@ def test_an_empty_effective_range_is_refused(tmp_path) -> None:
         _range(narrow, setpoint_min=10.0, setpoint_max=20.0)
 
 
-def test_profile_without_a_declared_range_uses_the_room_limits(tmp_path) -> None:
+def test_profile_without_a_declared_range_keeps_its_step(tmp_path) -> None:
     (tmp_path / "open.yaml").write_text(
         BUILTIN_TEXT.replace("id: sonoff_trvzb_native", "id: user_open", 1).replace(
             "range: [4, 35], step: 0.5", "step: 1.0", 1
@@ -192,7 +192,8 @@ def test_profile_without_a_declared_range_uses_the_room_limits(tmp_path) -> None
     )
     profile = load_profiles_sync(tmp_path).profiles["user_open"]
 
-    assert _range(profile) == (5.0, 30.0, 0.5)
+    # The room's limits apply; the step the profile declares is kept.
+    assert _range(profile) == (5.0, 30.0, 1.0)
 
 
 @pytest.mark.parametrize("intent", ["set_setpoint", "set_hvac_mode"])

@@ -187,12 +187,24 @@ class RoomLogic:
         readings = {**state.readings, **{r.entity_id: r for r in event.sensors}}
         state = replace(state, readings=readings, trvs=trvs)
         state, commands = self._apply_settings(state, self._writable(state))
+        # The holds first: a room that starts held is compared with the
+        # thermostats without writing heat or a value, only the hold's off.
+        state, holds = self._start_holds(event, now, state)
+        commands = [*commands, *holds]
         # Before the source: a room that starts switched off writes no value.
         state, setpoint_commands = setpoint.reconcile_start(
             self._cfg, state, now, event.reported, self._capability_of
         )
         state, source_commands = self._reconcile_source(state, now)
         return state, [*commands, *setpoint_commands, *source_commands]
+
+    def _start_holds(self, event: Start, now: datetime, state: RoomState) -> _Step:
+        """Apply the window contact and outdoor temperature known at start."""
+        state, commands = self._on_hold_event(
+            WindowChanged(open=event.window_open), now, state
+        )
+        state, outdoor = self._on_hold_event(OutdoorChanged(event.outdoor), now, state)
+        return state, [*commands, *outdoor]
 
     def _on_room_event(
         self,

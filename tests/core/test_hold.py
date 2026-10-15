@@ -12,6 +12,7 @@ from custom_components.easy_trv.core.model import (
     Note,
     OutdoorChanged,
     RaiseIssue,
+    RestoreRoom,
     RetryDue,
     RoomConfig,
     RoomMode,
@@ -89,6 +90,44 @@ def issue_kinds(cmds: list[Command]) -> tuple[list[str], list[str]]:
 
 def open_window(st: RoomState) -> tuple[RoomState, list[Command]]:
     return room().handle(WindowChanged(open=True), OPEN_AT, st)
+
+
+# --- Start inside a hold ---------------------------------------------------
+
+
+def test_start_with_an_open_window_holds_before_reconciling() -> None:
+    logic = room()
+    st, _ = logic.handle(
+        RestoreRoom(21.0, RoomMode.HEAT, None), T0, RoomState.initial(HOLD_CFG)
+    )
+    reported = {A: (18.0, "off"), B: (18.0, "off")}
+    st, cmds = logic.handle(
+        Start(
+            (reading("sensor.t1", 21.3),), BOTH_AVAILABLE, reported, window_open=True
+        ),
+        T0,
+        st,
+    )
+
+    assert st.window_open is True
+    assert (st.mode, st.setpoint) == (RoomMode.HEAT, 21.0)
+    # Off for both thermostats, no heat and no setpoint.
+    assert [i for _, i in executes(cmds) if isinstance(i, SetHvacMode)] == [
+        SetHvacMode("off"),
+        SetHvacMode("off"),
+    ]
+    assert not [i for _, i in executes(cmds) if isinstance(i, SetSetpoint)]
+
+
+def test_start_with_a_warm_outdoor_holds() -> None:
+    st, cmds = room().handle(
+        Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE, outdoor=20.0),
+        T0,
+        RoomState.initial(HOLD_CFG),
+    )
+
+    assert st.outdoor_hold is True
+    assert (A, SetHvacMode("off")) in executes(cmds)
 
 
 # --- Window: enter and leave ---------------------------------------------
