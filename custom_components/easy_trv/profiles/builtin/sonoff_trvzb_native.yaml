@@ -33,3 +33,14 @@ capabilities:
     intent: set_frost_temperature
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6002, encode: temperature_centi, range: [4, 35] }
     verify: { rule: equals }
+  setpoint:
+    intent: set_setpoint
+    observe: true
+    write: { endpoint: 1, cluster: 0x0201, attribute: 0x0012, encode: temperature_centi, range: [4, 35], step: 0.5 }
+    verify: { rule: equals }
+  hvac_mode:
+    intent: set_hvac_mode
+    observe: true
+    write: { endpoint: 1, cluster: 0x0201, attribute: 0x001C, encode: { map: { heat: 4, "off": 0 } } }
+    verify: { rule: one_of, heat: [4], "off": [0] }   # "off" quoted: bare off is a YAML boolean
+    signals: { 1: schedule }

@@ -7,6 +7,7 @@ can be tested without a running instance.
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from types import MappingProxyType
 from typing import Any
 
@@ -15,19 +16,24 @@ from custom_components.easy_trv.core.model import (
     Intent,
     SetAdaptiveMode,
     SetFrostTemperature,
+    SetHvacMode,
     SetHysteresis,
     SetRoomTemperature,
+    SetSetpoint,
     SetSource,
     SetWindowDetection,
 )
 from custom_components.easy_trv.core.values import (
     Version,
+    from_centi,
     is_in_range,
     parse_version_string,
     to_centi,
 )
 
 _CENTI_FACTOR = 100
+_DEFAULT_STEP = 0.5
+_DECODED_DIGITS = 2
 
 type _Value = float | bool | str
 
@@ -93,7 +99,9 @@ class CapabilitySpec:
     ``encode`` is the name of a built-in encoder, a constant raw value
     (``int``) or a lookup table from intent value to raw value (``Mapping``).
     ``verify_values`` holds the accepted raw values per intent value for the
-    ``one_of`` rule and is empty for ``equals``.
+    ``one_of`` rule and is empty for ``equals``. ``step`` is the grid the
+    engine rounds the intent value to before encoding (``None``: no rounding);
+    ``observe`` marks capabilities whose device value the room follows.
     """
 
     name: str
@@ -108,22 +116,24 @@ class CapabilitySpec:
     verify_values: Mapping[str, tuple[int, ...]]
     signals: Mapping[int, str]
     also_read: tuple[int, ...]
+    step: float | None = None
+    observe: bool = False
 
 
 def _intent_value(intent: Intent) -> _Value:
     """Return the value carried by an intent."""
     match intent:
-        case SetRoomTemperature(celsius=value):
+        case (
+            SetRoomTemperature(celsius=value)
+            | SetFrostTemperature(celsius=value)
+            | SetSetpoint(celsius=value)
+        ):
             return value
         case SetHysteresis(kelvin=value):
             return value
-        case SetFrostTemperature(celsius=value):
+        case SetAdaptiveMode(enabled=value) | SetWindowDetection(enabled=value):
             return value
-        case SetAdaptiveMode(enabled=value):
-            return value
-        case SetWindowDetection(enabled=value):
-            return value
-        case SetSource(source=value):
+        case SetSource(source=value) | SetHvacMode(mode=value):
             return value
 
 
@@ -147,6 +157,21 @@ def _numeric(spec: CapabilitySpec, value: _Value) -> float:
         msg = f"capability {spec.name!r}: {value} is not a finite number"
         raise ValueOutOfRange(msg)
     return value
+
+
+def _round_to_step(spec: CapabilitySpec, value: _Value) -> _Value:
+    """Round a numeric value half-up to the capability's step, if it has one.
+
+    Booleans, strings and non-finite numbers pass through unchanged; the range
+    check and the encoder report them.
+    """
+    step = spec.step
+    if step is None or isinstance(value, bool | str) or not math.isfinite(value):
+        return value
+    units = (Decimal(str(value)) / Decimal(str(step))).quantize(
+        Decimal(1), rounding=ROUND_HALF_UP
+    )
+    return float(units * Decimal(str(step)))
 
 
 def _check_range(spec: CapabilitySpec, value: _Value) -> None:
@@ -203,6 +228,7 @@ def _build_capability(name: str, raw: dict[str, Any]) -> CapabilitySpec:
     if isinstance(encode, dict):
         encode = encode["const"] if "const" in encode else dict(encode["map"])
     value_range = write.get("range")
+    step = write.get("step")
     verify = raw["verify"]
     verify_values = {
         key: tuple(values) for key, values in verify.items() if key != "rule"
@@ -233,6 +259,8 @@ def _build_capability(name: str, raw: dict[str, Any]) -> CapabilitySpec:
         verify_values=MappingProxyType(verify_values),
         signals=MappingProxyType(dict(raw.get("signals", {}))),
         also_read=tuple(raw.get("also_read", ())),
+        step=None if step is None else float(step),
+        observe=bool(raw.get("observe", False)),
     )
 
 
@@ -319,7 +347,7 @@ class Profile:
         required = self._required_firmware(spec)
         if firmware is not None and firmware < required:
             raise CapabilityUnsupported(name, required, firmware)
-        value = _intent_value(intent)
+        value = _round_to_step(spec, _intent_value(intent))
         _check_range(spec, value)
         raw_value = _encode(spec, value)
         return Operation(
@@ -333,6 +361,45 @@ class Profile:
             also_read=spec.also_read,
             extra_signals=self._extra_signals(spec),
         )
+
+    def decode(self, capability: str, raw: int) -> float | str | None:
+        """Turn a raw attribute value back into the value of the intent.
+
+        ``temperature_centi`` gives °C (two decimals), a ``map`` encoder gives
+        the key whose raw value matches, ``None`` for an unmapped raw value or
+        an encoder that cannot be inverted.
+
+        Raises:
+            KeyError: If the profile has no capability of that name.
+
+        """
+        spec = self.capabilities[capability]
+        encode = spec.encode
+        if isinstance(encode, Mapping):
+            return next((key for key, value in encode.items() if value == raw), None)
+        if encode == "temperature_centi":
+            return round(from_centi(raw), _DECODED_DIGITS)
+        return None
+
+    def limits(self, intent_name: str) -> tuple[float, float, float] | None:
+        """Return ``(low, high, step)`` of the capability handling an intent.
+
+        The step is the capability's ``write.step``; when it declares none the
+        default is 0.5 (it only matters for the setpoint). ``None`` if the
+        profile has no capability for the intent or it declares no ``range``.
+        """
+        spec = next(
+            (s for s in self.capabilities.values() if s.intent == intent_name),
+            None,
+        )
+        if spec is None or spec.value_range is None:
+            return None
+        low, high = spec.value_range
+        return low, high, _DEFAULT_STEP if spec.step is None else spec.step
+
+    def observed(self) -> tuple[str, ...]:
+        """Return the names of the capabilities the room observes on the device."""
+        return tuple(name for name, spec in self.capabilities.items() if spec.observe)
 
     def _required_firmware(self, spec: CapabilitySpec) -> Version:
         """Return the lowest firmware on which the capability may be used."""

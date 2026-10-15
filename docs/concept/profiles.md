@@ -63,13 +63,26 @@ capabilities:
     intent: set_frost_temperature
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6002, encode: temperature_centi, range: [4, 35] }
     verify: { rule: equals }
+  setpoint:
+    intent: set_setpoint
+    observe: true                    # the room follows this value on the device
+    write: { endpoint: 1, cluster: 0x0201, attribute: 0x0012, encode: temperature_centi, range: [4, 35], step: 0.5 }
+    verify: { rule: equals }
+  hvac_mode:
+    intent: set_hvac_mode
+    observe: true
+    write: { endpoint: 1, cluster: 0x0201, attribute: 0x001C, encode: { map: { heat: 4, "off": 0 } } }
+    verify: { rule: one_of, heat: [4], "off": [0] }
+    signals: { 1: schedule }         # read 1 (auto) = the device runs its own schedule
 ```
 
-The vocabulary is small on purpose: a fixed set of intents (`set_room_temperature`, `set_source`, `set_window_detection`, `set_hysteresis`, `set_adaptive_mode`, `set_frost_temperature`), a fixed set of encoders (`temperature_centi`, `kelvin_centi_negative`, `bool`, `map`, `const`), two verify rules (`equals`, `one_of`) and named signals. New vocabulary is added in code when a new device needs it; profiles only combine it.
+The vocabulary is small on purpose: a fixed set of intents (`set_room_temperature`, `set_source`, `set_window_detection`, `set_hysteresis`, `set_adaptive_mode`, `set_frost_temperature`, `set_setpoint`, `set_hvac_mode`), a fixed set of encoders (`temperature_centi`, `kelvin_centi_negative`, `bool`, `map`, `const`), two verify rules (`equals`, `one_of`) and named signals. New vocabulary is added in code when a new device needs it; profiles only combine it.
 
-Two details that matter when writing a profile:
+Two optional keys support room state. `write.step` (a positive number) makes the engine round the intent value half-up to that grid before the range check and the encoder (21.25 → 21.5 with `step: 0.5`); without it nothing is rounded. `observe: true` marks a capability whose device value the room follows; `Profile.observed()` lists those. `Profile.decode(capability, raw)` is the inverse of the encoder (`temperature_centi` → °C, `map` → the key, an unmapped raw value → `None`) and `Profile.limits(intent)` returns `(low, high, step)` from `range` and `step` (step 0.5 when absent; it only matters for the setpoint). `set_setpoint` and `set_hvac_mode` are room state, not thermostat settings, so a room never applies them as settings. Existing user profiles stay valid: `step` and `observe` are optional.
 
-- The keys of a `map` encoder (and of a `one_of` verify rule) are matched against the intent value rendered as text: a string as it is (`external`), any other value as `str(value).lower()`. For a boolean intent the keys are therefore `true` and `false`; quote them in YAML (`"true": 1`), otherwise YAML reads them as booleans and the schema rejects the file. A `one_of` rule must list exactly the keys of the `map` encoder.
+Details that matter when writing a profile:
+
+- The keys of a `map` encoder (and of a `one_of` verify rule) are matched against the intent value rendered as text: a string as it is (`external`), any other value as `str(value).lower()`. For a boolean intent the keys are therefore `true` and `false`; quote them in YAML (`"true": 1`), otherwise YAML reads them as booleans and the schema rejects the file. The same goes for `"off"` (and `"on"`, `"yes"`, `"no"`), which YAML 1.1 reads as booleans. A `one_of` rule must list exactly the keys of the `map` encoder.
 - A user profile's `id` must be unique: an id that a shipped profile (or an earlier user file) already uses is rejected with a `profile_invalid` Repairs issue, and the file is skipped. Pick a new id when copying a shipped profile.
 
 ## Selection

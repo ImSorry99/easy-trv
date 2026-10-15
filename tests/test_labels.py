@@ -15,6 +15,8 @@ INTENTS = {
     "set_hysteresis",
     "set_adaptive_mode",
     "set_frost_temperature",
+    "set_setpoint",
+    "set_hvac_mode",
 }
 
 

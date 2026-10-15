@@ -23,6 +23,16 @@ def test_builtin_profile_validates() -> None:
     assert data["capabilities"]["hysteresis"]["min_firmware"] == "1.3.0"
 
 
+def test_builtin_declares_setpoint_and_hvac_mode() -> None:
+    data = schema.validate_profile_dict(_load_builtin())
+    setpoint = data["capabilities"]["setpoint"]
+    assert setpoint["intent"] == "set_setpoint"
+    assert setpoint["observe"] is True
+    assert setpoint["write"]["step"] == 0.5
+    assert data["capabilities"]["hvac_mode"]["signals"] == {1: "schedule"}
+    assert data["capabilities"]["hysteresis"]["observe"] is False
+
+
 def test_unknown_encoder_rejected() -> None:
     data = _load_builtin()
     data["capabilities"]["external_temperature"]["write"]["encode"] = "float"
@@ -128,3 +138,27 @@ def test_profile_without_a_required_intent_is_rejected(
     del data["capabilities"][capability]
     with pytest.raises(vol.Invalid, match=f"needs a capability for {intent}"):
         schema.validate_profile_dict(data)
+
+
+@pytest.mark.parametrize("step", [0, -0.5, True, "0.5", float("inf")])
+def test_schema_rejects_a_non_positive_or_invalid_step(step: object) -> None:
+    data = _load_builtin()
+    data["capabilities"]["setpoint"]["write"]["step"] = step
+    with pytest.raises(vol.Invalid):
+        schema.validate_profile_dict(data)
+
+
+def test_schema_rejects_a_non_boolean_observe() -> None:
+    data = _load_builtin()
+    data["capabilities"]["setpoint"]["observe"] = "yes"
+    with pytest.raises(vol.Invalid):
+        schema.validate_profile_dict(data)
+
+
+def test_step_and_observe_are_optional() -> None:
+    data = _load_builtin()
+    del data["capabilities"]["setpoint"]["write"]["step"]
+    del data["capabilities"]["setpoint"]["observe"]
+    validated = schema.validate_profile_dict(data)
+    assert "step" not in validated["capabilities"]["setpoint"]["write"]
+    assert validated["capabilities"]["setpoint"]["observe"] is False

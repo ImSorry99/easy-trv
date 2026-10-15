@@ -58,6 +58,20 @@ class SetFrostTemperature:
     celsius: float
 
 
+@dataclass(frozen=True)
+class SetSetpoint:
+    """Set the target temperature the thermostat heats to."""
+
+    celsius: float
+
+
+@dataclass(frozen=True)
+class SetHvacMode:
+    """Switch the thermostat's heating on (``heat``) or off."""
+
+    mode: Literal["heat", "off"]
+
+
 Intent = (
     SetRoomTemperature
     | SetSource
@@ -65,6 +79,8 @@ Intent = (
     | SetAdaptiveMode
     | SetHysteresis
     | SetFrostTemperature
+    | SetSetpoint
+    | SetHvacMode
 )
 
 INTENT_NAMES: dict[type, str] = {
@@ -74,9 +90,12 @@ INTENT_NAMES: dict[type, str] = {
     SetAdaptiveMode: "set_adaptive_mode",
     SetHysteresis: "set_hysteresis",
     SetFrostTemperature: "set_frost_temperature",
+    SetSetpoint: "set_setpoint",
+    SetHvacMode: "set_hvac_mode",
 }
 
 # The settings a room applies to a thermostat, in the order they are written.
+# SetSetpoint and SetHvacMode are room state, not settings, and stay out.
 SETTING_INTENTS: Final = (
     SetWindowDetection,
     SetAdaptiveMode,

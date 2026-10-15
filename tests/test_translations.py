@@ -22,6 +22,8 @@ INTENTS = {
     "set_hysteresis",
     "set_adaptive_mode",
     "set_frost_temperature",
+    "set_setpoint",
+    "set_hvac_mode",
 }
 
 ROOM_ERRORS = {
@@ -249,6 +251,8 @@ def test_capability_labels_en() -> None:
         "set_hysteresis": "Hysteresis",
         "set_adaptive_mode": "Adaptive mode",
         "set_frost_temperature": "Frost protection temperature",
+        "set_setpoint": "Target temperature",
+        "set_hvac_mode": "Mode",
     }
 
 
@@ -260,6 +264,8 @@ def test_capability_labels_de() -> None:
         "set_hysteresis": "Hysterese",
         "set_adaptive_mode": "Adaptiver Modus",
         "set_frost_temperature": "Frostschutztemperatur",
+        "set_setpoint": "Solltemperatur",
+        "set_hvac_mode": "Modus",
     }
 
 

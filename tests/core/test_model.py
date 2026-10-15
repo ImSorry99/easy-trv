@@ -6,7 +6,9 @@ from custom_components.easy_trv.core.model import (
     RoomParams,
     SetAdaptiveMode,
     SetFrostTemperature,
+    SetHvacMode,
     SetHysteresis,
+    SetSetpoint,
     SetWindowDetection,
 )
 from custom_components.easy_trv.core.settings import resolve_settings
@@ -78,3 +80,10 @@ def test_setting_intents_are_in_write_order() -> None:
         SetHysteresis,
         SetFrostTemperature,
     ) == SETTING_INTENTS
+
+
+def test_room_state_intents_have_stable_names_and_are_not_settings() -> None:
+    assert INTENT_NAMES[SetSetpoint] == "set_setpoint"
+    assert INTENT_NAMES[SetHvacMode] == "set_hvac_mode"
+    assert SetSetpoint not in SETTING_INTENTS
+    assert SetHvacMode not in SETTING_INTENTS

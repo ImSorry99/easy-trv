@@ -245,7 +245,9 @@
         "set_window_detection": "Fenster-offen-Erkennung des Thermostats",
         "set_hysteresis": "Hysterese",
         "set_adaptive_mode": "Adaptiver Modus",
-        "set_frost_temperature": "Frostschutztemperatur"
+        "set_frost_temperature": "Frostschutztemperatur",
+        "set_setpoint": "Solltemperatur",
+        "set_hvac_mode": "Modus"
       }
     }
   }

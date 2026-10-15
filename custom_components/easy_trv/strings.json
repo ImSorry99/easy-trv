@@ -245,7 +245,9 @@
         "set_window_detection": "Thermostat's open-window detection",
         "set_hysteresis": "Hysteresis",
         "set_adaptive_mode": "Adaptive mode",
-        "set_frost_temperature": "Frost protection temperature"
+        "set_frost_temperature": "Frost protection temperature",
+        "set_setpoint": "Target temperature",
+        "set_hvac_mode": "Mode"
       }
     }
   }

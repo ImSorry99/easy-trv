@@ -20,6 +20,8 @@ INTENTS = (
     "set_hysteresis",
     "set_adaptive_mode",
     "set_frost_temperature",
+    "set_setpoint",
+    "set_hvac_mode",
 )
 # Without these a room could never write its temperature, and a missing
 # capability is otherwise skipped silently, so a profile must declare them.
@@ -65,6 +67,15 @@ def _number(value: object) -> float:
     return float(value)
 
 
+def _positive_number(value: object) -> float:
+    """Validate a finite number greater than zero and return it as float."""
+    number = _number(value)
+    if number <= 0:
+        msg = "expected a positive number"
+        raise vol.Invalid(msg)
+    return number
+
+
 def _schema_version(value: object) -> int:
     """Accept exactly the integer 1 (not ``True`` or ``1.0``)."""
     if (
@@ -102,6 +113,7 @@ _WRITE = vol.Schema(
         vol.Required("attribute"): _integer(0, _MAX_ZCL_ID),
         vol.Required("encode"): _ENCODE,
         vol.Optional("range"): _value_range,
+        vol.Optional("step"): _positive_number,
     },
 )
 
@@ -137,6 +149,7 @@ _CAPABILITY = vol.Schema(
         vol.Optional("min_firmware"): _VERSION,
         vol.Required("write"): _WRITE,
         vol.Required("verify"): _verify,
+        vol.Optional("observe", default=False): bool,
         vol.Optional("signals", default=dict): {_integer(): _SLUG},
         vol.Optional("also_read", default=list): [_integer(0, _MAX_ZCL_ID)],
     },

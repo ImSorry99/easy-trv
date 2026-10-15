@@ -6,8 +6,10 @@ import yaml
 from custom_components.easy_trv.core.model import (
     SetAdaptiveMode,
     SetFrostTemperature,
+    SetHvacMode,
     SetHysteresis,
     SetRoomTemperature,
+    SetSetpoint,
     SetSource,
     SetWindowDetection,
 )
@@ -216,3 +218,78 @@ def test_frost_temperature_encodes_centi_and_rejects_out_of_range(
         trvzb.plan(SetFrostTemperature(3.0), (1, 3, 0))
     with pytest.raises(engine.ValueOutOfRange):
         trvzb.plan(SetFrostTemperature(35.5), (1, 3, 0))
+
+
+def test_setpoint_plans_centi_rounded_to_half_degree(trvzb: engine.Profile) -> None:
+    op = trvzb.plan(SetSetpoint(21.3), (1, 4, 4))
+    assert (op.cluster, op.attribute, op.raw_value) == (0x0201, 0x0012, 2150)
+    assert op.accept == frozenset({2150})
+
+
+@pytest.mark.parametrize(
+    ("celsius", "raw"),
+    [(21.25, 2150), (21.24, 2100), (21.0, 2100), (21.75, 2200), (4.2, 400)],
+)
+def test_setpoint_step_rounds_half_up(
+    trvzb: engine.Profile, celsius: float, raw: int
+) -> None:
+    assert trvzb.plan(SetSetpoint(celsius), None).raw_value == raw
+
+
+def test_setpoint_range_is_checked_after_rounding(trvzb: engine.Profile) -> None:
+    assert trvzb.plan(SetSetpoint(3.75), None).raw_value == 400
+    with pytest.raises(engine.ValueOutOfRange):
+        trvzb.plan(SetSetpoint(3.7), None)
+    with pytest.raises(engine.ValueOutOfRange):
+        trvzb.plan(SetSetpoint(35.3), None)
+    with pytest.raises(engine.ValueOutOfRange):
+        trvzb.plan(SetSetpoint(float("nan")), None)
+
+
+def test_hvac_mode_plans_heat_and_off(trvzb: engine.Profile) -> None:
+    heat = trvzb.plan(SetHvacMode("heat"), (1, 3, 0))
+    off = trvzb.plan(SetHvacMode("off"), (1, 3, 0))
+    assert (heat.cluster, heat.attribute, heat.raw_value) == (0x0201, 0x001C, 4)
+    assert off.raw_value == 0
+    assert heat.accept == frozenset({4})
+    assert off.accept == frozenset({0})
+    assert heat.signals == {1: "schedule"}
+
+
+def test_decode_inverts_the_encoders(trvzb: engine.Profile) -> None:
+    assert trvzb.decode("setpoint", 2150) == 21.5
+    assert trvzb.decode("setpoint", 2133) == 21.33
+    assert trvzb.decode("hvac_mode", 0) == "off"
+    assert trvzb.decode("hvac_mode", 4) == "heat"
+    assert trvzb.decode("hvac_mode", 1) is None
+    assert trvzb.decode("hysteresis", -40) is None
+    with pytest.raises(KeyError):
+        trvzb.decode("nope", 0)
+
+
+def test_limits_and_observed(trvzb: engine.Profile) -> None:
+    assert trvzb.limits("set_setpoint") == (4.0, 35.0, 0.5)
+    assert trvzb.limits("set_hysteresis") == (0.2, 1.0, 0.5)  # default step
+    assert trvzb.limits("set_hvac_mode") is None  # no range
+    assert trvzb.limits("set_window_detection") is None
+    assert set(trvzb.observed()) == {"setpoint", "hvac_mode"}
+
+
+def test_limits_use_the_declared_step_and_none_without_a_capability() -> None:
+    data = _builtin_dict()
+    data["capabilities"]["setpoint"]["write"]["step"] = 0.1
+    data["capabilities"].pop("hvac_mode")
+    profile = engine.Profile.from_dict(data)
+    assert profile.limits("set_setpoint") == (4.0, 35.0, 0.1)
+    assert profile.limits("set_hvac_mode") is None
+    assert profile.observed() == ("setpoint",)
+
+
+def test_a_capability_without_step_and_observe_keeps_working() -> None:
+    data = _builtin_dict()
+    del data["capabilities"]["setpoint"]["write"]["step"]
+    del data["capabilities"]["setpoint"]["observe"]
+    profile = engine.Profile.from_dict(data)
+    assert profile.capabilities["setpoint"].step is None
+    assert profile.capabilities["setpoint"].observe is False
+    assert profile.plan(SetSetpoint(21.3), None).raw_value == 2130
