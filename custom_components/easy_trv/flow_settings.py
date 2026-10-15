@@ -11,6 +11,8 @@ import voluptuous as vol
 from homeassistant.const import UnitOfTemperature, UnitOfTime
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -26,11 +28,19 @@ from custom_components.easy_trv.const import (
     CONF_HYSTERESIS,
     CONF_MAX_ATTEMPTS,
     CONF_MIN_DELTA,
+    CONF_OUTDOOR_CUTOFF,
+    CONF_OUTDOOR_CUTOFF_CELSIUS,
+    CONF_OUTDOOR_SENSOR,
     CONF_PROFILE,
     CONF_REFRESH_MINUTES,
     CONF_SENSOR_TIMEOUT,
+    CONF_SETPOINT_MAX,
+    CONF_SETPOINT_MIN,
     CONF_VERIFY_DELAY,
+    CONF_WINDOW_CHECK_DROP,
+    CONF_WINDOW_CHECK_MINUTES,
     CONF_WINDOW_DETECTION,
+    CONF_WINDOW_WARN_MINUTES,
     PROFILE_AUTO,
     SETTING_GLOBAL,
 )
@@ -49,6 +59,12 @@ SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
     CONF_WINDOW_DETECTION: ("on", "off", "leave"),
     CONF_HYSTERESIS: ("0_2", "0_4", "0_6", "0_8", "1_0"),
     CONF_ADAPTIVE_MODE: ("on", "off", "leave"),
+}
+# A choice that only a room has: the global outdoor cut-off threshold is the
+# value to keep ("global") or to ignore ("off") in this room.
+ROOM_SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
+    **SELECT_VALUES,
+    CONF_OUTDOOR_CUTOFF: ("off",),
 }
 
 
@@ -69,11 +85,25 @@ NUMBERS: Final[Mapping[str, NumberSpec]] = {
     CONF_MIN_DELTA: NumberSpec(0.0, 1.0, 0.1, UnitOfTemperature.KELVIN),
     CONF_SENSOR_TIMEOUT: NumberSpec(0, 1440, unit=UnitOfTime.MINUTES),
     CONF_FROST_TEMPERATURE: NumberSpec(4.0, 16.0, 0.5, UnitOfTemperature.CELSIUS),
+    CONF_SETPOINT_MIN: NumberSpec(4.0, 35.0, 0.5, UnitOfTemperature.CELSIUS),
+    CONF_SETPOINT_MAX: NumberSpec(4.0, 35.0, 0.5, UnitOfTemperature.CELSIUS),
+    CONF_WINDOW_WARN_MINUTES: NumberSpec(0, 1440, unit=UnitOfTime.MINUTES),
+    CONF_WINDOW_CHECK_MINUTES: NumberSpec(0, 240, unit=UnitOfTime.MINUTES),
+    CONF_WINDOW_CHECK_DROP: NumberSpec(0.1, 3.0, 0.1, UnitOfTemperature.KELVIN),
+    CONF_OUTDOOR_CUTOFF_CELSIUS: NumberSpec(
+        -10.0, 30.0, 0.5, UnitOfTemperature.CELSIUS
+    ),
 }
+# Numbers whose value 0 (or, for the cut-off, no value) reads as "off".
+_OFF_AT_ZERO: Final = frozenset(
+    {CONF_SENSOR_TIMEOUT, CONF_WINDOW_WARN_MINUTES, CONF_WINDOW_CHECK_MINUTES}
+)
 
 # How the options form groups its fields (the stored options stay flat).
 _SECTION_WRITES: Final = "writes"
 _SECTION_THERMOSTAT: Final = "thermostat"
+_SECTION_ROOM_THERMOSTAT: Final = "room_thermostat"
+_SECTION_WINDOWS_OUTDOOR: Final = "windows_outdoor"
 SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
     _SECTION_WRITES: (
         CONF_REFRESH_MINUTES,
@@ -88,6 +118,14 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
         CONF_ADAPTIVE_MODE,
         CONF_FROST_TEMPERATURE,
     ),
+    _SECTION_ROOM_THERMOSTAT: (CONF_SETPOINT_MIN, CONF_SETPOINT_MAX),
+    _SECTION_WINDOWS_OUTDOOR: (
+        CONF_WINDOW_WARN_MINUTES,
+        CONF_WINDOW_CHECK_MINUTES,
+        CONF_WINDOW_CHECK_DROP,
+        CONF_OUTDOOR_SENSOR,
+        CONF_OUTDOOR_CUTOFF_CELSIUS,
+    ),
 }
 # The order of the room's settings form.
 ROOM_SETTING_KEYS: Final = (
@@ -101,14 +139,22 @@ ROOM_SETTING_KEYS: Final = (
     CONF_MAX_ATTEMPTS,
     CONF_MIN_DELTA,
     CONF_SENSOR_TIMEOUT,
+    CONF_SETPOINT_MIN,
+    CONF_SETPOINT_MAX,
+    CONF_WINDOW_WARN_MINUTES,
+    CONF_WINDOW_CHECK_MINUTES,
+    CONF_WINDOW_CHECK_DROP,
+    CONF_OUTDOOR_CUTOFF,
+    CONF_OUTDOOR_CUTOFF_CELSIUS,
 )
 ROOM_SELECT_KEYS: Final = (
     CONF_PROFILE,
-    *(key for key in ROOM_SETTING_KEYS if key in SELECT_VALUES),
+    *(key for key in ROOM_SETTING_KEYS if key in ROOM_SELECT_VALUES),
 )
 ROOM_NUMBER_KEYS: Final = tuple(key for key in ROOM_SETTING_KEYS if key in NUMBERS)
 
 ERR_TIMEOUT_RANGE: Final = "timeout_range"
+ERR_SETPOINT_RANGE: Final = "setpoint_range"
 
 # The sensor timeout is either off (0) or within these bounds (minutes).
 _TIMEOUT_MIN: Final = 10
@@ -130,6 +176,13 @@ def _number_selector(key: str) -> NumberSelector:
     if spec.unit is not None:
         config["unit_of_measurement"] = spec.unit
     return NumberSelector(config)
+
+
+def _outdoor_sensor_selector() -> EntitySelector:
+    """Return the picker of the outdoor temperature sensor."""
+    return EntitySelector(
+        EntitySelectorConfig(domain="sensor", device_class="temperature")
+    )
 
 
 def _select_selector(
@@ -171,24 +224,48 @@ def timeout_error(values: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
+def setpoint_range_error(
+    options: Mapping[str, Any], room: Mapping[str, Any]
+) -> dict[str, str]:
+    """Return the form error of a setpoint range whose minimum is not below its maximum.
+
+    The range is resolved like the room does: its own value, else the global
+    one, else the built-in default. Pass the room's values as ``room`` and the
+    global options as ``options``; to check the global pair alone, pass ``{}``
+    as ``options`` and the submitted options as ``room``. The error is not tied
+    to a field, because either bound may come from another layer.
+    """
+    merged = {**DEFAULTS, **overrides(options), **overrides(room)}
+    if merged[CONF_SETPOINT_MIN] >= merged[CONF_SETPOINT_MAX]:
+        return {"base": ERR_SETPOINT_RANGE}
+    return {}
+
+
 async def setting_texts(
     hass: HomeAssistant, values: Mapping[str, Any]
 ) -> dict[str, str]:
     """Render setting values as plain text in the language of Home Assistant.
 
     Selects use the labels of their selector, numbers get their unit and, in
-    German, a decimal comma. A sensor timeout of 0 reads as "off".
+    German, a decimal comma. A timeout or window time of 0 and an outdoor cut-off
+    that is not set read as "off".
     """
     texts: dict[str, str] = {}
     for key, value in values.items():
-        if key in NUMBERS and not (key == CONF_SENSOR_TIMEOUT and value == 0):
+        not_set = value is None
+        is_off = not_set or (key in _OFF_AT_ZERO and value == 0)
+        if key in NUMBERS and not is_off:
             text = f"{value:.1f}" if isinstance(value, float) else str(value)
             text = localized_number(hass, text)
             unit = NUMBERS[key].unit
             texts[key] = text if unit is None else f"{text} {unit}"
         else:
-            name = "sensor_timeout" if key == CONF_SENSOR_TIMEOUT else key
-            option = "off" if key == CONF_SENSOR_TIMEOUT else str(value)
+            name, option = (key, str(value))
+            if is_off:
+                name, option = (
+                    "outdoor_cutoff" if not_set else "sensor_timeout",
+                    "off",
+                )
             texts[key] = (await async_option_labels(hass, name)).get(option, option)
     return texts
 
@@ -199,7 +276,9 @@ def effective_settings(
     """Return the saved global value of each setting, else its built-in default."""
     values = {**DEFAULTS, **overrides(options)}
     return {
-        key: _stored_number(key, values[key]) if key in NUMBERS else values[key]
+        key: _stored_number(key, values[key])
+        if key in NUMBERS and values[key] is not None
+        else values[key]
         for key in keys
     }
 
@@ -220,9 +299,9 @@ def room_settings_schema(profiles: Mapping[str, Profile]) -> vol.Schema:
             schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
                 key, profile_options
             )
-        elif key in SELECT_VALUES:
+        elif key in ROOM_SELECT_VALUES:
             schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
-                key, [SETTING_GLOBAL, *SELECT_VALUES[key]]
+                key, [SETTING_GLOBAL, *ROOM_SELECT_VALUES[key]]
             )
         else:
             schema[vol.Optional(key)] = _number_selector(key)
@@ -241,7 +320,7 @@ def room_settings(user_input: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def options_schema(current: Mapping[str, Any]) -> vol.Schema:
-    """Return the form of the global options in two sections.
+    """Return the form of the global options in four sections.
 
     The selects default to what is saved (else the built-in default). The
     numbers have neither a default nor a suggestion unless they are saved: an
@@ -256,6 +335,8 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
                 fields[vol.Required(key, default=effective[key])] = _select_selector(
                     key, list(SELECT_VALUES[key])
                 )
+            elif key == CONF_OUTDOOR_SENSOR:
+                fields[vol.Optional(key)] = _outdoor_sensor_selector()
             else:
                 fields[vol.Optional(key)] = _number_selector(key)
         return section(vol.Schema(fields), {"collapsed": False})
@@ -266,21 +347,33 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
 
 
 def options_suggestions(current: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """Return the numbers the options form shows: only those that are saved."""
-    saved = overrides(current)
+    """Return the numbers and the sensor the options form shows: only those saved."""
+    saved = {
+        **overrides(current),
+        CONF_OUTDOOR_SENSOR: current.get(CONF_OUTDOOR_SENSOR),
+    }
     return {
-        name: {key: saved[key] for key in keys if key in NUMBERS and key in saved}
+        name: {
+            key: saved[key]
+            for key in keys
+            if (key in NUMBERS or key == CONF_OUTDOOR_SENSOR)
+            and saved.get(key) is not None
+        }
         for name, keys in SECTIONS.items()
     }
 
 
 def stored_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
-    """Return what the options store of a submitted form: the selects and numbers.
+    """Return what the options store of a submitted form.
 
-    The sections only lay the form out; the options are stored flat.
+    The selects, the filled numbers and the outdoor sensor if there is one. The
+    sections only lay the form out; the options are stored flat.
     """
     flat = {key: value for name in SECTIONS for key, value in user_input[name].items()}
-    return {
+    options = {
         **{key: flat[key] for key in SELECT_VALUES},
         **stored_numbers(flat, list(NUMBERS)),
     }
+    if flat.get(CONF_OUTDOOR_SENSOR):
+        options[CONF_OUTDOOR_SENSOR] = flat[CONF_OUTDOOR_SENSOR]
+    return options

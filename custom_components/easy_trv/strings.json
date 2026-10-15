@@ -43,12 +43,14 @@
           "data": {
             "trvs": "Thermostats (ZHA)",
             "temp_sensors": "Temperature sensors",
-            "humidity_sensors": "Humidity sensors"
+            "humidity_sensors": "Humidity sensors",
+            "window_contacts": "Window and door contacts"
           },
           "data_description": {
             "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
-            "humidity_sensors": "Stored for later use; not evaluated yet."
+            "humidity_sensors": "Stored for later use; not evaluated yet.",
+            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional."
           }
         },
         "reconfigure": {
@@ -57,12 +59,14 @@
             "name": "Room name",
             "trvs": "Thermostats (ZHA)",
             "temp_sensors": "Temperature sensors",
-            "humidity_sensors": "Humidity sensors"
+            "humidity_sensors": "Humidity sensors",
+            "window_contacts": "Window and door contacts"
           },
           "data_description": {
             "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
-            "humidity_sensors": "Stored for later use; not evaluated yet."
+            "humidity_sensors": "Stored for later use; not evaluated yet.",
+            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional."
           }
         },
         "settings": {
@@ -78,7 +82,14 @@
             "verify_delay_seconds": "Read-back delay (seconds)",
             "max_attempts": "Attempts",
             "min_delta_kelvin": "Minimum change (K)",
-            "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)"
+            "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)",
+            "setpoint_min": "Minimum target temperature",
+            "setpoint_max": "Maximum target temperature",
+            "window_warn_minutes": "Open-window warning (minutes, 0 = never)",
+            "window_check_minutes": "Window contact check (minutes, 0 = off)",
+            "window_check_drop_kelvin": "Cooling expected by the check (K)",
+            "outdoor_cutoff": "Outdoor cut-off",
+            "outdoor_cutoff_celsius": "Outdoor cut-off temperature"
           },
           "data_description": {
             "profile": "Auto picks the first profile that matches all thermostats of the room. Global is currently {global_profile}.",
@@ -90,7 +101,14 @@
             "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds. Global is currently {global_verify_delay_seconds}.",
             "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Global is currently {global_max_attempts}.",
             "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Global is currently {global_min_delta_kelvin}.",
-            "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}."
+            "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}.",
+            "setpoint_min": "The lowest target temperature the room accepts. 4.0 to 35.0 °C and below the maximum. Global is currently {global_setpoint_min}.",
+            "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Global is currently {global_setpoint_max}.",
+            "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Global is currently {global_window_warn_minutes}.",
+            "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the cooling below, otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
+            "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Global is currently {global_window_check_drop_kelvin}.",
+            "outdoor_cutoff": "Global uses the outdoor cut-off temperature of the integration options. Off never switches this room off because of the outdoor temperature.",
+            "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. Needs an outdoor sensor in the integration options. -10.0 to 30.0 °C. Empty = Global, currently {global_outdoor_cutoff_celsius}."
           }
         }
       },
@@ -102,7 +120,8 @@
         "trv_in_other_room": "At least one of the selected thermostats already belongs to another room.",
         "name_exists": "A room with this name already exists.",
         "name_required": "Enter a name for the room.",
-        "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes."
+        "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes.",
+        "setpoint_range": "Minimum must be below maximum."
       },
       "abort": {
         "reconfigure_successful": "Re-configuration was successful",
@@ -212,12 +231,43 @@
               "adaptive_mode": "The thermostat adapts to the room itself. While it is on, the hysteresis is ignored. Needs firmware 1.4.4 or newer.",
               "frost_temperature": "The temperature the thermostat keeps as frost protection. 4.0 to 16.0 °C. Empty = {default_frost_temperature}."
             }
+          },
+          "room_thermostat": {
+            "name": "Room thermostat",
+            "description": "The limits of the target temperature that can be set on a room.",
+            "data": {
+              "setpoint_min": "Minimum target temperature",
+              "setpoint_max": "Maximum target temperature"
+            },
+            "data_description": {
+              "setpoint_min": "The lowest target temperature a room accepts. 4.0 to 35.0 °C and below the maximum. Empty = {default_setpoint_min}.",
+              "setpoint_max": "The highest target temperature a room accepts. 4.0 to 35.0 °C and above the minimum. Empty = {default_setpoint_max}."
+            }
+          },
+          "windows_outdoor": {
+            "name": "Windows and outdoor",
+            "description": "What happens when a window is open for long and when it is warm outside. Number fields left empty use the built-in default.",
+            "data": {
+              "window_warn_minutes": "Open-window warning (minutes, 0 = never)",
+              "window_check_minutes": "Window contact check (minutes, 0 = off)",
+              "window_check_drop_kelvin": "Cooling expected by the check (K)",
+              "outdoor_sensor": "Outdoor temperature sensor",
+              "outdoor_cutoff_celsius": "Outdoor cut-off temperature"
+            },
+            "data_description": {
+              "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Empty = {default_window_warn_minutes}.",
+              "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the cooling below, otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Empty = {default_window_check_minutes}.",
+              "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Empty = {default_window_check_drop_kelvin}.",
+              "outdoor_sensor": "The temperature sensor the outdoor cut-off reads. Without it the cut-off does nothing.",
+              "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. A room can turn this off for itself. -10.0 to 30.0 °C. Empty = {default_outdoor_cutoff_celsius}."
+            }
           }
         }
       }
     },
     "error": {
-      "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes."
+      "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes.",
+      "setpoint_range": "Minimum must be below maximum."
     }
   },
   "selector": {
@@ -268,6 +318,12 @@
         "set_frost_temperature": "Frost protection temperature",
         "set_setpoint": "Target temperature",
         "set_hvac_mode": "Mode"
+      }
+    },
+    "outdoor_cutoff": {
+      "options": {
+        "global": "Global",
+        "off": "Off"
       }
     }
   }

@@ -37,12 +37,14 @@ from custom_components.easy_trv.const import (
     CONF_PROFILE,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
+    CONF_WINDOW_CONTACTS,
     DOMAIN,
     PROFILE_AUTO,
     SETTING_GLOBAL,
     SUBENTRY_ROOM,
 )
 from custom_components.easy_trv.core.settings import (
+    DEFAULTS,
     resolve_settings,
 )
 from custom_components.easy_trv.flow_settings import (
@@ -53,6 +55,7 @@ from custom_components.easy_trv.flow_settings import (
     options_suggestions,
     room_settings,
     room_settings_schema,
+    setpoint_range_error,
     setting_texts,
     stored_options,
     timeout_error,
@@ -86,7 +89,15 @@ _ERR_NAME_REQUIRED: Final = "name_required"
 
 
 # What the room's entities form submits, besides the name.
-_ENTITY_KEYS: Final = (CONF_TRVS, CONF_TEMP_SENSORS, CONF_HUMIDITY_SENSORS)
+_ENTITY_KEYS: Final = (
+    CONF_TRVS,
+    CONF_TEMP_SENSORS,
+    CONF_HUMIDITY_SENSORS,
+    CONF_WINDOW_CONTACTS,
+)
+
+# The device classes of a binary sensor that can be a window contact.
+_CONTACT_CLASSES: Final = ("window", "door", "opening", "garage_door")
 
 
 # --- Room helpers -----------------------------------------------------------
@@ -99,7 +110,10 @@ def prefill_from_area(hass: HomeAssistant, area_id: str) -> dict[str, list[str]]
     its device. ``trvs`` are the ZHA climate entities. ``temp_sensors`` and
     ``humidity_sensors`` are the enabled sensors of the matching device class,
     except those of a thermostat's own device (its built-in readings are not
-    room sensors). Every list is sorted by entity id.
+    room sensors). ``window_contacts`` are the enabled binary sensors of a
+    window, door, opening or garage door class, again without those of a
+    thermostat's device. Every list is sorted by entity id. The user may add
+    contacts of other areas on the form.
     """
     entity_registry = er.async_get(hass)
     entries = {
@@ -120,19 +134,20 @@ def prefill_from_area(hass: HomeAssistant, area_id: str) -> dict[str, list[str]]
     ]
     trv_devices = {entry.device_id for entry in trvs if entry.device_id is not None}
 
-    def sensors(device_class: str) -> list[str]:
+    def of_class(domain: str, *device_classes: str) -> list[str]:
         return sorted(
             entry.entity_id
             for entry in entries.values()
-            if entry.domain == "sensor"
+            if entry.domain == domain
             and entry.device_id not in trv_devices
-            and (entry.device_class or entry.original_device_class) == device_class
+            and (entry.device_class or entry.original_device_class) in device_classes
         )
 
     return {
         CONF_TRVS: sorted(entry.entity_id for entry in trvs),
-        CONF_TEMP_SENSORS: sensors("temperature"),
-        CONF_HUMIDITY_SENSORS: sensors("humidity"),
+        CONF_TEMP_SENSORS: of_class("sensor", "temperature"),
+        CONF_HUMIDITY_SENSORS: of_class("sensor", "humidity"),
+        CONF_WINDOW_CONTACTS: of_class("binary_sensor", *_CONTACT_CLASSES),
     }
 
 
@@ -200,7 +215,7 @@ def validate_room(
 
 
 def _entity_fields() -> dict[Any, Any]:
-    """Return the schema fields of a room's thermostats and sensors."""
+    """Return the schema fields of a room's thermostats, sensors and contacts."""
     return {
         vol.Required(CONF_TRVS): EntitySelector(
             EntitySelectorConfig(
@@ -219,6 +234,14 @@ def _entity_fields() -> dict[Any, Any]:
             EntitySelectorConfig(
                 multiple=True,
                 filter=[{"domain": "sensor", "device_class": "humidity"}],
+            )
+        ),
+        # Any area: a window of the kitchen can belong to the living room.
+        vol.Optional(CONF_WINDOW_CONTACTS, default=[]): EntitySelector(
+            EntitySelectorConfig(
+                domain="binary_sensor",
+                device_class=list(_CONTACT_CLASSES),
+                multiple=True,
             )
         ),
     }
@@ -392,8 +415,12 @@ class RoomSubentryFlow(ConfigSubentryFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             settings = room_settings(user_input)
-            errors = timeout_error(settings) or self._profile_errors(
-                entry, subentry, settings[CONF_PROFILE], profiles
+            errors = (
+                timeout_error(settings)
+                or setpoint_range_error(entry.options, settings)
+                or self._profile_errors(
+                    entry, subentry, settings[CONF_PROFILE], profiles
+                )
             )
             if not errors:
                 data = {
@@ -420,7 +447,10 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                     unique_id=self._name.casefold(),
                 )
         global_texts = await setting_texts(
-            self.hass, effective_settings(entry.options, ROOM_SETTING_KEYS)
+            self.hass,
+            effective_settings(
+                entry.options, [key for key in ROOM_SETTING_KEYS if key in DEFAULTS]
+            ),
         )
         suggested = user_input
         if user_input is None and subentry is not None:
@@ -497,7 +527,7 @@ class EasyTrvOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             options = stored_options(user_input)
-            errors = timeout_error(options)
+            errors = timeout_error(options) or setpoint_range_error({}, options)
             if not errors:
                 return self.async_create_entry(data=options)
         # Each number says what an empty field means: the built-in default.

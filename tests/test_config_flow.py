@@ -158,6 +158,55 @@ def foreign_trvs(hass, device_owner):
     add_entity(hass, "climate.mqtt_trv", "mqtt", device=mqtt)
 
 
+@pytest.fixture
+def area_with_contacts(hass, device_owner, area_with_trvs):
+    """The area Living plus window contacts, in it and in the Kitchen.
+
+    Returns the Kitchen, whose contact belongs to the living room's neighbour.
+    """
+    kitchen = ar.async_get(hass).async_create("Kitchen")
+    contact = add_device(
+        hass, device_owner, ("test", "contact"), area_id=area_with_trvs.id
+    )
+    for entity_id, device_class in (
+        ("binary_sensor.window", "window"),
+        ("binary_sensor.door", "door"),
+        ("binary_sensor.gap", "opening"),
+        ("binary_sensor.garage", "garage_door"),
+        ("binary_sensor.motion", "motion"),
+    ):
+        add_entity(hass, entity_id, "test", device=contact, device_class=device_class)
+    add_entity(
+        hass,
+        "binary_sensor.off_window",
+        "test",
+        device=contact,
+        device_class="window",
+        disabled_by=er.RegistryEntryDisabler.USER,
+    )
+    # In the area through the entity itself.
+    add_entity(
+        hass,
+        "binary_sensor.direct_window",
+        "test",
+        area_id=area_with_trvs.id,
+        device_class="window",
+    )
+    # The thermostat's own readings are not window contacts.
+    trv = dr.async_get(hass).async_get_device_by_identifier(
+        ("zha", IEEE_A), device_owner.entry_id
+    )
+    add_entity(hass, "binary_sensor.a_open", "zha", device=trv, device_class="window")
+    add_entity(
+        hass,
+        "binary_sensor.kitchen_window",
+        "test",
+        area_id=kitchen.id,
+        device_class="window",
+    )
+    return kitchen
+
+
 # --- Flow helpers ---------------------------------------------------------
 
 
@@ -215,6 +264,7 @@ ALL_GLOBAL = {
     "window_detection": "global",
     "hysteresis": "global",
     "adaptive_mode": "global",
+    "outdoor_cutoff": "global",
 }
 
 
@@ -319,6 +369,7 @@ async def test_room_from_area_prefills_and_creates(hass, entry, area_with_trvs) 
         "trvs": ["climate.a", "climate.b"],
         "temp_sensors": ["sensor.t1"],
         "humidity_sensors": ["sensor.h1"],
+        "window_contacts": [],
     }
 
     result = await room_flows(hass).async_configure(
@@ -349,6 +400,7 @@ async def test_room_from_area_prefills_and_creates(hass, entry, area_with_trvs) 
         "trvs": ["climate.a", "climate.b"],
         "temp_sensors": ["sensor.t1"],
         "humidity_sensors": [],
+        "window_contacts": [],
         **ALL_GLOBAL,
         "hysteresis": "0_4",
     }
@@ -383,6 +435,7 @@ async def test_custom_room_is_stored_with_defaults(hass, entry) -> None:
         "trvs": ["climate.a"],
         "temp_sensors": [],
         "humidity_sensors": [],
+        "window_contacts": [],
         **ALL_GLOBAL,
     }
 
@@ -392,7 +445,12 @@ async def test_entities_form_fields_and_defaults(hass, entry) -> None:
     result = await open_entities_step(hass, entry)
 
     selectors = fields(result)
-    assert list(selectors) == ["trvs", "temp_sensors", "humidity_sensors"]
+    assert list(selectors) == [
+        "trvs",
+        "temp_sensors",
+        "humidity_sensors",
+        "window_contacts",
+    ]
     assert selectors["trvs"].config["multiple"] is True
     assert selectors["trvs"].config["filter"] == [
         {"integration": "zha", "domain": ["climate"]}
@@ -405,7 +463,11 @@ async def test_entities_form_fields_and_defaults(hass, entry) -> None:
     assert selectors["humidity_sensors"].config["filter"] == [
         {"domain": ["sensor"], "device_class": ["humidity"]}
     ]
-    assert defaults(result) == {"humidity_sensors": [], "temp_sensors": []}
+    assert defaults(result) == {
+        "humidity_sensors": [],
+        "temp_sensors": [],
+        "window_contacts": [],
+    }
 
 
 @pytest.mark.usefixtures("area_with_trvs")
@@ -677,16 +739,19 @@ async def test_prefill_walks_devices_and_filters(
         "trvs": ["climate.a", "climate.b"],
         "temp_sensors": ["sensor.direct_t", "sensor.t1"],
         "humidity_sensors": ["sensor.direct_h", "sensor.h1"],
+        "window_contacts": [],
     }
     assert prefill_from_area(hass, other.id) == {
         "trvs": [],
         "temp_sensors": ["sensor.kitchen_t", "sensor.moved_t"],
         "humidity_sensors": [],
+        "window_contacts": [],
     }
     assert prefill_from_area(hass, "no_such_area") == {
         "trvs": [],
         "temp_sensors": [],
         "humidity_sensors": [],
+        "window_contacts": [],
     }
 
 
@@ -709,6 +774,99 @@ async def test_validate_room_treats_an_unknown_profile_as_a_mismatch(
     assert validate_room(hass, entry, None, trvs, {}) == {"profile": "no_profile"}
 
 
+# --- Room flow: window contacts -----------------------------------------------
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_entities_form_offers_window_contacts_of_any_area(hass, entry) -> None:
+    contacts = fields(await open_entities_step(hass, entry))["window_contacts"]
+
+    assert contacts.config["multiple"] is True
+    assert contacts.config["domain"] == ["binary_sensor"]
+    assert contacts.config["device_class"] == [
+        "window",
+        "door",
+        "opening",
+        "garage_door",
+    ]
+    # No area filter: a window of the neighbouring room can be a contact.
+    assert "area" not in contacts.config
+    assert "filter" not in contacts.config
+
+
+@pytest.mark.usefixtures("area_with_contacts")
+async def test_prefill_suggests_the_contacts_of_the_area(hass, area_with_trvs) -> None:
+    assert prefill_from_area(hass, area_with_trvs.id)["window_contacts"] == [
+        "binary_sensor.direct_window",
+        "binary_sensor.door",
+        "binary_sensor.gap",
+        "binary_sensor.garage",
+        "binary_sensor.window",
+    ]
+
+
+@pytest.mark.usefixtures("area_with_contacts")
+async def test_room_from_area_prefills_and_stores_window_contacts(
+    hass, entry, area_with_trvs
+) -> None:
+    result = await open_room_flow(hass, entry, "from_area")
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"area_id": area_with_trvs.id}
+    )
+    assert suggested_values(result)["window_contacts"] == [
+        "binary_sensor.direct_window",
+        "binary_sensor.door",
+        "binary_sensor.gap",
+        "binary_sensor.garage",
+        "binary_sensor.window",
+    ]
+
+    # The user drops one and adds the kitchen window (another area).
+    contacts = ["binary_sensor.window", "binary_sensor.kitchen_window"]
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(window_contacts=contacts)
+    )
+    assert result["step_id"] == "settings"
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    sub = next(iter(entry.subentries.values()))
+    assert sub.data["window_contacts"] == contacts
+
+
+@pytest.mark.usefixtures("area_with_contacts")
+async def test_custom_room_stores_contacts_from_any_area(hass, entry) -> None:
+    result = await open_settings_step(
+        hass, entry, window_contacts=["binary_sensor.kitchen_window"]
+    )
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    sub = next(iter(entry.subentries.values()))
+    assert sub.data["window_contacts"] == ["binary_sensor.kitchen_window"]
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_prefills_and_replaces_the_window_contacts(hass) -> None:
+    entry = make_entry(
+        hass,
+        [room_data(window_contacts=["binary_sensor.window", "binary_sensor.door"])],
+        {},
+    )
+    sub = next(iter(entry.subentries.values()))
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    assert suggested_values(result)["window_contacts"] == [
+        "binary_sensor.window",
+        "binary_sensor.door",
+    ]
+    # Emptying the list removes the contacts.
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living", window_contacts=[])
+    )
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.subentries[sub.subentry_id].data["window_contacts"] == []
+
+
 # --- Room flow: settings step ------------------------------------------------
 
 SETTINGS_FIELDS = [
@@ -722,6 +880,13 @@ SETTINGS_FIELDS = [
     "max_attempts",
     "min_delta_kelvin",
     "sensor_timeout_minutes",
+    "setpoint_min",
+    "setpoint_max",
+    "window_warn_minutes",
+    "window_check_minutes",
+    "window_check_drop_kelvin",
+    "outdoor_cutoff",
+    "outdoor_cutoff_celsius",
 ]
 SETTING_NUMBERS = {
     "frost_temperature": (4.0, 16.0, 0.5, "°C"),
@@ -730,6 +895,12 @@ SETTING_NUMBERS = {
     "max_attempts": (1, 10, 1, None),
     "min_delta_kelvin": (0.0, 1.0, 0.1, "K"),
     "sensor_timeout_minutes": (0, 1440, 1, "min"),
+    "setpoint_min": (4.0, 35.0, 0.5, "°C"),
+    "setpoint_max": (4.0, 35.0, 0.5, "°C"),
+    "window_warn_minutes": (0, 1440, 1, "min"),
+    "window_check_minutes": (0, 240, 1, "min"),
+    "window_check_drop_kelvin": (0.1, 3.0, 0.1, "K"),
+    "outdoor_cutoff_celsius": (-10.0, 30.0, 0.5, "°C"),
 }
 
 
@@ -753,6 +924,12 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_max_attempts": "3",
         "global_min_delta_kelvin": "0.1 K",
         "global_sensor_timeout_minutes": "120 min",
+        "global_setpoint_min": "5.0 °C",
+        "global_setpoint_max": "30.0 °C",
+        "global_window_warn_minutes": "120 min",
+        "global_window_check_minutes": "30 min",
+        "global_window_check_drop_kelvin": "0.3 K",
+        "global_outdoor_cutoff_celsius": "Off",
     }
 
 
@@ -924,6 +1101,177 @@ async def test_room_sensor_timeout_is_off_or_ten_to_1440(
         assert not entry.subentries
 
 
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_outdoor_cutoff_select_is_global_or_off(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    cutoff = fields(result)["outdoor_cutoff"]
+
+    assert option_values(cutoff) == ["global", "off"]
+    assert cutoff.config["translation_key"] == "outdoor_cutoff"
+    assert defaults(result)["outdoor_cutoff"] == "global"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_placeholders_show_the_global_window_values(hass) -> None:
+    entry = make_entry(
+        hass,
+        [],
+        {
+            "setpoint_min": 6.0,
+            "setpoint_max": 24.5,
+            "window_warn_minutes": 0,
+            "window_check_minutes": 45,
+            "window_check_drop_kelvin": 0.5,
+            "outdoor_cutoff_celsius": 18.0,
+        },
+    )
+    placeholders = (await open_settings_step(hass, entry))["description_placeholders"]
+
+    assert placeholders["global_setpoint_min"] == "6.0 °C"
+    assert placeholders["global_setpoint_max"] == "24.5 °C"
+    assert placeholders["global_window_warn_minutes"] == "Off"
+    assert placeholders["global_window_check_minutes"] == "45 min"
+    assert placeholders["global_window_check_drop_kelvin"] == "0.5 K"
+    assert placeholders["global_outdoor_cutoff_celsius"] == "18.0 °C"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_cutoff_placeholder_is_german(hass, entry) -> None:
+    hass.config.language = "de"
+    placeholders = (await open_settings_step(hass, entry))["description_placeholders"]
+    assert placeholders["global_outdoor_cutoff_celsius"] == "Aus"
+    assert placeholders["global_window_check_drop_kelvin"] == "0,3 K"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_store_the_window_and_outdoor_values(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"],
+        {
+            "setpoint_min": 16.0,
+            "setpoint_max": 24.0,
+            "window_warn_minutes": 60.0,
+            "window_check_minutes": 0.0,
+            "window_check_drop_kelvin": 0.5,
+            "outdoor_cutoff_celsius": 0.0,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    data = next(iter(entry.subentries.values())).data
+    assert data["outdoor_cutoff"] == "global"
+    for key, value in (
+        ("setpoint_min", 16.0),
+        ("setpoint_max", 24.0),
+        ("window_check_drop_kelvin", 0.5),
+        ("outdoor_cutoff_celsius", 0.0),
+    ):
+        assert data[key] == value
+        assert type(data[key]) is float
+    for key, value in (("window_warn_minutes", 60), ("window_check_minutes", 0)):
+        assert data[key] == value
+        assert type(data[key]) is int
+    settings = resolve_settings({}, data)
+    assert (settings.setpoint_min, settings.outdoor_cutoff_celsius) == (16.0, 0.0)
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_store_nothing_for_empty_new_numbers(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    data = next(iter(entry.subentries.values())).data
+    for key in (
+        "setpoint_min",
+        "setpoint_max",
+        "window_warn_minutes",
+        "window_check_minutes",
+        "window_check_drop_kelvin",
+        "outdoor_cutoff_celsius",
+    ):
+        assert key not in data
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_can_switch_the_outdoor_cutoff_off(hass) -> None:
+    entry = make_entry(hass, [], {"outdoor_cutoff_celsius": 18.0})
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"outdoor_cutoff": "off"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    data = next(iter(entry.subentries.values())).data
+    assert data["outdoor_cutoff"] == "off"
+    assert resolve_settings(entry.options, data).outdoor_cutoff_celsius is None
+    assert resolve_settings(entry.options, {}).outdoor_cutoff_celsius == 18.0
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+@pytest.mark.parametrize(
+    ("options", "submitted", "valid"),
+    [
+        ({}, {"setpoint_min": 10.0, "setpoint_max": 20.0}, True),
+        # The defaults are 5.0 and 30.0: a lone value is checked against them.
+        ({}, {"setpoint_min": 30.0}, False),
+        ({}, {"setpoint_min": 29.5}, True),
+        ({}, {"setpoint_max": 5.0}, False),
+        ({}, {"setpoint_max": 5.5}, True),
+        ({}, {"setpoint_min": 20.0, "setpoint_max": 20.0}, False),
+        ({}, {"setpoint_min": 22.0, "setpoint_max": 18.0}, False),
+        # ... or against the global options.
+        ({"setpoint_max": 20.0}, {"setpoint_min": 20.0}, False),
+        ({"setpoint_max": 20.0}, {"setpoint_min": 19.5}, True),
+        ({"setpoint_min": 12.0}, {"setpoint_max": 12.0}, False),
+        ({"setpoint_min": 12.0}, {"setpoint_max": 12.5}, True),
+        # Nothing set in the room: the global pair was valid when it was saved.
+        ({"setpoint_min": 8.0, "setpoint_max": 12.0}, {}, True),
+    ],
+)
+async def test_room_settings_reject_a_setpoint_range_that_is_not_a_range(
+    hass, options, submitted, valid
+) -> None:
+    entry = make_entry(hass, [], options)
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(result["flow_id"], submitted)
+
+    if valid:
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+    else:
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "settings"
+        assert result["errors"] == {"base": "setpoint_range"}
+        # The form keeps what was typed.
+        shown = suggested_values(result)
+        assert {key: shown[key] for key in submitted} == submitted
+        assert not entry.subentries
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_settings_reject_a_setpoint_range_that_is_not_a_range(
+    hass,
+) -> None:
+    entry = make_entry(hass, [room_data(setpoint_min=10.0, setpoint_max=20.0)], {})
+    sub = next(iter(entry.subentries.values()))
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living")
+    )
+    assert suggested_values(result)["setpoint_min"] == 10.0
+
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"setpoint_min": 25.0, "setpoint_max": 20.0}
+    )
+    assert result["errors"] == {"base": "setpoint_range"}
+    assert entry.subentries[sub.subentry_id].data["setpoint_min"] == 10.0
+
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"setpoint_min": 12.0, "setpoint_max": 20.0}
+    )
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.subentries[sub.subentry_id].data["setpoint_min"] == 12.0
+
+
 # --- Reconfigure ------------------------------------------------------------
 
 
@@ -948,6 +1296,7 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
         "trvs",
         "temp_sensors",
         "humidity_sensors",
+        "window_contacts",
     ]
     # The form shows what is stored, not what the area would suggest.
     assert suggested_values(result) == {
@@ -1071,6 +1420,7 @@ async def test_reconfigure_renames_and_keeps_the_area(hass, area_with_trvs) -> N
         "trvs": ["climate.a"],
         "temp_sensors": [],
         "humidity_sensors": [],
+        "window_contacts": [],
         **ALL_GLOBAL,
         "window_detection": "leave",
     }
@@ -1168,8 +1518,10 @@ def test_params_read_the_keys_the_options_flow_writes() -> None:
 WRITES = ["refresh_minutes", "verify_delay_seconds", "max_attempts", "min_delta_kelvin"]
 
 
-def options_input(writes=None, thermostat=None) -> dict[str, Any]:
-    """Return what the options form submits: two sections."""
+def options_input(
+    writes=None, thermostat=None, room_thermostat=None, windows_outdoor=None
+) -> dict[str, Any]:
+    """Return what the options form submits: four sections."""
     return {
         "writes": {
             "refresh_minutes": 20,
@@ -1186,14 +1538,21 @@ def options_input(writes=None, thermostat=None) -> dict[str, Any]:
             "frost_temperature": 5.0,
             **(thermostat or {}),
         },
+        "room_thermostat": dict(room_thermostat or {}),
+        "windows_outdoor": dict(windows_outdoor or {}),
     }
 
 
-async def test_options_form_is_grouped_in_two_sections(hass, entry) -> None:
+async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "init"
-    assert list(fields(result)) == ["writes", "thermostat"]
+    assert list(fields(result)) == [
+        "writes",
+        "thermostat",
+        "room_thermostat",
+        "windows_outdoor",
+    ]
     for group in fields(result).values():
         assert group.options == {"collapsed": False}
     assert list(section_fields(result, "writes")) == [
@@ -1205,6 +1564,17 @@ async def test_options_form_is_grouped_in_two_sections(hass, entry) -> None:
         "hysteresis",
         "adaptive_mode",
         "frost_temperature",
+    ]
+    assert list(section_fields(result, "room_thermostat")) == [
+        "setpoint_min",
+        "setpoint_max",
+    ]
+    assert list(section_fields(result, "windows_outdoor")) == [
+        "window_warn_minutes",
+        "window_check_minutes",
+        "window_check_drop_kelvin",
+        "outdoor_sensor",
+        "outdoor_cutoff_celsius",
     ]
 
 
@@ -1226,6 +1596,12 @@ async def test_options_form_suggests_only_saved_numbers(hass, entry) -> None:
         "default_min_delta_kelvin": "0.1 K",
         "default_sensor_timeout_minutes": "120 min",
         "default_frost_temperature": "5.0 °C",
+        "default_setpoint_min": "5.0 °C",
+        "default_setpoint_max": "30.0 °C",
+        "default_window_warn_minutes": "120 min",
+        "default_window_check_minutes": "30 min",
+        "default_window_check_drop_kelvin": "0.3 K",
+        "default_outdoor_cutoff_celsius": "Off",
     }
 
     saved = make_entry(
@@ -1385,4 +1761,142 @@ async def test_options_flow_sensor_timeout_is_off_or_ten_to_1440(
         assert result["type"] is FlowResultType.FORM
         assert result["errors"] == {"sensor_timeout_minutes": "timeout_range"}
         assert suggested_values(result, "writes")["sensor_timeout_minutes"] == minutes
+        assert not entry.options
+
+
+async def test_options_new_numbers_have_ranges_and_units(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    numbers = {
+        **section_fields(result, "room_thermostat"),
+        **section_fields(result, "windows_outdoor"),
+    }
+    outdoor = numbers.pop("outdoor_sensor")
+    assert {
+        name: (
+            selector.config["min"],
+            selector.config["max"],
+            selector.config["step"],
+            selector.config.get("unit_of_measurement"),
+        )
+        for name, selector in numbers.items()
+    } == {key: SETTING_NUMBERS[key] for key in numbers}
+    assert {s.config["mode"] for s in numbers.values()} == {"box"}
+
+    assert outdoor.config["domain"] == ["sensor"]
+    assert outdoor.config["device_class"] == ["temperature"]
+    assert "multiple" not in outdoor.config or outdoor.config["multiple"] is False
+    # Nothing is required and nothing has a default: empty = not stored.
+    assert defaults(result, "room_thermostat") == {}
+    assert defaults(result, "windows_outdoor") == {}
+
+
+async def test_options_flow_stores_the_new_sections_flat(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        options_input(
+            room_thermostat={"setpoint_min": 16.0, "setpoint_max": 24.5},
+            windows_outdoor={
+                "window_warn_minutes": 90.0,
+                "window_check_minutes": 20.0,
+                "window_check_drop_kelvin": 0.4,
+                "outdoor_sensor": "sensor.outdoor",
+                "outdoor_cutoff_celsius": 17.5,
+            },
+        ),
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    options = dict(entry.options)
+    assert options["setpoint_min"] == 16.0
+    assert options["setpoint_max"] == 24.5
+    assert options["window_warn_minutes"] == 90
+    assert type(options["window_warn_minutes"]) is int
+    assert options["window_check_minutes"] == 20
+    assert options["window_check_drop_kelvin"] == 0.4
+    assert options["outdoor_sensor"] == "sensor.outdoor"
+    assert options["outdoor_cutoff_celsius"] == 17.5
+    # Flat: no section name leaks into the options.
+    assert not {"room_thermostat", "windows_outdoor"} & set(options)
+    settings = resolve_settings(options, {})
+    assert (settings.setpoint_min, settings.window_warn_minutes) == (16.0, 90)
+    assert settings.outdoor_cutoff_celsius == 17.5
+
+
+async def test_options_new_fields_empty_are_not_stored(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], options_input()
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    for key in (
+        "setpoint_min",
+        "setpoint_max",
+        "window_warn_minutes",
+        "window_check_minutes",
+        "window_check_drop_kelvin",
+        "outdoor_sensor",
+        "outdoor_cutoff_celsius",
+    ):
+        assert key not in entry.options
+
+
+async def test_options_form_suggests_the_saved_window_and_outdoor_values(hass) -> None:
+    saved = make_entry(
+        hass,
+        [],
+        {
+            "setpoint_max": 26.0,
+            "window_check_minutes": 0,
+            "outdoor_sensor": "sensor.outdoor",
+            "outdoor_cutoff_celsius": 15.0,
+        },
+    )
+    result = await hass.config_entries.options.async_init(saved.entry_id)
+
+    assert suggested_values(result, "room_thermostat") == {"setpoint_max": 26.0}
+    assert suggested_values(result, "windows_outdoor") == {
+        "window_check_minutes": 0,
+        "outdoor_sensor": "sensor.outdoor",
+        "outdoor_cutoff_celsius": 15.0,
+    }
+
+    # Clearing the sensor removes it; the other values stay.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        options_input(
+            room_thermostat={"setpoint_max": 26.0},
+            windows_outdoor={"outdoor_cutoff_celsius": 15.0},
+        ),
+    )
+    assert "outdoor_sensor" not in saved.options
+    assert saved.options["outdoor_cutoff_celsius"] == 15.0
+
+
+@pytest.mark.parametrize(
+    ("submitted", "valid"),
+    [
+        ({"setpoint_min": 10.0, "setpoint_max": 20.0}, True),
+        ({"setpoint_min": 20.0, "setpoint_max": 20.0}, False),
+        ({"setpoint_min": 25.0, "setpoint_max": 20.0}, False),
+        # The global pair alone: a lone value meets the built-in other bound.
+        ({"setpoint_min": 30.0}, False),
+        ({"setpoint_min": 29.5}, True),
+        ({"setpoint_max": 5.0}, False),
+        ({"setpoint_max": 5.5}, True),
+        ({}, True),
+    ],
+)
+async def test_options_flow_rejects_a_setpoint_range_that_is_not_a_range(
+    hass, entry, submitted, valid
+) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], options_input(room_thermostat=submitted)
+    )
+    if valid:
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+    else:
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {"base": "setpoint_range"}
+        assert suggested_values(result, "room_thermostat") == submitted
         assert not entry.options

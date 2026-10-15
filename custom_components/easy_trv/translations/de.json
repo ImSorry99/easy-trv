@@ -43,12 +43,14 @@
           "data": {
             "trvs": "Thermostate (ZHA)",
             "temp_sensors": "Temperatursensoren",
-            "humidity_sensors": "Feuchtesensoren"
+            "humidity_sensors": "Feuchtesensoren",
+            "window_contacts": "Fenster- und Türkontakte"
           },
           "data_description": {
             "trvs": "Die ZHA-Thermostate, die diesen Raum heizen. Ein Thermostat kann nur zu einem Raum gehören.",
             "temp_sensors": "Reihenfolge = Priorität; der erste brauchbare Sensor wird verwendet.",
-            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet."
+            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet.",
+            "window_contacts": "Kontakte, die ein offenes Fenster oder eine offene Tür dieses Raums melden. Sie dürfen aus einem anderen Bereich stammen, z. B. die Küche, wenn sie mit dem Wohnzimmer verbunden ist. Solange einer offen ist, bleibt die Heizung des Raums aus. Optional."
           }
         },
         "reconfigure": {
@@ -57,12 +59,14 @@
             "name": "Raumname",
             "trvs": "Thermostate (ZHA)",
             "temp_sensors": "Temperatursensoren",
-            "humidity_sensors": "Feuchtesensoren"
+            "humidity_sensors": "Feuchtesensoren",
+            "window_contacts": "Fenster- und Türkontakte"
           },
           "data_description": {
             "trvs": "Die ZHA-Thermostate, die diesen Raum heizen. Ein Thermostat kann nur zu einem Raum gehören.",
             "temp_sensors": "Reihenfolge = Priorität; der erste brauchbare Sensor wird verwendet.",
-            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet."
+            "humidity_sensors": "Wird für später gespeichert; derzeit nicht ausgewertet.",
+            "window_contacts": "Kontakte, die ein offenes Fenster oder eine offene Tür dieses Raums melden. Sie dürfen aus einem anderen Bereich stammen, z. B. die Küche, wenn sie mit dem Wohnzimmer verbunden ist. Solange einer offen ist, bleibt die Heizung des Raums aus. Optional."
           }
         },
         "settings": {
@@ -78,7 +82,14 @@
             "verify_delay_seconds": "Rücklese-Verzögerung (Sekunden)",
             "max_attempts": "Versuche",
             "min_delta_kelvin": "Mindeständerung (K)",
-            "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)"
+            "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)",
+            "setpoint_min": "Kleinste Solltemperatur",
+            "setpoint_max": "Größte Solltemperatur",
+            "window_warn_minutes": "Warnung bei offenem Fenster (Minuten, 0 = nie)",
+            "window_check_minutes": "Fensterkontakt-Prüfung (Minuten, 0 = aus)",
+            "window_check_drop_kelvin": "Erwartete Abkühlung bei der Prüfung (K)",
+            "outdoor_cutoff": "Außentemperatur-Abschaltung",
+            "outdoor_cutoff_celsius": "Abschalttemperatur außen"
           },
           "data_description": {
             "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt. Global ist derzeit {global_profile}.",
@@ -90,7 +101,14 @@
             "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden. Global ist derzeit {global_verify_delay_seconds}.",
             "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10. Global ist derzeit {global_max_attempts}.",
             "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Global ist derzeit {global_min_delta_kelvin}.",
-            "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}."
+            "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}.",
+            "setpoint_min": "Die niedrigste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Global ist derzeit {global_setpoint_min}.",
+            "setpoint_max": "Die höchste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Global ist derzeit {global_setpoint_max}.",
+            "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Global ist derzeit {global_window_warn_minutes}.",
+            "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um die Abkühlung unten abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Global ist derzeit {global_window_check_minutes}.",
+            "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Global ist derzeit {global_window_check_drop_kelvin}.",
+            "outdoor_cutoff": "Global verwendet die Abschalttemperatur aus den Integrationsoptionen. Aus schaltet diesen Raum nie wegen der Außentemperatur ab.",
+            "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Braucht einen Außensensor in den Integrationsoptionen. -10,0 bis 30,0 °C. Leer = Global, derzeit {global_outdoor_cutoff_celsius}."
           }
         }
       },
@@ -102,7 +120,8 @@
         "trv_in_other_room": "Mindestens eines der gewählten Thermostate gehört bereits zu einem anderen Raum.",
         "name_exists": "Ein Raum mit diesem Namen existiert bereits.",
         "name_required": "Gib einen Namen für den Raum ein.",
-        "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein."
+        "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein.",
+        "setpoint_range": "Das Minimum muss unter dem Maximum liegen."
       },
       "abort": {
         "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
@@ -212,12 +231,43 @@
               "adaptive_mode": "Das Thermostat stellt sich selbst auf den Raum ein. Solange er an ist, wird die Hysterese ignoriert. Braucht Firmware 1.4.4 oder neuer.",
               "frost_temperature": "Die Temperatur, die das Thermostat als Frostschutz hält. 4,0 bis 16,0 °C. Leer = {default_frost_temperature}."
             }
+          },
+          "room_thermostat": {
+            "name": "Raumthermostat",
+            "description": "Die Grenzen der Solltemperatur, die an einem Raum eingestellt werden kann.",
+            "data": {
+              "setpoint_min": "Kleinste Solltemperatur",
+              "setpoint_max": "Größte Solltemperatur"
+            },
+            "data_description": {
+              "setpoint_min": "Die niedrigste Solltemperatur, die ein Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Leer = {default_setpoint_min}.",
+              "setpoint_max": "Die höchste Solltemperatur, die ein Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Leer = {default_setpoint_max}."
+            }
+          },
+          "windows_outdoor": {
+            "name": "Fenster und Außentemperatur",
+            "description": "Was passiert, wenn ein Fenster lange offen ist und wenn es draußen warm ist. Leere Zahlenfelder verwenden den eingebauten Standardwert.",
+            "data": {
+              "window_warn_minutes": "Warnung bei offenem Fenster (Minuten, 0 = nie)",
+              "window_check_minutes": "Fensterkontakt-Prüfung (Minuten, 0 = aus)",
+              "window_check_drop_kelvin": "Erwartete Abkühlung bei der Prüfung (K)",
+              "outdoor_sensor": "Außentemperatursensor",
+              "outdoor_cutoff_celsius": "Abschalttemperatur außen"
+            },
+            "data_description": {
+              "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Leer = {default_window_warn_minutes}.",
+              "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um die Abkühlung unten abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Leer = {default_window_check_minutes}.",
+              "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Leer = {default_window_check_drop_kelvin}.",
+              "outdoor_sensor": "Der Temperatursensor, den die Außentemperatur-Abschaltung liest. Ohne ihn tut die Abschaltung nichts.",
+              "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Ein Raum kann das für sich abschalten. -10,0 bis 30,0 °C. Leer = {default_outdoor_cutoff_celsius}."
+            }
           }
         }
       }
     },
     "error": {
-      "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein."
+      "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein.",
+      "setpoint_range": "Das Minimum muss unter dem Maximum liegen."
     }
   },
   "selector": {
@@ -268,6 +318,12 @@
         "set_frost_temperature": "Frostschutztemperatur",
         "set_setpoint": "Solltemperatur",
         "set_hvac_mode": "Modus"
+      }
+    },
+    "outdoor_cutoff": {
+      "options": {
+        "global": "Global",
+        "off": "Aus"
       }
     }
   }

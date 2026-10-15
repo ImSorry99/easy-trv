@@ -35,6 +35,7 @@ ROOM_ERRORS = {
     "name_exists",
     "name_required",
     "timeout_range",
+    "setpoint_range",
 }
 
 
@@ -83,7 +84,7 @@ def test_every_flow_error_and_abort_is_translated(path: Path) -> None:
     room = data["config_subentries"]["room"]
     assert set(room["error"]) == ROOM_ERRORS
     assert set(room["abort"]) == {"reconfigure_successful", "already_configured"}
-    assert set(data["options"]["error"]) == {"timeout_range"}
+    assert set(data["options"]["error"]) == {"timeout_range", "setpoint_range"}
     assert set(data["config"]["abort"]) == {"single_instance_allowed"}
 
 
@@ -110,8 +111,15 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "max_attempts",
         "min_delta_kelvin",
         "sensor_timeout_minutes",
+        "setpoint_min",
+        "setpoint_max",
+        "window_warn_minutes",
+        "window_check_minutes",
+        "window_check_drop_kelvin",
+        "outdoor_cutoff",
+        "outdoor_cutoff_celsius",
     }
-    entity_fields = {"trvs", "temp_sensors", "humidity_sensors"}
+    entity_fields = {"trvs", "temp_sensors", "humidity_sensors", "window_contacts"}
     assert set(room["step"]["entities"]["data"]) == entity_fields
     assert set(room["step"]["reconfigure"]["data"]) == {"name", *entity_fields}
     assert set(room["step"]["settings"]["data"]) == settings_fields
@@ -121,7 +129,12 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(room["step"]["user"]["menu_options"]) == {"from_area", "custom"}
     assert set(room["initiate_flow"]) == {"user", "reconfigure"}
     options = data["options"]["step"]["init"]["sections"]
-    assert set(options) == {"writes", "thermostat"}
+    assert set(options) == {
+        "writes",
+        "thermostat",
+        "room_thermostat",
+        "windows_outdoor",
+    }
     for section in options.values():
         assert set(section) == {"name", "description", "data", "data_description"}
         assert set(section["data"]) == set(section["data_description"])
@@ -138,6 +151,15 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "adaptive_mode",
         "frost_temperature",
     }
+    assert set(options["room_thermostat"]["data"]) == {"setpoint_min", "setpoint_max"}
+    assert set(options["windows_outdoor"]["data"]) == {
+        "window_warn_minutes",
+        "window_check_minutes",
+        "window_check_drop_kelvin",
+        "outdoor_sensor",
+        "outdoor_cutoff_celsius",
+    }
+    assert set(data["selector"]["outdoor_cutoff"]["options"]) == {"global", "off"}
     assert set(data["selector"]["window_detection"]["options"]) == {
         "global",
         "on",
@@ -336,3 +358,76 @@ def test_adaptive_mode_option_texts_are_state_like() -> None:
         "off": "Adaptiv aus",
         "leave": "Im Thermostat unverändert lassen",
     }
+
+
+@pytest.mark.parametrize("path", [EN, DE])
+def test_room_and_options_forms_explain_window_contacts_and_cutoff(path: Path) -> None:
+    data = load(path)
+    room = data["config_subentries"]["room"]["step"]
+    sections = data["options"]["step"]["init"]["sections"]
+    for step in ("entities", "reconfigure"):
+        assert room[step]["data_description"]["window_contacts"].strip()
+    settings = room["settings"]["data_description"]
+    for key in (
+        "setpoint_min",
+        "setpoint_max",
+        "window_warn_minutes",
+        "window_check_minutes",
+        "window_check_drop_kelvin",
+        "outdoor_cutoff",
+        "outdoor_cutoff_celsius",
+    ):
+        assert settings[key].strip()
+    # Every number says what Global currently is (rooms) or what empty means (options).
+    for key in ("setpoint_min", "window_check_drop_kelvin", "outdoor_cutoff_celsius"):
+        assert f"{{global_{key}}}" in settings[key]
+    windows = sections["windows_outdoor"]["data_description"]
+    assert "{default_outdoor_cutoff_celsius}" in windows["outdoor_cutoff_celsius"]
+    assert "{default_window_warn_minutes}" in windows["window_warn_minutes"]
+    assert room["settings"]["data_description"]["setpoint_max"]
+
+
+def test_window_contact_texts_name_another_area_en() -> None:
+    en = load(EN)["config_subentries"]["room"]["step"]
+    text = en["entities"]["data_description"]["window_contacts"]
+    assert "another area" in text
+    assert "kitchen" in text.lower()
+    assert en["reconfigure"]["data_description"]["window_contacts"] == text
+
+
+def test_window_contact_texts_name_another_area_de() -> None:
+    de = load(DE)["config_subentries"]["room"]["step"]
+    text = de["entities"]["data_description"]["window_contacts"]
+    assert "anderen Bereich" in text
+    assert "die Küche, wenn sie mit dem Wohnzimmer verbunden ist" in text
+    assert de["reconfigure"]["data_description"]["window_contacts"] == text
+
+
+def test_setpoint_range_error_texts() -> None:
+    en, de = load(EN), load(DE)
+    for data, text in (
+        (en, "Minimum must be below maximum."),
+        (de, "Das Minimum muss unter dem Maximum liegen."),
+    ):
+        assert data["config_subentries"]["room"]["error"]["setpoint_range"] == text
+        assert data["options"]["error"]["setpoint_range"] == text
+
+
+def test_window_and_outdoor_field_texts_en() -> None:
+    en = load(EN)
+    settings = en["config_subentries"]["room"]["step"]["settings"]["data_description"]
+    assert "0 = never" in settings["window_warn_minutes"]
+    assert "Repairs" in settings["window_warn_minutes"]
+    assert "0 = off" in settings["window_check_minutes"]
+    assert "0.5 K below" in settings["outdoor_cutoff_celsius"]
+    assert "switches off" in settings["outdoor_cutoff_celsius"]
+
+
+def test_window_and_outdoor_field_texts_de() -> None:
+    de = load(DE)
+    settings = de["config_subentries"]["room"]["step"]["settings"]["data_description"]
+    assert "0 = nie" in settings["window_warn_minutes"]
+    assert "Reparaturen" in settings["window_warn_minutes"]
+    assert "0 = aus" in settings["window_check_minutes"]
+    assert "0,5 K unter" in settings["outdoor_cutoff_celsius"]
+    assert "schaltet" in settings["outdoor_cutoff_celsius"]
