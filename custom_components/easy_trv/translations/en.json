@@ -268,7 +268,7 @@
           },
           "thermostat": {
             "name": "Thermostat settings",
-            "description": "These settings are written to the thermostats.",
+            "description": "These settings concern the thermostats. All of them except hiding are written to the thermostats.",
             "data": {
               "window_detection": "Thermostat's open-window detection",
               "hysteresis": "Hysteresis",

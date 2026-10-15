@@ -682,3 +682,23 @@ def test_hide_setting_texts_de() -> None:
         "on": "Ausgeblendet",
         "off": "Eingeblendet",
     }
+
+
+def test_thermostat_section_says_hiding_is_not_written() -> None:
+    en, de = load(EN), load(DE)
+    sections = "options", "step", "init", "sections", "thermostat"
+
+    def description(data: dict[str, Any]) -> str:
+        node: Any = data
+        for key in sections:
+            node = node[key]
+        return str(node["description"])
+
+    assert description(en) == (
+        "These settings concern the thermostats. "
+        "All of them except hiding are written to the thermostats."
+    )
+    assert description(de) == (
+        "Diese Einstellungen betreffen die Thermostate. "
+        "Alle außer dem Ausblenden werden in die Thermostate geschrieben."
+    )

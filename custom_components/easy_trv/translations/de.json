@@ -268,7 +268,7 @@
           },
           "thermostat": {
             "name": "Thermostat-Einstellungen",
-            "description": "Diese Einstellungen werden in die Thermostate geschrieben.",
+            "description": "Diese Einstellungen betreffen die Thermostate. Alle außer dem Ausblenden werden in die Thermostate geschrieben.",
             "data": {
               "window_detection": "Fenster-offen-Erkennung des Thermostats",
               "hysteresis": "Hysterese",
