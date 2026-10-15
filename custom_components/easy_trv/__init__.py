@@ -24,7 +24,6 @@ from custom_components.easy_trv.const import (
     CONF_AREA,
     CONF_HYSTERESIS,
     CONF_OUTDOOR_SENSOR,
-    CONF_PROFILE,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
     CONF_WINDOW_CONTACTS,
@@ -252,9 +251,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
     """Create the controller of one ``room`` subentry."""
     settings = resolve_settings(entry.options, subentry.data)
     device_refs = _resolve_thermostats(gateway, list(subentry.data[CONF_TRVS]))
-    profile = select_profile(
-        profiles, subentry.data.get(CONF_PROFILE, PROFILE_AUTO), device_refs
-    )
+    profile = select_profile(profiles, settings.profile, device_refs)
     config = room_config_from_subentry(
         subentry.subentry_id,
         subentry.title,

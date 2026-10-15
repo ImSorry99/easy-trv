@@ -211,6 +211,28 @@ async def test_unknown_explicit_profile_invalidates_only_its_room(hass) -> None:
     assert "no_such_profile" in issue.translation_placeholders["error"]
 
 
+async def test_a_room_with_the_global_profile_uses_the_global_choice(hass) -> None:
+    entry = make_entry(hass, [room_data(profile="global")], FAST_OPTIONS)
+
+    await start(hass, entry)
+
+    assert room_issue(hass, subentry_of(entry, "Living").subentry_id) is None
+    assert hass.states.get("sensor.living_heating_status").state == "ok"
+
+
+async def test_a_room_with_the_global_profile_follows_an_explicit_global_one(
+    hass,
+) -> None:
+    options = {**FAST_OPTIONS, "profile": "no_such_profile"}
+    entry = make_entry(hass, [room_data(profile="global")], options)
+
+    await start(hass, entry)
+
+    issue = room_issue(hass, subentry_of(entry, "Living").subentry_id)
+    assert issue is not None
+    assert "no_such_profile" in issue.translation_placeholders["error"]
+
+
 # --- A room that cannot be set up -------------------------------------------
 
 
