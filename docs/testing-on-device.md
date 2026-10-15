@@ -148,13 +148,13 @@ template:
         state: "{{ is_state('input_boolean.easy_trv_test_window', 'on') }}"
 ```
 
-Add it to Wohnzimmer (**Edit room**, window contacts; try a contact from a different area). Warm sensor, target 22 °C.
+Add it to Wohnzimmer (edit the room, field **Window and door contacts**; try a contact from a different area). Warm sensor, target 22 °C.
 
 1. Open the window. Expected: `window_open` true, the event `easy_trv_window_hold`, all three thermostats `0x001C = 0` within the verify delay, the climate entity keeps showing heat and 22 °C, no `0x600D` or `0x0012` line in the debug log meanwhile.
 2. During the hold change the target in HA to 20 °C. Expected: nothing is written to the thermostats. Close the window: they read heat and `0x0012 = 2000`.
-3. Open it again and let the check run. Set **Window contact check** to 5 minutes and **Window open warning** to 10 minutes in the room (reset afterwards). Expected: at 5 minutes with no drop of 0.3 K, Repairs shows `window_contact_suspect`; at 10 minutes `window_open_long`; both disappear on closing. If the room really cools by 0.3 K, no suspect issue appears; note which case happened.
+3. Before you open the window, set **Window contact check (minutes, 0 = off)** to 5 and **Open-window warning (minutes, 0 = never)** to 10 in the room's settings (reset afterwards; saving reloads the room and would restart the hold timer). Then open it and let the check run. Expected: at 5 minutes with no drop of 0.3 K, Repairs shows `window_contact_suspect`; at 10 minutes `window_open_long`; both disappear on closing. If the room really cools by 0.3 K, no suspect issue appears; note which case happened.
 4. Open the window and restart Home Assistant. Expected: the room is back in the hold, the thermostats stay off and no heat or target is written while the contact is open. Close it: the room resumes.
-5. Make the contact unavailable (disable the helper entity). Expected: counts as closed, `in_sync` false, a debug line says the contact is counted as closed.
+5. Make the contact unavailable: disable the template binary sensor itself (disabling the `input_boolean` helper only makes it report off, which is closed), or give the template an `availability` template that you can switch off. Expected: counts as closed, `in_sync` false, a debug line says the contact is counted as closed.
 6. Optional (the trade-off): open the window, stop Home Assistant for a few minutes, start it. Note what the thermostats showed meanwhile (off with frost protection) and that the room returns correctly.
 
 ### 6.4 Outdoor cut-off via a template sensor
@@ -170,10 +170,10 @@ template:
         state: "{{ states('input_number.easy_trv_test_outdoor') | float(0) }}"
 ```
 
-In the Easy TRV options choose it as **Outdoor temperature sensor** and set the cut-off to 15 °C (Wohnzimmer follows Global; Schlafzimmer set to **Off**).
+In the Easy TRV options choose it as **Outdoor temperature sensor** and set the cut-off to 15 °C (Wohnzimmer follows Global; in Schlafzimmer's room settings set **Outdoor cut-off** to Off).
 
-1. Set the helper to 14.5: nothing happens. 15: Wohnzimmer goes off (`outdoor_cutoff` true, the event `easy_trv_outdoor_hold`, `0x001C = 0`); Schlafzimmer stays on.
-2. Back to 14.5: still off (deadband). 14.4: the room is back on with its target.
+1. Set the helper to 14.5: nothing happens. Then 15: Wohnzimmer goes off (`outdoor_cutoff` true, the event `easy_trv_outdoor_hold`, `0x001C = 0`); Schlafzimmer stays on.
+2. Back to 14.5: still off (deadband). 14.0 (the helper steps by 0.5): the room is back on with its target; the hold ends below 14.5.
 3. During the cut-off turn a knob: expected only the target changes (`setpoint_source` `device:...`), the room stays off until the cut-off ends.
 4. Open the window during the cut-off and end the cut-off: the room stays off until the window is closed, and vice versa.
 5. Cut-off on, then make the template sensor unavailable (disable its entity): the room goes back on and the log has a warning.
@@ -184,13 +184,14 @@ Each spike answers one question that decides whether a requirement holds. Keep t
 
 ### S1: Does a value write wake a thermostat that is off?
 
-Why: requirement T6 keeps writing regardless of the thermostat's HVAC mode.
+Why: requirement T6 is amended: no temperature writes while the room is off or held by a window or the outdoor cut-off. The answer tells whether that rule is needed (a write wakes the thermostat) or only a simplification.
 
-1. Set one living-room thermostat to `off` (more-info dialog or `climate.set_hvac_mode`). Note `hvac_mode` and `hvac_action` and read the system mode in ZHA (cluster `0x0201`, attribute `0x001C`).
-2. Trigger writes: reload the integration (settings, source and value are written), then change the active sensor's value by 0.1 K or more (value only).
-3. Wait at least 5 minutes after each (the thermostat polls infrequently). Watch `hvac_mode` and `hvac_action`, the display on the device, and the system mode in ZHA.
-4. Record for each trigger: stayed `off` or switched on, and after how long. Set the thermostat back to its normal mode.
-5. Result use: the design keeps the room from sending any `0x600D` write while it is off (see 6.1 step 5); if a write does wake an `off` thermostat, that rule is confirmed, if not, it is only a simplification.
+Easy TRV cannot run this test itself any more: an `off` set through the ZHA entity is adopted by the room, which switches the others off and stops writing. So test with the entry disabled, as S4 does.
+
+1. Disable the Easy TRV entry (Easy TRV page > three dots > Disable) so nothing writes or adopts.
+2. Set one living-room thermostat to `off` (more-info dialog of its ZHA entity). Note `hvac_mode` and `hvac_action` and read the system mode in ZHA (cluster `0x0201`, attribute `0x001C`; expect `0`).
+3. In ZHA > Manage Zigbee device > Clusters write `0x600E = 1` (cluster `0xFC11`, endpoint 1), wait 5 minutes, then write `0x600D = 2140` by hand. After each write wait at least 5 minutes (the thermostat polls infrequently) and watch `hvac_mode` and `hvac_action`, the display on the device and `0x001C`.
+4. Record for each write: stayed `off` or switched on, and after how long. Set the thermostat back to its normal mode and enable the entry again.
 
 ### S2: Does the thermostat report `0x600E = 2`, or only answer reads?
 

@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Outdoor cut-off switches a room off above a global or per-room outdoor temperature, with a 0.5 K deadband
 - Diagnostics list the holds and the latest observations per thermostat
 
+### Changed
+
+- No external-temperature writes while a room is off or held by a window or the outdoor cut-off
+
 ## [0.2.0] - 2026-10-14
 
 ### Added
