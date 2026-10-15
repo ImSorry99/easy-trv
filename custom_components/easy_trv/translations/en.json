@@ -141,13 +141,10 @@
     }
   },
   "entity": {
-    "select": {
-      "operating_mode": {
-        "name": "Operating mode",
+    "climate": {
+      "room": {
         "state": {
-          "off": "Off",
-          "frost": "Frost protection",
-          "heat": "Heating enabled"
+          "auto": "Frost protection"
         }
       }
     },

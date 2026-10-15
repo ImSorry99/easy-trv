@@ -192,9 +192,12 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["selector"]["capability"]["options"]) == INTENTS
     assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
     assert set(data["selector"]["sensor_timeout"]["options"]) == {"off"}
-    assert "climate" not in data["entity"]
-    modes = data["entity"]["select"]["operating_mode"]["state"]
-    assert set(modes) == {"off", "frost", "heat"}
+    # The select entity is gone: frost protection is the mode ``auto`` of the
+    # room thermostat, and this is its label.
+    assert set(data["entity"]) == {"climate", "sensor"}
+    assert set(data["entity"]["climate"]) == {"room"}
+    assert set(data["entity"]["climate"]["room"]) == {"state"}
+    assert set(data["entity"]["climate"]["room"]["state"]) == {"auto"}
     # Existing sections of the earlier tasks stay in place.
     assert set(data["entity"]["sensor"]["room_status"]["state"]) == {
         "ok",
@@ -245,19 +248,28 @@ def test_german_translation_is_actually_german() -> None:
         "from_area": "Aus Bereich",
         "custom": "Eigener Raum",
     }
-    assert de["entity"]["select"]["operating_mode"] == {
-        "name": "Betriebsart",
-        "state": {
-            "off": "Aus",
-            "frost": "Frostschutz",
-            "heat": "Heizbetrieb freigegeben",
-        },
-    }
+    assert de["entity"]["climate"]["room"] == {"state": {"auto": "Frostschutz"}}
     assert de["entity"]["sensor"]["room_status"]["state"] == {
         "ok": "OK",
         "degraded": "Eingeschränkt",
         "error": "Fehler",
     }
+
+
+def test_frost_protection_is_the_label_of_the_auto_mode() -> None:
+    assert load(EN)["entity"]["climate"]["room"]["state"] == {
+        "auto": "Frost protection"
+    }
+    assert load(DE)["entity"]["climate"]["room"]["state"] == {"auto": "Frostschutz"}
+
+
+def test_the_auto_mode_has_the_frost_protection_icon() -> None:
+    icons = json.loads((INTEGRATION / "icons.json").read_text())
+
+    assert icons["entity"]["climate"]["room"]["state"]["auto"] == (
+        "mdi:snowflake-thermometer"
+    )
+    assert "select" not in icons["entity"]
 
 
 def test_room_device_name_is_translated() -> None:

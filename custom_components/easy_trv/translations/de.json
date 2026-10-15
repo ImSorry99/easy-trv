@@ -141,13 +141,10 @@
     }
   },
   "entity": {
-    "select": {
-      "operating_mode": {
-        "name": "Betriebsart",
+    "climate": {
+      "room": {
         "state": {
-          "off": "Aus",
-          "frost": "Frostschutz",
-          "heat": "Heizbetrieb freigegeben"
+          "auto": "Frostschutz"
         }
       }
     },

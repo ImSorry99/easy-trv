@@ -88,8 +88,9 @@ async def test_room_climate_entity_properties(hass, entry) -> None:
     assert attributes[ATTR_MIN_TEMP] == 4.0
     assert attributes[ATTR_MAX_TEMP] == 35.0
     assert attributes[ATTR_TARGET_TEMP_STEP] == 0.5
-    assert attributes[ATTR_HVAC_MODES] == [HVACMode.HEAT, HVACMode.OFF]
-    # Frost protection is an operating mode of the room, not a preset.
+    # ``auto`` carries frost protection (Home Assistant has no mode for it).
+    assert attributes[ATTR_HVAC_MODES] == [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
+    # Frost protection is a mode of the room, not a preset.
     assert ATTR_PRESET_MODES not in attributes
     assert ATTR_PRESET_MODE not in attributes
     assert attributes[ATTR_SUPPORTED_FEATURES] == (
@@ -218,6 +219,90 @@ async def test_off_ends_frost_protection(hass, entry) -> None:
     assert controller.operation is OperatingMode.HEAT
 
 
+async def test_auto_is_frost_protection_and_heat_returns_to_the_setpoint(
+    hass, entry, fake_gateway
+) -> None:
+    await start(hass, entry)
+    controller = next(iter(entry.runtime_data.rooms.values()))
+    fake_gateway.writes.clear()
+
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
+
+    state = hass.states.get(CLIMATE)
+    assert state.state == "auto"
+    assert state.attributes[ATTR_TEMPERATURE] == 5.0
+    assert state.attributes["setpoint_source"] == "frost"
+    assert controller.operation is OperatingMode.FROST
+    assert sorted(writes(fake_gateway, SETPOINT)) == [(IEEE_A, 500), (IEEE_B, 500)]
+    assert writes(fake_gateway, MODE) == []
+
+    fake_gateway.writes.clear()
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.HEAT)
+
+    state = hass.states.get(CLIMATE)
+    assert state.state == "heat"
+    assert state.attributes[ATTR_TEMPERATURE] == 21.0
+    assert controller.operation is OperatingMode.HEAT
+    assert sorted(writes(fake_gateway, SETPOINT)) == [(IEEE_A, 2100), (IEEE_B, 2100)]
+
+
+async def test_auto_from_off_switches_the_room_on_at_frost_protection(
+    hass, entry, fake_gateway
+) -> None:
+    await start(hass, entry)
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.OFF)
+    fake_gateway.writes.clear()
+
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("auto", 5.0)
+    assert sorted(writes(fake_gateway, MODE)) == [(IEEE_A, HEAT), (IEEE_B, HEAT)]
+    assert sorted(writes(fake_gateway, SETPOINT)) == [(IEEE_A, 500), (IEEE_B, 500)]
+
+
+async def test_off_from_frost_protection_and_back_to_heat(hass, entry) -> None:
+    await start(hass, entry)
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
+
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.OFF)
+    assert hass.states.get(CLIMATE).state == "off"
+
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.HEAT)
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("heat", 21.0)
+
+
+async def test_turn_on_leaves_frost_protection(hass, entry) -> None:
+    await start(hass, entry)
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
+
+    await call(hass, SERVICE_TURN_ON)
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("heat", 21.0)
+
+
+async def test_a_new_target_in_frost_protection_switches_to_heat(
+    hass, entry, fake_gateway
+) -> None:
+    await start(hass, entry)
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
+    fake_gateway.writes.clear()
+
+    await call(hass, SERVICE_SET_TEMPERATURE, **{ATTR_TEMPERATURE: 19.5})
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("heat", 19.5)
+    assert state.attributes["setpoint_source"] == "ha"
+    assert sorted(writes(fake_gateway, SETPOINT)) == [(IEEE_A, 1950), (IEEE_B, 1950)]
+
+    # Frost protection forgot the target from before: heat stays at 19.5.
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.HEAT)
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 19.5
+
+
 async def test_the_state_follows_the_controller_without_a_service(hass, entry) -> None:
     await start(hass, entry)
     controller = next(iter(entry.runtime_data.rooms.values()))
@@ -320,6 +405,22 @@ async def test_restore_keeps_frost_protection_and_the_setpoint_to_return_to(
 
     await controller.async_set_operation(OperatingMode.HEAT)
     await settle(hass)
+
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 22.0
+
+
+@pytest.mark.parametrize("preset", ["frost", "none", None])
+async def test_a_restored_auto_state_is_frost_protection(hass, entry, preset) -> None:
+    remember(hass, "auto", 5.0, preset=preset, frost_return=22.0)
+
+    await start(hass, entry)
+
+    controller = next(iter(entry.runtime_data.rooms.values()))
+    state = hass.states.get(CLIMATE)
+    assert controller.operation is OperatingMode.FROST
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("auto", 5.0)
+
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.HEAT)
 
     assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 22.0
 

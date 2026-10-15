@@ -14,7 +14,12 @@ from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.util import slugify
 
 from custom_components.easy_trv.const import DOMAIN
-from custom_components.easy_trv.core.model import Note, Preset, RoomMode
+from custom_components.easy_trv.core.model import (
+    Note,
+    OperatingMode,
+    Preset,
+    RoomMode,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigSubentry
@@ -26,8 +31,14 @@ if TYPE_CHECKING:
 
 PARALLEL_UPDATES = 0
 
-_HVAC_MODES = {RoomMode.HEAT: HVACMode.HEAT, RoomMode.OFF: HVACMode.OFF}
-_ROOM_MODES = {mode.value: room_mode for room_mode, mode in _HVAC_MODES.items()}
+# Home Assistant has no mode for frost protection: ``auto`` carries it.
+_HVAC_MODES = {
+    OperatingMode.OFF: HVACMode.OFF,
+    OperatingMode.HEAT: HVACMode.HEAT,
+    OperatingMode.FROST: HVACMode.AUTO,
+}
+_OPERATIONS = {mode: operation for operation, mode in _HVAC_MODES.items()}
+_ROOM_MODES = {HVACMode.HEAT.value: RoomMode.HEAT, HVACMode.OFF.value: RoomMode.OFF}
 _PRESETS = {preset.value: preset for preset in Preset}
 
 
@@ -91,9 +102,10 @@ async def async_setup_entry(
 class RoomClimate(ClimateEntity, RestoreEntity):
     """The thermostat of a room: one setpoint and mode for all valves.
 
-    Frost protection is not a preset here but an operating mode of the room
-    (the room's select entity); the thermostat then shows ``heat`` at the
-    frost protection temperature.
+    Frost protection is not a preset here but a mode of the room: the mode
+    ``auto``, which the translations show as Frost protection. The thermostat
+    then holds the frost protection temperature; ``heat`` returns to the
+    target from before and a new target ends frost protection too.
     """
 
     _attr_has_entity_name = True
@@ -101,7 +113,7 @@ class RoomClimate(ClimateEntity, RestoreEntity):
     _attr_translation_key = "room"
     _attr_should_poll = False
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]  # noqa: RUF012
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]  # noqa: RUF012
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_ON
@@ -138,8 +150,8 @@ class RoomClimate(ClimateEntity, RestoreEntity):
 
     @property
     def hvac_mode(self) -> HVACMode:
-        """Return whether the room heats or is switched off."""
-        return _HVAC_MODES[self._controller.mode]
+        """Return whether the room heats, is on frost protection or is off."""
+        return _HVAC_MODES[self._controller.operation]
 
     @property
     def target_temperature(self) -> float | None:
@@ -178,16 +190,19 @@ class RoomClimate(ClimateEntity, RestoreEntity):
             await self._controller.async_set_setpoint(float(celsius))
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Switch the room on or off; off ends frost protection."""
-        await self._controller.async_set_mode(_ROOM_MODES[hvac_mode.value])
+        """Switch the room off, to frost protection (``auto``) or to heating.
+
+        Off ends frost protection; heat brings back the target from before.
+        """
+        await self._controller.async_set_operation(_OPERATIONS[hvac_mode])
 
     async def async_turn_on(self) -> None:
-        """Switch the room on."""
-        await self._controller.async_set_mode(RoomMode.HEAT)
+        """Switch the room on: heating, also from frost protection."""
+        await self._controller.async_set_operation(OperatingMode.HEAT)
 
     async def async_turn_off(self) -> None:
         """Switch the room off."""
-        await self._controller.async_set_mode(RoomMode.OFF)
+        await self._controller.async_set_operation(OperatingMode.OFF)
 
     async def async_added_to_hass(self) -> None:
         """Restore the room and write the state whenever the room changes.
@@ -205,13 +220,17 @@ class RoomClimate(ClimateEntity, RestoreEntity):
             return
         extra = await self.async_get_last_extra_data()
         data = RoomExtraData.from_dict(extra.as_dict()) if extra else None
+        mode = _ROOM_MODES.get(last.state)
         preset = data.preset if data else None
-        if preset is None:
+        if last.state == HVACMode.AUTO:
+            # Frost protection shown as the mode ``auto`` (the room shows it as a mode).
+            mode, preset = RoomMode.HEAT, Preset.FROST
+        elif preset is None:
             # Remembered by 0.3.0, which had frost protection as a preset.
             preset = _PRESETS.get(str(last.attributes.get("preset_mode")))
         await self._controller.async_restore(
             _number(last.attributes.get(ATTR_TEMPERATURE)),
-            _ROOM_MODES.get(last.state),
+            mode,
             preset,
             data.frost_return if data else None,
         )

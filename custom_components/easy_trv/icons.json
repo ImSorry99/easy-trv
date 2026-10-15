@@ -1,12 +1,10 @@
 {
   "entity": {
-    "select": {
-      "operating_mode": {
-        "default": "mdi:radiator",
+    "climate": {
+      "room": {
+        "default": "mdi:thermostat",
         "state": {
-          "off": "mdi:radiator-off",
-          "frost": "mdi:snowflake-thermometer",
-          "heat": "mdi:radiator"
+          "auto": "mdi:snowflake-thermometer"
         }
       }
     },

@@ -9,6 +9,7 @@ from homeassistant.core import CoreState
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.easy_trv import issues
 from custom_components.easy_trv.adapters.zha_gateway import ZhaUnavailable
@@ -93,13 +94,11 @@ async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
     )
     assert device is not None
     assert device.name == "Living heating"
-    # A thermostat, an operating mode and a status sensor per room, attached to
-    # the room's subentry.
+    # A thermostat and a status sensor per room, attached to the room's subentry.
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     by_id = {e.entity_id: e for e in entities}
     assert by_id.keys() == {
         "climate.living_heating",
-        "select.living_heating_mode",
         "sensor.living_heating_status",
     }
     assert by_id["sensor.living_heating_status"].unique_id == f"{subentry_id}_status"
@@ -110,6 +109,39 @@ async def test_setup_creates_room_device_and_status_sensor(hass, entry) -> None:
     labels = entry.runtime_data.labels
     assert labels["set_window_detection"] == "Thermostat's open-window detection"
     assert zha_issue(hass) is None
+
+
+async def test_setup_removes_the_operating_mode_select_of_0_4_0(hass, entry) -> None:
+    registry = er.async_get(hass)
+    subentry_id = next(iter(entry.subentries))
+    orphan = registry.async_get_or_create(
+        "select",
+        DOMAIN,
+        f"{subentry_id}_operating_mode",
+        config_entry=entry,
+        config_subentry_id=subentry_id,
+        suggested_object_id="living_heating_mode",
+    )
+    # Neighbours that must stay: a select of another integration, and an
+    # entity of this one that merely looks similar.
+    other_entry = MockConfigEntry(domain="other")
+    other_entry.add_to_hass(hass)
+    foreign = registry.async_get_or_create(
+        "select",
+        "other",
+        f"{subentry_id}_operating_mode",
+        config_entry=other_entry,
+        suggested_object_id="foreign",
+    )
+    assert registry.async_get(orphan.entity_id) is not None
+
+    await start(hass, entry)
+
+    assert registry.async_get(orphan.entity_id) is None
+    assert hass.states.get(orphan.entity_id) is None
+    assert registry.async_get(foreign.entity_id) is not None
+    assert registry.async_get("climate.living_heating") is not None
+    assert registry.async_get("sensor.living_heating_status") is not None
 
 
 async def test_rooms_start_only_when_home_assistant_has_started(

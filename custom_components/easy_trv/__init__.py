@@ -11,6 +11,7 @@ from homeassistant.components.climate.const import ATTR_MAX_TEMP, ATTR_MIN_TEMP
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
 
 from custom_components.easy_trv import issues
@@ -30,6 +31,7 @@ from custom_components.easy_trv.const import (
     CONF_WINDOW_CONTACTS,
     DEFAULT_SETPOINT_MAX,
     DEFAULT_SETPOINT_MIN,
+    DOMAIN,
     PLATFORMS,
     PROFILE_AUTO,
     SETTING_GLOBAL,
@@ -53,6 +55,9 @@ if TYPE_CHECKING:
     from custom_components.easy_trv.profiles.engine import Profile
 
 _LOGGER = logging.getLogger(__name__)
+
+# What the unique id of the 0.4.0 operating mode select ends with.
+_OPERATING_MODE_SUFFIX = "_operating_mode"
 
 # The hysteresis choice that version 1 entries could store and version 2 retired.
 _HYSTERESIS_LEAVE = "leave"
@@ -427,6 +432,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     entry.runtime_data = EasyTrvRuntimeData(
         gateway, profiles, rooms, resolved, areas, labels
     )
+    _remove_operating_mode_selects(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -446,6 +452,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     entry.async_on_unload(async_at_started(hass, _start_rooms))
     entry.async_on_unload(entry.add_update_listener(_async_reload_on_update))
     return True
+
+
+def _remove_operating_mode_selects(
+    hass: HomeAssistant, entry: EasyTrvConfigEntry
+) -> None:
+    """Remove the operating mode selects of 0.4.0, which no platform provides now.
+
+    Frost protection moved to the mode ``auto`` of the room thermostat. The
+    registry would keep the select as an unavailable entity otherwise.
+    """
+    registry = er.async_get(hass)
+    for registered in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if (
+            registered.domain == "select"
+            and registered.platform == DOMAIN
+            and registered.unique_id.endswith(_OPERATING_MODE_SUFFIX)
+        ):
+            registry.async_remove(registered.entity_id)
 
 
 async def _async_reload_on_update(
