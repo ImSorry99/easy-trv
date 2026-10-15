@@ -21,6 +21,10 @@ from homeassistant.const import (
 from homeassistant.core import CoreState, State
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_state_report_event,
+)
 from homeassistant.helpers.restore_state import async_get as async_restore_data
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -29,7 +33,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.easy_trv.const import DOMAIN
-from custom_components.easy_trv.controller import ThermostatStatistics
+from custom_components.easy_trv.controller import RoomController, ThermostatStatistics
 from tests.helpers_entry import (
     CELSIUS,
     FAST_OPTIONS,
@@ -142,14 +146,24 @@ def sent_to(gateway, ieee) -> int:
     return len([write for write in gateway.writes if write[0] == ieee])
 
 
-def seed(hass, totals: dict[str, Any]) -> None:
-    """Put the last native values of sensors where a restart would find them."""
+def seed(
+    hass, totals: dict[str, Any], units: dict[str, str | None] | None = None
+) -> None:
+    """Put the last native values of sensors where a restart would find them.
+
+    The values come with the unit their sensor has (hours for a duration, none
+    for a count) unless ``units`` names another one.
+    """
+    units = {HEATING_TIME: "h", OPEN_TIME: "h", **(units or {})}
     mock_restore_cache_with_extra_data(
         hass,
         [
             (
                 State(entity_id, str(total)),
-                {"native_value": total, "native_unit_of_measurement": None},
+                {
+                    "native_value": total,
+                    "native_unit_of_measurement": units.get(entity_id),
+                },
             )
             for entity_id, total in totals.items()
         ],
@@ -163,6 +177,19 @@ def dumped(hass, entity_id: str) -> Any:
             assert stored.extra_data is not None
             return stored.extra_data.as_dict()["native_value"]
     pytest.fail(f"nothing saved for {entity_id}")
+
+
+def watch_writes(hass, entity_ids: set[str]) -> tuple[list[str], list[str]]:
+    """Record which entities write a state that changed, or the same again."""
+    changed: list[str] = []
+    reported: list[str] = []
+    async_track_state_change_event(
+        hass, entity_ids, lambda event: changed.append(event.data["entity_id"])
+    )
+    async_track_state_report_event(
+        hass, entity_ids, lambda event: reported.append(event.data["entity_id"])
+    )
+    return changed, reported
 
 
 async def start_room_not_running(hass, entry) -> None:
@@ -252,7 +279,7 @@ async def test_unique_ids_device_and_category(hass, big_room) -> None:
 @pytest.mark.parametrize(
     ("entity_id", "expected"),
     [
-        (DEVIATION, (None, "K", "measurement", 1)),
+        (DEVIATION, ("temperature_delta", "K", "measurement", 1)),
         (HEATING_TIME, ("duration", "h", "total_increasing", 2)),
         (OPENINGS, (None, None, "total_increasing", None)),
         (OPEN_TIME, ("duration", "h", "total_increasing", 2)),
@@ -672,7 +699,9 @@ async def test_a_restored_duration_does_not_come_back_a_float_step_lower(
     assert dumped(hass, HEATING_TIME) == stored
 
 
-async def test_nothing_usable_to_restore_starts_at_zero(hass, entry) -> None:
+async def test_nothing_usable_to_restore_starts_at_zero(
+    hass, entry, fake_gateway
+) -> None:
     seed(
         hass,
         {
@@ -686,10 +715,67 @@ async def test_nothing_usable_to_restore_starts_at_zero(hass, entry) -> None:
 
     await start(hass, entry)
 
-    assert value(hass, A_WRITES) != "None"
+    # Only what the room wrote itself: no total came back.
+    assert sent_to(fake_gateway, IEEE_A) > 0
+    assert value(hass, A_WRITES) == str(sent_to(fake_gateway, IEEE_A))
     assert value(hass, A_FAILURES) == "0"
     assert value(hass, A_DROPOUTS) == "0"
     assert hass.states.get(OPENINGS) is None
+
+
+async def test_a_stored_value_in_another_unit_is_not_restored(
+    hass, entry_with_contact, fake_gateway
+) -> None:
+    seed(
+        hass,
+        {HEATING_TIME: 12.5, OPEN_TIME: 3.0, A_WRITES: 7, OPENINGS: 4},
+        units={HEATING_TIME: "min", OPEN_TIME: None, A_WRITES: "h", OPENINGS: "h"},
+    )
+    hass.states.async_set("climate.a", "heat", IDLE)
+
+    await start(hass, entry_with_contact)
+
+    assert number(hass, HEATING_TIME) == 0.0
+    assert number(hass, OPEN_TIME) == 0.0
+    assert value(hass, A_WRITES) == str(sent_to(fake_gateway, IEEE_A))
+    assert value(hass, OPENINGS) == "0"
+
+
+async def test_a_negative_stored_value_is_not_handed_to_the_room(
+    hass, entry_with_contact
+) -> None:
+    seed(
+        hass,
+        {
+            A_WRITES: -3,
+            A_FAILURES: -0.5,
+            A_DROPOUTS: 3,
+            HEATING_TIME: -1.5,
+            OPEN_TIME: -2.0,
+            OPENINGS: -1,
+        },
+    )
+
+    with patch.object(RoomController, "restore_statistic") as restore:
+        await start(hass, entry_with_contact)
+
+    assert [call.args for call in restore.call_args_list] == [
+        ("dropouts", 3.0, "climate.a")
+    ]
+
+
+async def test_a_negative_stored_duration_is_not_kept_for_the_next_restart(
+    hass, entry_with_contact
+) -> None:
+    seed(hass, {HEATING_TIME: -1.5, OPEN_TIME: -2.0})
+
+    await start(hass, entry_with_contact)
+
+    # No thermostat reports what it is doing: nothing to show, nothing to keep.
+    assert value(hass, HEATING_TIME) == STATE_UNAVAILABLE
+    assert dumped(hass, HEATING_TIME) is None
+    assert number(hass, OPEN_TIME) == 0.0
+    assert dumped(hass, OPEN_TIME) == 0.0
 
 
 async def test_a_sensor_without_a_stored_value_starts_at_zero(hass, entry) -> None:
@@ -707,6 +793,63 @@ async def test_the_deviation_is_not_restored(hass, entry) -> None:
     await start_room_not_running(hass, entry)
 
     assert value(hass, DEVIATION) == STATE_UNKNOWN
+
+
+# --- Reading and writing the state ------------------------------------------
+
+
+async def test_the_room_is_read_once_per_sensor_and_update(hass, big_room) -> None:
+    await start(hass, big_room)
+    controller = room_of(big_room)
+    published = len(sensors(hass, big_room)) - 1  # all but the heating state
+
+    with patch.object(
+        controller, "statistics", wraps=controller.statistics
+    ) as statistics:
+        controller._tell_update_listeners()  # noqa: SLF001
+
+    assert statistics.call_count == published == 13
+
+
+async def test_a_sensor_writes_its_state_only_when_it_changed(hass, entry) -> None:
+    hass.states.async_set("climate.a", "heat", {"temperature": 21.0})
+    hass.states.async_set("climate.b", "heat", {"temperature": 21.0})
+    await start(hass, entry)
+    controller = room_of(entry)
+    ours = set(sensors(hass, entry)) - {STATE_ENTITY}
+    changed, reported = watch_writes(hass, set(sensors(hass, entry)))
+
+    # The room tells it has news, but none of the sensors has another value.
+    controller._tell_update_listeners()  # noqa: SLF001
+    await settle(hass)
+
+    assert not ours & set(changed)
+    assert not ours & set(reported)
+    # The state sensor of the room is no statistic and writes as before.
+    assert STATE_ENTITY in reported
+
+    # A value that is new is written.
+    hass.states.async_set("sensor.t1", "20.5", CELSIUS)
+    await settle(hass)
+
+    assert DEVIATION in changed
+    assert value(hass, DEVIATION) == "-0.5"
+
+
+async def test_a_total_that_becomes_available_is_written_with_the_same_value(
+    hass, entry
+) -> None:
+    seed(hass, {HEATING_TIME: 12.5})
+    await start(hass, entry)
+    assert value(hass, HEATING_TIME) == STATE_UNAVAILABLE
+    changed, _ = watch_writes(hass, {HEATING_TIME})
+
+    # The room has 12.5 hours before and after: only the availability changes.
+    hass.states.async_set("climate.a", "heat", IDLE)
+    await settle(hass)
+
+    assert HEATING_TIME in changed
+    assert number(hass, HEATING_TIME) == pytest.approx(12.5)
 
 
 # --- A room reload ----------------------------------------------------------

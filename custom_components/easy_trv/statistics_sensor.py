@@ -9,6 +9,8 @@ keeps it as long-term statistics.
 The counters and durations are totals that only grow (``total_increasing``) and
 carry on after a restart: each sensor hands its last value back to the
 controller before the room starts, and shows the highest value it has shown.
+A sensor reads the room once per update and writes its state only when the
+value, or whether there is one, is new.
 """
 
 import math
@@ -65,6 +67,7 @@ class ThermostatStatistic(SensorEntityDescription):
 ROOM_STATISTICS: tuple[RoomStatistic, ...] = (
     RoomStatistic(
         key="deviation",
+        device_class=SensorDeviceClass.TEMPERATURE_DELTA,
         native_unit_of_measurement=UnitOfTemperature.KELVIN,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=1,
@@ -216,9 +219,10 @@ class StatisticSensor(RestoreSensor):
     """A statistic of the room's controller, shown as a diagnostic sensor.
 
     A total (a counter or a duration) is restored from the value it showed
-    before a restart and never shows less than it did before. A measurement,
-    the control deviation, takes nothing back: it is only meaningful while the
-    room heats.
+    before a restart, if that was in the unit the sensor has now and not
+    negative, and never shows less than it did before. A measurement, the
+    control deviation, takes nothing back: it is only meaningful while the room
+    heats.
     """
 
     _attr_has_entity_name = True
@@ -248,6 +252,7 @@ class StatisticSensor(RestoreSensor):
         self._duration = description.device_class is SensorDeviceClass.DURATION
         # What the sensor shows: for a total the highest value it has shown.
         self._shown: Reading = None
+        self._available = True
 
     @property
     def native_value(self) -> Reading:
@@ -261,7 +266,7 @@ class StatisticSensor(RestoreSensor):
         A total the room cannot measure (the heating time while no thermostat
         reports an action) is unavailable, not stuck at what it was.
         """
-        return not self._total or self._read() is not None
+        return self._available
 
     @property
     def extra_restore_state_data(self) -> SensorExtraStoredData:
@@ -274,11 +279,27 @@ class StatisticSensor(RestoreSensor):
 
     def _latest(self) -> Reading:
         """Return the value to show now: for a total, never less than shown."""
-        fresh = self._read()
+        return self._value_to_show(self._read())
+
+    def _value_to_show(self, fresh: Reading) -> Reading:
+        """Return what to show for a value the room reports: a total never falls."""
         if not self._total:
             return fresh
         known = [value for value in (self._shown, fresh) if value is not None]
         return max(known, default=None)
+
+    def _refresh(self) -> bool:
+        """Read the room once and return whether the sensor now shows anything new.
+
+        New is another value, or the room has (or has not) a value to show.
+        """
+        fresh = self._read()
+        shown = self._value_to_show(fresh)
+        available = not self._total or fresh is not None
+        changed = shown != self._shown or available != self._available
+        self._shown = shown
+        self._available = available
+        return changed
 
     async def async_added_to_hass(self) -> None:
         """Take back the last total, then follow the room.
@@ -289,19 +310,24 @@ class StatisticSensor(RestoreSensor):
         await super().async_added_to_hass()
         if self._total:
             await self._take_back_total()
-        self._shown = self._latest()
+        self._refresh()
         self.async_on_remove(self._controller.add_update_listener(self._handle_update))
 
     async def _take_back_total(self) -> None:
         """Hand the last value to the controller and show it, as it was."""
         data = await self.async_get_last_sensor_data()
-        if data is None:
+        # A value in another unit than the sensor has now (hours were once
+        # minutes, say) cannot be taken for the same quantity.
+        if data is None or data.native_unit_of_measurement != (
+            self.native_unit_of_measurement
+        ):
             return
         stored = data.native_value
         if (
             not isinstance(stored, (int, float))
             or isinstance(stored, bool)
             or not math.isfinite(stored)
+            or stored < 0
         ):
             return
         self._restore(float(stored))
@@ -312,9 +338,9 @@ class StatisticSensor(RestoreSensor):
 
     @callback
     def _handle_update(self) -> None:
-        """Take the room's value, then write the state."""
-        self._shown = self._latest()
-        self.async_write_ha_state()
+        """Take the room's value, then write the state if it is another one."""
+        if self._refresh():
+            self.async_write_ha_state()
 
 
 class RoomStatisticSensor(StatisticSensor):
