@@ -411,6 +411,14 @@ def test_a_failed_off_write_is_retried_as_off_during_the_hold() -> None:
     assert st.trvs[A].written_recently["hvac_mode"][-1] == ("off", LATER)
 
 
+def test_a_retry_pending_from_the_hold_sends_heat_after_the_close() -> None:
+    st, _ = open_window(heating())
+    st, _ = room().handle(result(A, SetHvacMode("off"), Failed("timeout")), OPEN_AT, st)
+    st, _ = room().handle(WindowChanged(open=False), OPEN_AT, st)
+    st, cmds = room().handle(RetryDue(A, "hvac_mode"), LATER, st)
+    assert executes(cmds) == [(A, SetHvacMode("heat"))]
+
+
 def test_a_setpoint_retry_is_still_suppressed_during_the_hold() -> None:
     st = heating()
     st, _ = room().handle(result(A, SetSetpoint(21.0), Failed("busy")), OPEN_AT, st)
@@ -500,11 +508,14 @@ def test_the_stuck_check_is_skipped_when_another_sensor_is_active() -> None:
     st, _ = open_window(heating())
     assert st.window_open_sensor == "sensor.t1"
     at = OPEN_AT + timedelta(minutes=30)
-    only_t2 = {"sensor.t2": st.readings["sensor.t2"]}
-    st = replace(st, readings=only_t2)  # t1 is gone, t2 (20.0) takes over
+    # t1 is gone; t2 takes over and sits within 0.3 K of the opening value, so
+    # without the identity check the contact would be called suspect.
+    only_t2 = {"sensor.t2": reading("sensor.t2", 21.2, at)}
+    st = replace(st, readings=only_t2)
     st, cmds = room().handle(Tick(), at, st)
     assert of_type(cmds, RaiseIssue) == []
     assert st.window_suspect is False
+    assert st.window_checked is False
 
 
 def test_the_stuck_check_fires_once_the_sensor_is_usable_again() -> None:
