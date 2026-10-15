@@ -9,7 +9,7 @@ Assistant imports, so it can be tested without a running instance.
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, assert_never
 
-from custom_components.easy_trv.core import setpoint
+from custom_components.easy_trv.core import observe, setpoint
 from custom_components.easy_trv.core.model import (
     EVENT_FAILSAFE,
     EVENT_RECOVERED,
@@ -160,7 +160,7 @@ class RoomLogic:
             case SetRoomSetpoint() | SetRoomMode() | SetRoomPreset() | RestoreRoom():
                 state, commands = self._on_room_event(event, now, state)
             case TrvObserved():
-                state, commands = setpoint.on_observed(
+                state, commands = observe.on_observed(
                     self._cfg, state, now, event, self._capability_of
                 )
             case KnobSettled():
@@ -244,9 +244,9 @@ class RoomLogic:
     ) -> _Step:
         """Adopt a settled knob turn; one that wakes the room resyncs source first."""
         resync: list[Intent] = []
-        if setpoint.knob_wakes_room(self._cfg, state, event, self._capability_of):
+        if observe.knob_wakes_room(self._cfg, state, event, self._capability_of):
             state, resync = self._source_intents(state, now)
-        return setpoint.on_knob_settled(
+        return observe.on_knob_settled(
             self._cfg, state, now, event, self._capability_of, resync
         )
 
@@ -290,7 +290,7 @@ class RoomLogic:
 
     def _on_tick(self, now: datetime, state: RoomState) -> _Step:
         """Handle sensor timeouts and window phases, then resend what is due."""
-        state, phase = setpoint.expire_window_phase(
+        state, phase = observe.expire_window_phase(
             self._cfg, state, now, self._capability_of
         )
         state, commands = self._on_tick_sensors(now, state)
@@ -331,7 +331,7 @@ class RoomLogic:
         back = replace(current, available=True)
         back = replace(back, health=self._baseline(back))
         state, commands = self._resync_trv(self._with_trv(state, trv, back), now, trv)
-        state, climate = setpoint.resync_trv(
+        state, climate = observe.resync_trv(
             self._cfg, state, now, trv, self._capability_of
         )
         return state, [*commands, *climate]
@@ -431,7 +431,7 @@ class RoomLogic:
         ):
             return False
         known = state.trvs[event.trv]
-        return not setpoint.is_echo(known, event.capability, outcome.observed, now)
+        return not observe.is_echo(known, event.capability, outcome.observed, now)
 
     def _on_foreign_readback(
         self,
@@ -458,9 +458,7 @@ class RoomLogic:
         observed = TrvObserved(
             trv, capability, outcome.observed, outcome.actual or 0, "report"
         )
-        return setpoint.on_observed(
-            self._cfg, state, now, observed, self._capability_of
-        )
+        return observe.on_observed(self._cfg, state, now, observed, self._capability_of)
 
     def _on_schedule_readback(
         self, event: OperationResult, now: datetime, state: RoomState
@@ -481,9 +479,7 @@ class RoomLogic:
             ),
         )
         observed = TrvObserved(trv, capability, None, 1, "report")
-        return setpoint.on_observed(
-            self._cfg, state, now, observed, self._capability_of
-        )
+        return observe.on_observed(self._cfg, state, now, observed, self._capability_of)
 
     def _on_ok(self, event: OperationResult, now: datetime, state: RoomState) -> _Step:
         """Forget earlier trouble with the capability and record a verified value.
