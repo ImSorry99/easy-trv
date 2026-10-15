@@ -102,16 +102,74 @@ def on_set_mode(  # noqa: PLR0913
     state = replace(state, mode=mode)
     if holding(state):
         return state, []
+    if mode is RoomMode.HEAT:
+        return resume(cfg, state, now, capability_of, resync)
+    writes = [(trv, SetHvacMode("off")) for trv in _writable(cfg, state)]
+    return _write(state, now, writes, capability_of)
+
+
+def resume(
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    capability_of: _Capabilities,
+    resync: Sequence[Intent] = (),
+) -> _Step:
+    """Bring every thermostat up to date when the room starts heating again.
+
+    Per writable thermostat: mode ``heat``, the ``resync`` intents (source and
+    value, which the room logic knows), then the setpoint. Used whenever the
+    room leaves ``off`` or a hold.
+    """
     writes: list[tuple[str, Intent]] = []
     for trv in _writable(cfg, state):
-        if mode is RoomMode.OFF:
-            writes.append((trv, SetHvacMode("off")))
-            continue
         writes.append((trv, SetHvacMode("heat")))
         writes.extend((trv, intent) for intent in resync)
         if state.setpoint is not None:
             writes.append((trv, SetSetpoint(state.setpoint)))
     return _write(state, now, writes, capability_of)
+
+
+def leaving_off(cfg: RoomConfig, state: RoomState, mode: RoomMode | None) -> bool:
+    """Return whether setting ``mode`` takes a room that is off back to heating."""
+    return (
+        cfg.setpoint_range is not None
+        and state.mode is RoomMode.OFF
+        and mode is RoomMode.HEAT
+        and not holding(state)
+    )
+
+
+def current(state: RoomState, intent: Intent) -> Intent | None:
+    """Return what a retry of a setpoint or mode write should send now.
+
+    Never an older value than the room's; ``None`` when the room has none.
+    """
+    if isinstance(intent, SetSetpoint):
+        return None if state.setpoint is None else SetSetpoint(state.setpoint)
+    if isinstance(intent, SetHvacMode):
+        return SetHvacMode("off" if state.mode is RoomMode.OFF else "heat")
+    return intent
+
+
+def retry(
+    state: RoomState,
+    now: datetime,
+    trv: str,
+    intent: Intent,
+    capability_of: _Capabilities,
+) -> _Step:
+    """Resend a setpoint or mode write whose retry is due, with the newest value.
+
+    A setpoint is not resent while the room is off or on hold (the resume writes
+    it); a mode is not resent during a hold, but ``off`` is while the room is off.
+    """
+    if holding(state) or (isinstance(intent, SetSetpoint) and suspended(state)):
+        return state, []
+    newest = current(state, intent)
+    if newest is None:
+        return state, []
+    return _write(state, now, [(trv, newest)], capability_of)
 
 
 def on_set_preset(
@@ -145,17 +203,19 @@ def on_set_preset(
     return _write_setpoint(cfg, state, now, capability_of)
 
 
-def on_restore(
+def on_restore(  # noqa: PLR0913
     cfg: RoomConfig,
     state: RoomState,
     now: datetime,
     restore: RestoreRoom,
     capability_of: _Capabilities,
+    resync: Sequence[Intent] = (),
 ) -> _Step:
     """Take the room state remembered across a restart; it wins over the devices.
 
     Only thermostats known to report something else get a write. Thermostats
-    that have not reported yet are handled by ``reconcile_start``.
+    that have not reported yet are handled by ``reconcile_start``. A room that
+    was off and is restored to heat resumes every thermostat instead.
     """
     if cfg.setpoint_range is None:
         return state, []
@@ -165,10 +225,15 @@ def on_restore(
             setpoint=clamp(restore.setpoint, cfg.setpoint_range),
             setpoint_source="restore",
         )
+    leaving = leaving_off(cfg, state, restore.mode)
     if restore.mode is not None:
         state = replace(state, mode=restore.mode)
     if restore.preset is not None:
         state = replace(state, preset=restore.preset)
+    if restore.frost_return is not None:
+        state = replace(state, frost_return=restore.frost_return)
+    if leaving:
+        return resume(cfg, state, now, capability_of, resync)
     return _sync_differing(cfg, state, now, capability_of, with_mode=True)
 
 
@@ -199,8 +264,16 @@ def reconcile_start(
     if state.setpoint is not None:
         return _sync_differing(cfg, state, now, capability_of, with_mode=True)
     writable = _writable(cfg, state)
+    # A thermostat on its schedule (or with no mode) shows a setpoint that is
+    # not the user's.
     first = next(
-        (t for t in writable if state.trvs[t].reported_setpoint is not None), None
+        (
+            t
+            for t in writable
+            if state.trvs[t].reported_setpoint is not None
+            and state.trvs[t].reported_mode in _OWN_MODES
+        ),
+        None,
     )
     modes = [state.trvs[t].reported_mode for t in writable]
     reported_modes = [m for m in modes if m is not None]
@@ -220,6 +293,13 @@ def reconcile_start(
 
 
 # --- Helpers -------------------------------------------------------------
+
+
+def _schedule_driven(known: TrvState) -> bool:
+    """Return whether a thermostat runs its own schedule and is left alone."""
+    return known.note is Note.SCHEDULE or (
+        known.reported_mode is not None and known.reported_mode not in _OWN_MODES
+    )
 
 
 def _writable(cfg: RoomConfig, state: RoomState) -> list[str]:
@@ -254,7 +334,7 @@ def _sync_differing(
     mode: SetHvacMode = SetHvacMode("off" if state.mode is RoomMode.OFF else "heat")
     for trv in _writable(cfg, state):
         known = state.trvs[trv]
-        if known.reported_mode is not None and known.reported_mode not in _OWN_MODES:
+        if _schedule_driven(known):
             continue
         if (
             with_mode
@@ -292,7 +372,7 @@ def _write(
         if capability in known.unsupported:
             continue
         if isinstance(intent, SetSetpoint | SetHvacMode):
-            if known.note is Note.SCHEDULE:
+            if _schedule_driven(known):
                 continue
             value = intent.celsius if isinstance(intent, SetSetpoint) else intent.mode
             trvs[trv] = _remember(known, capability, value, now)

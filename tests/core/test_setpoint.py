@@ -508,3 +508,124 @@ def test_a_capability_the_thermostat_lacks_is_not_written_or_remembered() -> Non
     st, cmds = logic().handle(SetRoomSetpoint(22.0), T0, st)
     assert executes(cmds) == [("climate.b", SetSetpoint(22.0))]
     assert "setpoint" not in st.trvs["climate.a"].written_recently
+
+
+# --- fix round 1 ---------------------------------------------------------
+
+
+def failed_setpoint(value: float = 21.0) -> RoomState:
+    """Return a started room whose SetSetpoint write to climate.a failed once."""
+    st, _ = started()
+    st, _ = logic().handle(SetRoomSetpoint(value), T0, st)
+    st, _ = logic().handle(
+        result("climate.a", SetSetpoint(value), Failed("busy")), T0, st
+    )
+    assert "setpoint" in st.trvs["climate.a"].pending_retry
+    return st
+
+
+def test_a_setpoint_retry_sends_the_newest_setpoint_and_records_it() -> None:
+    st = failed_setpoint(21.0)
+    st = replace(st, setpoint=23.0)
+    st, cmds = logic().handle(RetryDue("climate.a", "setpoint"), LATER, st)
+    assert executes(cmds) == [("climate.a", SetSetpoint(23.0))]
+    assert st.trvs["climate.a"].written_recently["setpoint"][-1] == (23.0, LATER)
+
+
+def test_the_pending_setpoint_retry_holds_the_newest_setpoint() -> None:
+    st = failed_setpoint(21.0)
+    st = replace(st, setpoint=23.0)
+    st, _ = logic().handle(
+        result("climate.a", SetSetpoint(21.0), Failed("busy")), T0, st
+    )
+    assert st.trvs["climate.a"].pending_retry["setpoint"] == SetSetpoint(23.0)
+
+
+def test_no_setpoint_retry_while_off_or_held() -> None:
+    st = failed_setpoint(21.0)
+    off, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
+    _, cmds = logic().handle(RetryDue("climate.a", "setpoint"), LATER, off)
+    assert executes(cmds) == []
+    held = replace(st, window_open=True)
+    _, cmds = logic().handle(RetryDue("climate.a", "setpoint"), LATER, held)
+    assert executes(cmds) == []
+
+
+def test_a_mode_retry_sends_the_current_mode_and_records_it() -> None:
+    st, _ = started()
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
+    st, _ = logic().handle(
+        result("climate.a", SetHvacMode("off"), Failed("busy")), T0, st
+    )
+    st, cmds = logic().handle(RetryDue("climate.a", "hvac_mode"), LATER, st)
+    assert executes(cmds) == [("climate.a", SetHvacMode("off"))]
+    assert st.trvs["climate.a"].written_recently["hvac_mode"][-1] == ("off", LATER)
+    st, _ = logic().handle(
+        result("climate.a", SetHvacMode("off"), Failed("busy")), LATER, st
+    )
+    held = replace(st, outdoor_hold=True)
+    _, cmds = logic().handle(RetryDue("climate.a", "hvac_mode"), LATER, held)
+    assert executes(cmds) == []
+
+
+def test_initial_setpoint_ignores_a_thermostat_on_its_schedule() -> None:
+    reported = {"climate.a": (17.0, "auto"), "climate.b": (21.0, "heat")}
+    st, cmds = logic().handle(
+        Start((), BOTH_AVAILABLE, reported), T0, RoomState.initial(CFG)
+    )
+    assert st.setpoint == 21.0
+    assert writes(cmds) == []
+    only_auto = {"climate.a": (17.0, "auto"), "climate.b": (None, None)}
+    st, cmds = logic().handle(
+        Start((), BOTH_AVAILABLE, only_auto), T0, RoomState.initial(CFG)
+    )
+    assert st.setpoint is None
+    assert writes(cmds) == []
+
+
+def test_restore_out_of_off_resyncs_mode_source_value_and_setpoint() -> None:
+    reported = {"climate.a": (19.0, "off"), "climate.b": (19.0, "off")}
+    st, _ = logic().handle(
+        Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE, reported),
+        T0,
+        RoomState.initial(CFG),
+    )
+    assert st.mode is RoomMode.OFF
+    st, cmds = logic().handle(RestoreRoom(22.0, RoomMode.HEAT, Preset.NONE), LATER, st)
+    assert executes(cmds) == [
+        ("climate.a", SetHvacMode("heat")),
+        ("climate.a", SetSource("external")),
+        ("climate.a", SetRoomTemperature(21.3)),
+        ("climate.a", SetSetpoint(22.0)),
+        ("climate.b", SetHvacMode("heat")),
+        ("climate.b", SetSource("external")),
+        ("climate.b", SetRoomTemperature(21.3)),
+        ("climate.b", SetSetpoint(22.0)),
+    ]
+    refresh = logic()._params.refresh  # noqa: SLF001
+    _, tick = logic().handle(Tick(), LATER + refresh + timedelta(seconds=1), st)
+    assert [i for _, i in executes(tick) if isinstance(i, SetRoomTemperature)]
+
+
+def test_restore_remembers_the_setpoint_before_frost() -> None:
+    st, _ = logic().handle(
+        RestoreRoom(7.0, RoomMode.HEAT, Preset.FROST, frost_return=21.0),
+        T0,
+        RoomState.initial(CFG),
+    )
+    assert (st.preset, st.setpoint, st.frost_return) == (Preset.FROST, 7.0, 21.0)
+    st, _ = logic().handle(SetRoomPreset(Preset.NONE), T0, st)
+    assert st.setpoint == 21.0
+
+
+def test_a_thermostat_reporting_auto_gets_no_setpoint_write() -> None:
+    st, _ = started()
+    st = with_trv(st, "climate.a", reported_mode="auto")
+    _, cmds = logic().handle(SetRoomSetpoint(22.0), T0, st)
+    assert executes(cmds) == [("climate.b", SetSetpoint(22.0))]
+
+
+def test_a_setpoint_retry_without_a_room_setpoint_sends_nothing() -> None:
+    st = replace(failed_setpoint(21.0), setpoint=None)
+    _, cmds = logic().handle(RetryDue("climate.a", "setpoint"), LATER, st)
+    assert executes(cmds) == []

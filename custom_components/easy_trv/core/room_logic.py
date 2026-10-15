@@ -43,11 +43,13 @@ from custom_components.easy_trv.core.model import (
     SensorReading,
     SetAdaptiveMode,
     SetFrostTemperature,
+    SetHvacMode,
     SetHysteresis,
     SetRoomMode,
     SetRoomPreset,
     SetRoomSetpoint,
     SetRoomTemperature,
+    SetSetpoint,
     SetSource,
     SetStatus,
     SetWindowDetection,
@@ -152,7 +154,7 @@ class RoomLogic:
             case TrvAvailabilityChanged():
                 state, commands = self._on_availability(event, now, state)
             case RetryDue():
-                state, commands = self._on_retry_due(event, state)
+                state, commands = self._on_retry_due(event, now, state)
             case OperationResult():
                 state, commands = self._on_result(event, now, state)
             case SetRoomSetpoint() | SetRoomMode() | SetRoomPreset() | RestoreRoom():
@@ -207,7 +209,12 @@ class RoomLogic:
                     cfg, state, now, event.preset, capability_of
                 )
             case RestoreRoom():
-                return setpoint.on_restore(cfg, state, now, event, capability_of)
+                resync: list[Intent] = []
+                if setpoint.leaving_off(cfg, state, event.mode):
+                    state, resync = self._source_intents(state, now)
+                return setpoint.on_restore(
+                    cfg, state, now, event, capability_of, resync
+                )
             case _:
                 assert_never(event)
 
@@ -295,7 +302,7 @@ class RoomLogic:
         back = replace(back, health=self._baseline(back))
         return self._resync_trv(self._with_trv(state, trv, back), now, trv)
 
-    def _on_retry_due(self, event: RetryDue, state: RoomState) -> _Step:
+    def _on_retry_due(self, event: RetryDue, now: datetime, state: RoomState) -> _Step:
         """Resend the newest intent that is still waiting for its retry."""
         trv, capability = event.trv, event.capability
         current = state.trvs[trv]
@@ -306,11 +313,14 @@ class RoomLogic:
             current, pending_retry=_without(current.pending_retry, capability)
         )
         if trv in self._writable(state):
+            state = self._with_trv(state, trv, updated)
+            if isinstance(intent, SetSetpoint | SetHvacMode):
+                return setpoint.retry(state, now, trv, intent, self._capability_of)
             if setpoint.suspended(state) and isinstance(
                 intent, SetRoomTemperature | SetSource
             ):
-                return self._with_trv(state, trv, updated), []
-            return self._with_trv(state, trv, updated), [Execute(trv, intent)]
+                return state, []
+            return state, [Execute(trv, intent)]
         if isinstance(intent, SETTING_INTENTS):
             # Dropped while the thermostat is away: re-apply on its return.
             updated = replace(updated, settings_applied=False)
@@ -790,7 +800,7 @@ class RoomLogic:
         """Return what a retry should send: never an older temperature."""
         if isinstance(intent, SetRoomTemperature) and state.last_written is not None:
             return SetRoomTemperature(state.last_written)
-        return intent
+        return setpoint.current(state, intent) or intent
 
     def _drop_unsupported(
         self, state: RoomState, commands: list[Command]

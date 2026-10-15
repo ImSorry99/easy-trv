@@ -434,6 +434,8 @@ class RestoreRoom:
     setpoint: float | None
     mode: RoomMode | None
     preset: Preset | None
+    # The setpoint to return to when the preset ``frost`` ends.
+    frost_return: float | None = None
 
 
 @dataclass(frozen=True)
