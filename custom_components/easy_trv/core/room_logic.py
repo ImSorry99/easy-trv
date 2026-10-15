@@ -515,8 +515,10 @@ class RoomLogic:
     def _on_ok(self, event: OperationResult, now: datetime, state: RoomState) -> _Step:
         """Forget earlier trouble with the capability and record a verified value.
 
-        An error ends only when the capability that caused it verifies; a
-        verified write of any other capability says nothing about it.
+        An error ends only when the capability that caused it verifies and no
+        other capability of the thermostat is still given up on; a verified
+        write of any other capability says nothing about it. When the one that
+        owns the issue arrives but another has not, the issue moves on to that.
         """
         trv, capability = event.trv, event.capability
         current = state.trvs[trv]
@@ -533,12 +535,19 @@ class RoomLogic:
         still_failing = False
         if self._reported(current):
             if current.error_capability in (None, capability):
-                updated = replace(updated, last_error=None, error_capability=None)
-                commands += [
-                    ClearIssue("unreachable", trv),
-                    FireEvent(EVENT_RECOVERED, self._event_data(trv)),
-                    Log("info", f"{self._cfg.name}: {trv} accepts writes again"),
-                ]
+                remaining = self._exhausted(updated)
+                if remaining:
+                    still_failing = True
+                    next_capability = remaining[0]
+                    updated = replace(updated, error_capability=next_capability)
+                    commands += self._still_failing(trv, updated, next_capability)
+                else:
+                    updated = replace(updated, last_error=None, error_capability=None)
+                    commands += [
+                        ClearIssue("unreachable", trv),
+                        FireEvent(EVENT_RECOVERED, self._event_data(trv)),
+                        Log("info", f"{self._cfg.name}: {trv} accepts writes again"),
+                    ]
             else:
                 still_failing = True
                 note = (
@@ -588,12 +597,14 @@ class RoomLogic:
             ]
         reported = self._reported(current)
         updated = replace(updated, health=TrvHealth.ERROR, last_error=error)
-        if not reported:
-            updated = replace(updated, error_capability=capability)
-        if updated.error_capability == capability:
-            # Only the reported capability moves the clock: another write that
-            # keeps failing must not postpone the one that is sent again.
+        if current.health is not TrvHealth.ERROR:
+            # The thermostat goes into error: the clock for sending again what
+            # did not arrive starts now. Failures while it is in error leave the
+            # clock alone, it counts from the last time they were sent.
             updated = replace(updated, last_error_retry=now)
+        if not reported:
+            # The first to give up owns the issue.
+            updated = replace(updated, error_capability=capability)
         if isinstance(event.intent, SETTING_INTENTS):
             # The setting never arrived: apply it again on the next resync.
             updated = replace(updated, settings_applied=False)
@@ -602,21 +613,42 @@ class RoomLogic:
             return state, []
         data = {"attribute": capability, "attempts": attempts, "error": error}
         return state, [
-            RaiseIssue(
-                "unreachable",
-                trv,
-                {
-                    "room": self._cfg.name,
-                    "trv": trv,
-                    "attribute": capability,
-                    "attempts": str(attempts),
-                    "error": error,
-                },
-            ),
+            self._unreachable(trv, capability, attempts, error),
             FireEvent(EVENT_WRITE_FAILED, {**self._event_data(trv), **data}),
             Log(
                 "warning",
                 f"{self._cfg.name}: {trv} did not accept {capability} "
+                f"after {attempts} attempts: {error}",
+            ),
+        ]
+
+    def _unreachable(
+        self, trv: str, capability: str, attempts: int, error: str
+    ) -> RaiseIssue:
+        """Return the Repairs issue for a capability the thermostat did not take."""
+        return RaiseIssue(
+            "unreachable",
+            trv,
+            {
+                "room": self._cfg.name,
+                "trv": trv,
+                "attribute": capability,
+                "attempts": str(attempts),
+                "error": error,
+            },
+        )
+
+    def _still_failing(
+        self, trv: str, trv_state: TrvState, capability: str
+    ) -> list[Command]:
+        """Move the issue on to a capability that has not arrived either."""
+        attempts = trv_state.attempts[capability]
+        error = trv_state.last_error or "unknown"
+        return [
+            self._unreachable(trv, capability, attempts, error),
+            Log(
+                "warning",
+                f"{self._cfg.name}: {trv} still did not accept {capability} "
                 f"after {attempts} attempts: {error}",
             ),
         ]
@@ -822,54 +854,88 @@ class RoomLogic:
         return self._write_value(state, active, now)
 
     def _retry_failed(self, state: RoomState, now: datetime) -> _Step:
-        """Send a capability again that a thermostat gave up on.
+        """Send every capability again that a thermostat gave up on.
 
         Only the room temperature is refreshed on its own; the source and the
         settings are otherwise written when something changes. A thermostat in
-        error on one of them would stay there, so once per ``refresh`` the write
-        that raised the error is issued again with a fresh set of attempts. The
+        error would stay there, so once per ``refresh`` everything that did not
+        arrive is issued again, each with a fresh set of attempts, for ever. The
         value write that follows in the same tick covers an error on the value.
         """
         commands: list[Command] = []
         for trv in self._writable(state):
             current = state.trvs[trv]
-            capability = current.error_capability
-            intents = self._reissuable(state, current)
-            intent = intents.get(capability) if capability is not None else None
-            attempts = current.attempts.get(capability, 0) if capability else 0
-            if (
-                current.health is not TrvHealth.ERROR
-                or capability is None
-                or intent is None
-                or (
-                    current.last_error_retry is not None
-                    and now - current.last_error_retry < self._params.refresh
-                )
-                # A chain of retries is still running: let it finish first.
-                or capability in current.pending_retry
-                or 0 < attempts < self._params.max_attempts
-                or (setpoint.suspended(state) and isinstance(intent, SetSource))
+            if current.health is not TrvHealth.ERROR or (
+                current.last_error_retry is not None
+                and now - current.last_error_retry < self._params.refresh
             ):
                 continue
+            intents = self._sendable_again(state, current)
+            if not intents:
+                continue
+            attempts, pending_retry = current.attempts, current.pending_retry
+            for intent in intents:
+                capability = self._capability_of(intent)
+                attempts = _without(attempts, capability)
+                pending_retry = _without(pending_retry, capability)
+            # One clock for the thermostat: all of them go out together.
             state = self._with_trv(
                 state,
                 trv,
                 replace(
                     current,
-                    attempts=_without(current.attempts, capability),
-                    pending_retry=_without(current.pending_retry, capability),
+                    attempts=attempts,
+                    pending_retry=pending_retry,
                     last_error_retry=now,
                 ),
             )
-            if isinstance(intent, SetSetpoint | SetHvacMode):
-                # Through the room's writes, which remember them as echoes.
-                state, written = setpoint.write(
-                    state, now, [(trv, intent)], self._capability_of
-                )
-                commands.extend(written)
-            else:
-                commands.append(Execute(trv, intent))
+            for intent in intents:
+                if isinstance(intent, SetSetpoint | SetHvacMode):
+                    # Through the room's writes, which remember them as echoes.
+                    state, written = setpoint.write(
+                        state, now, [(trv, intent)], self._capability_of
+                    )
+                    commands.extend(written)
+                else:
+                    commands.append(Execute(trv, intent))
         return state, commands
+
+    def _sendable_again(self, state: RoomState, trv_state: TrvState) -> list[Intent]:
+        """Return the writes to a thermostat that are due again, in write order.
+
+        That is every capability that gave up and that the room writes, and the
+        one that raised the issue even when its attempts were dropped since.
+        """
+        gave_up = set(self._exhausted(trv_state))
+        reported = trv_state.error_capability
+        if reported is not None and reported not in trv_state.unsupported:
+            gave_up.add(reported)
+        intents: list[Intent] = []
+        for capability, intent in self._reissuable(state, trv_state).items():
+            attempts = trv_state.attempts.get(capability, 0)
+            if (
+                capability not in gave_up
+                # A chain of retries is still running: let it finish first.
+                or capability in trv_state.pending_retry
+                or 0 < attempts < self._params.max_attempts
+                or (setpoint.suspended(state) and isinstance(intent, SetSource))
+            ):
+                continue
+            intents.append(intent)
+        return intents
+
+    def _exhausted(self, trv_state: TrvState) -> list[str]:
+        """Return the capabilities whose attempts are used up, sorted by name.
+
+        One the firmware lacks is left out: it is never written, so it is no
+        reason to keep an issue.
+        """
+        return sorted(
+            capability
+            for capability, attempts in trv_state.attempts.items()
+            if attempts >= self._params.max_attempts
+            and capability not in trv_state.unsupported
+        )
 
     def _settings(self, trv_state: TrvState) -> list[Intent]:
         """Return the settings to write to a thermostat, in write order.

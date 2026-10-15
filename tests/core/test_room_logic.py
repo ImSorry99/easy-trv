@@ -33,8 +33,11 @@ from custom_components.easy_trv.core.model import (
     SensorReading,
     SetAdaptiveMode,
     SetFrostTemperature,
+    SetHvacMode,
     SetHysteresis,
+    SetRoomSetpoint,
     SetRoomTemperature,
+    SetSetpoint,
     SetSource,
     SetStatus,
     SetWindowDetection,
@@ -1305,6 +1308,231 @@ def test_nothing_is_sent_again_for_a_capability_the_room_does_not_manage(
         for t, i in executes(cmds)
         if t == "climate.a" and not isinstance(i, SetRoomTemperature)
     ] == []
+
+
+# --- Every value that did not arrive is sent again, for ever --------------
+
+REFRESH = RoomParams.defaults().refresh
+MODE = SetHvacMode("heat")
+SETPOINT = SetSetpoint(21.0)
+
+
+def exhaust(
+    st: RoomState, trv: str, *intents: Intent, at: datetime = T0, error: str = "busy"
+) -> RoomState:
+    """Fail each of ``intents`` on ``trv`` until its attempts are used up."""
+    for intent in intents:
+        for _ in range(3):
+            st, _ = logic().handle(result(trv, intent, Failed(error)), at, st)
+    return st
+
+
+def started_with_setpoint() -> RoomState:
+    st, _ = started()
+    st, _ = logic().handle(SetRoomSetpoint(21.0), T0, st)
+    return st
+
+
+def climate_writes(cmds: list[Command], trv: str = "climate.a") -> list[Intent]:
+    """Return what ``trv`` is sent apart from the room temperature."""
+    return [
+        intent
+        for target, intent in executes(cmds)
+        if target == trv and not isinstance(intent, SetRoomTemperature)
+    ]
+
+
+def test_every_exhausted_capability_is_retried_each_refresh() -> None:
+    st = exhaust(started_with_setpoint(), "climate.a", MODE, SETPOINT)
+    trv = st.trvs["climate.a"]
+    assert trv.error_capability == "hvac_mode"
+    assert trv.attempts == {"hvac_mode": 3, "setpoint": 3}
+
+    _, cmds = logic().handle(Tick(), T0 + REFRESH - timedelta(minutes=1), st)
+    assert climate_writes(cmds) == []
+
+    st, cmds = logic().handle(Tick(), T0 + REFRESH, st)
+    assert climate_writes(cmds) == [MODE, SETPOINT]
+    trv = st.trvs["climate.a"]
+    assert trv.attempts == {}
+    assert trv.pending_retry == {}
+    assert trv.health == TrvHealth.ERROR
+    # Both were remembered as our own writes, so the echo is no knob turn.
+    assert [value for value, _ in trv.written_recently["setpoint"]][-1] == 21.0
+    # One clock for the thermostat: nothing again before the next refresh.
+    _, cmds = logic().handle(Tick(), T0 + REFRESH + timedelta(minutes=1), st)
+    assert climate_writes(cmds) == []
+    # The other thermostat has nothing to send again.
+    assert climate_writes(cmds, "climate.b") == []
+
+
+@pytest.mark.parametrize(
+    ("setting", "capability"),
+    [
+        (SetWindowDetection(enabled=True), "window_detection"),
+        (HYSTERESIS, "hysteresis"),
+        (FROST, "frost_temperature"),
+    ],
+)
+def test_failed_setting_is_retried_without_a_resync(
+    setting: Intent, capability: str
+) -> None:
+    # The value gave up first and owns the issue; the setting gave up after it.
+    st = exhaust(started()[0], "climate.a", TEMP, setting)
+    trv = st.trvs["climate.a"]
+    assert trv.error_capability == "room_temperature"
+    assert trv.attempts[capability] == 3
+    assert trv.available
+    assert not trv.settings_applied
+
+    _, cmds = logic().handle(Tick(), T0 + REFRESH - timedelta(minutes=1), st)
+    assert climate_writes(cmds) == []
+    st, cmds = logic().handle(Tick(), T0 + REFRESH, st)
+    assert climate_writes(cmds) == [setting]
+    assert capability not in st.trvs["climate.a"].attempts
+    # A fresh set of attempts: it is retried with the backoff, not given up.
+    _, cmds = logic().handle(
+        result("climate.a", setting, Failed("busy")), T0 + REFRESH, st
+    )
+    assert of_type(cmds, ScheduleRetry) == [ScheduleRetry("climate.a", capability, 5.0)]
+
+
+def test_retries_never_stop() -> None:
+    st = exhaust(started()[0], "climate.a", TEMP, HYSTERESIS)
+    for period in (1, 2, 3):
+        at = T0 + period * REFRESH
+        _, cmds = logic().handle(Tick(), at - timedelta(minutes=1), st)
+        assert HYSTERESIS not in climate_writes(cmds)
+        st, cmds = logic().handle(Tick(), at, st)
+        assert climate_writes(cmds) == [HYSTERESIS]
+        assert "hysteresis" not in st.trvs["climate.a"].attempts
+        # It keeps failing: backed off at first, then given up on again.
+        st, cmds = logic().handle(
+            result("climate.a", HYSTERESIS, Failed("busy")), at, st
+        )
+        assert of_type(cmds, ScheduleRetry) == [
+            ScheduleRetry("climate.a", "hysteresis", 5.0)
+        ]
+        for _ in range(2):
+            st, _ = logic().handle(
+                result("climate.a", HYSTERESIS, Failed("busy")), at, st
+            )
+        assert st.trvs["climate.a"].attempts["hysteresis"] == 3
+        assert st.trvs["climate.a"].health == TrvHealth.ERROR
+
+
+def test_issue_stays_until_all_capabilities_arrive() -> None:
+    st = exhaust(started()[0], "climate.a", TEMP, HYSTERESIS, error="timeout")
+    assert st.trvs["climate.a"].error_capability == "room_temperature"
+
+    # The reported one arrives; the setting still has not.
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), T0, st)
+    trv = st.trvs["climate.a"]
+    assert of_type(cmds, ClearIssue) == []
+    assert of_type(cmds, FireEvent) == []
+    assert of_type(cmds, RaiseIssue) == [
+        RaiseIssue(
+            "unreachable",
+            "climate.a",
+            {
+                "room": "Living",
+                "trv": "climate.a",
+                "attribute": "hysteresis",
+                "attempts": "3",
+                "error": "timeout",
+            },
+        )
+    ]
+    assert (trv.health, trv.error_capability) == (TrvHealth.ERROR, "hysteresis")
+    assert trv.last_error == "timeout"
+    assert cmds[-1].status == RoomStatus.ERROR
+
+    # The other one arrives too: now the problem is gone.
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), T0, st)
+    trv = st.trvs["climate.a"]
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert of_type(cmds, RaiseIssue) == []
+    assert (trv.health, trv.error_capability, trv.last_error) == (
+        TrvHealth.OK,
+        None,
+        None,
+    )
+    assert cmds[-1].status == RoomStatus.OK
+
+
+def test_the_issue_follows_the_capabilities_in_name_order() -> None:
+    st = exhaust(
+        started()[0], "climate.a", TEMP, HYSTERESIS, FROST, SetSource("external")
+    )
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), T0, st)
+    assert st.trvs["climate.a"].error_capability == "frost_temperature"
+    assert of_type(cmds, RaiseIssue)[0].placeholders["attribute"] == "frost_temperature"
+    st, cmds = logic().handle(result("climate.a", FROST, Ok()), T0, st)
+    assert st.trvs["climate.a"].error_capability == "hysteresis"
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), T0, st)
+    assert st.trvs["climate.a"].error_capability == "source"
+    assert of_type(cmds, ClearIssue) == []
+    st, cmds = logic().handle(result("climate.a", SetSource("external"), Ok()), T0, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+
+
+def test_the_issue_ends_when_the_other_capability_arrives_first() -> None:
+    st = exhaust(started()[0], "climate.a", TEMP, HYSTERESIS)
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), T0, st)
+    assert of_type(cmds, ClearIssue) == []
+    assert st.trvs["climate.a"].error_capability == "room_temperature"
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), T0, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+
+
+def test_a_capability_without_firmware_support_does_not_keep_the_issue() -> None:
+    st = exhaust(started()[0], "climate.a", TEMP, HYSTERESIS)
+    st, _ = logic().handle(result("climate.a", HYSTERESIS, UNSUPPORTED), T0, st)
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), T0, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert st.trvs["climate.a"].error_capability is None
+    # And it is never sent again.
+    _, cmds = logic().handle(Tick(), T0 + REFRESH, st)
+    assert HYSTERESIS not in climate_writes(cmds)
+
+
+def test_a_resync_that_fails_starts_the_interval_again() -> None:
+    st = errored_on(HYSTERESIS)
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    back = T0 + timedelta(minutes=30)
+    st, cmds = logic().handle(
+        TrvAvailabilityChanged("climate.a", available=True), back, st
+    )
+    assert HYSTERESIS in climate_writes(cmds)
+    st, _ = logic().handle(result("climate.a", HYSTERESIS, Failed("busy")), back, st)
+    assert st.trvs["climate.a"].health == TrvHealth.ERROR
+
+    _, cmds = logic().handle(Tick(), back + timedelta(minutes=1), st)
+    assert climate_writes(cmds) == []
+    _, cmds = logic().handle(Tick(), back + REFRESH, st)
+    assert climate_writes(cmds) == [HYSTERESIS]
+
+
+def test_running_chain_is_not_doubled() -> None:
+    st = exhaust(started()[0], "climate.a", TEMP, HYSTERESIS, FROST)
+    st, _ = logic().handle(Tick(), T0 + REFRESH, st)
+    late = T0 + REFRESH + timedelta(minutes=19, seconds=50)
+    # The hysteresis is on its first retry; the frost temperature gave up again.
+    st, _ = logic().handle(result("climate.a", HYSTERESIS, Failed("busy")), late, st)
+    st = exhaust(st, "climate.a", FROST, at=late)
+    assert "hysteresis" in st.trvs["climate.a"].pending_retry
+
+    _, cmds = logic().handle(Tick(), T0 + 2 * REFRESH, st)
+    assert climate_writes(cmds) == [FROST]
+
+    # The retry is on its way now; the chain is still running.
+    st, cmds = logic().handle(RetryDue("climate.a", "hysteresis"), late, st)
+    assert climate_writes(cmds) == [HYSTERESIS]
+    st, cmds = logic().handle(Tick(), T0 + 2 * REFRESH, st)
+    assert climate_writes(cmds) == [FROST]
+    assert st.trvs["climate.a"].attempts["hysteresis"] == 1
 
 
 # --- Failed and mismatched results ---------------------------------------
