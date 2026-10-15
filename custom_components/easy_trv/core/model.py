@@ -267,6 +267,9 @@ class TrvState:
     resync_pending: Mapping[str, float | str] = field(default_factory=dict)
     # capability -> when reported_setpoint / reported_mode was last reported
     reported_at: Mapping[str, datetime] = field(default_factory=dict)
+    # Switched off by a hold while it ran its own schedule: the room leaves it
+    # off after the hold (it never writes ``auto``) until it reports auto or heat.
+    left_off: bool = False
 
 
 @dataclass(frozen=True)
@@ -513,10 +516,15 @@ EVENT_RECOVERED: Final = "easy_trv_recovered"
 EVENT_FAILSAFE: Final = "easy_trv_failsafe_detected"
 EVENT_SETPOINT_ADOPTED: Final = "easy_trv_setpoint_adopted"
 
-# ``unreachable`` and ``firmware`` belong to a thermostat (``trv`` is its entity);
-# the window kinds belong to the room (``trv`` is the room id).
+# ``unreachable``, ``firmware`` and ``schedule_thermostat_off`` belong to a
+# thermostat (``trv`` is its entity); the window kinds belong to the room
+# (``trv`` is the room id).
 IssueKind = Literal[
-    "unreachable", "firmware", "window_open_long", "window_contact_suspect"
+    "unreachable",
+    "firmware",
+    "window_open_long",
+    "window_contact_suspect",
+    "schedule_thermostat_off",
 ]
 
 

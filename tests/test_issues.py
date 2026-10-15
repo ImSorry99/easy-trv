@@ -26,6 +26,10 @@ def raise_firmware(hass, ieee) -> None:
 def test_issue_ids_drop_the_colons_of_the_ieee() -> None:
     assert issues.issue_id_unreachable(IEEE) == "trv_unreachable_00124b00aabb"
     assert issues.issue_id_firmware(IEEE) == "trv_firmware_00124b00aabb"
+    assert (
+        issues.issue_id_schedule_thermostat_off(IEEE)
+        == "schedule_thermostat_off_00124b00aabb"
+    )
     assert issues.issue_id_room_invalid("01ABC") == "room_invalid_01ABC"
     assert issues.issue_id_window_open_long("01ABC") == "window_open_long_01ABC"
     assert (
@@ -170,6 +174,35 @@ async def test_clear_thermostat_issues_except_keeps_only_the_named_thermostats(
     issues.clear_thermostat_issues_except(hass, set())
     assert get(hass, "trv_unreachable_00124b00aabb") is None
     assert get(hass, "trv_firmware_00124b00aabb") is None
+
+
+async def test_schedule_thermostat_off_issue_is_a_warning_naming_room_and_thermostat(
+    hass,
+) -> None:
+    issues.raise_schedule_thermostat_off(
+        hass, IEEE, room="Living", thermostat="Living TRV"
+    )
+    raised = get(hass, "schedule_thermostat_off_00124b00aabb")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_key == "schedule_thermostat_off"
+    assert raised.translation_placeholders == {
+        "room": "Living",
+        "thermostat": "Living TRV",
+    }
+    assert raised.is_fixable is False
+    assert raised.is_persistent is False
+    issues.clear_schedule_thermostat_off(hass, IEEE)
+    assert get(hass, "schedule_thermostat_off_00124b00aabb") is None
+
+
+async def test_clear_thermostat_issues_except_covers_the_schedule_issue(hass) -> None:
+    other = "00:12:4b:00:cc:dd"
+    for ieee in (IEEE, other):
+        issues.raise_schedule_thermostat_off(hass, ieee, room="x", thermostat="y")
+    issues.clear_thermostat_issues_except(hass, {IEEE})
+    assert get(hass, "schedule_thermostat_off_00124b00aabb") is not None
+    assert get(hass, "schedule_thermostat_off_00124b00ccdd") is None
 
 
 async def test_room_invalid_issue_names_the_room_and_the_problem(hass) -> None:

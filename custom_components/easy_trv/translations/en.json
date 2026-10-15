@@ -185,11 +185,15 @@
     },
     "window_open_long": {
       "title": "Window open in {room} for {minutes} minutes",
-      "description": "The window in {room} has been open for {minutes} minutes and its thermostats stay off.\n\nClose the window, or check the window contact if it is already closed. The heating returns by itself when the contact reports closed; this issue disappears then."
+      "description": "The window in {room} has been open for {minutes} minutes and all its thermostats stay off, those on their own schedule included.\n\nClose the window, or check the window contact if it is already closed. The heating returns by itself when the contact reports closed; this issue disappears then. Thermostats that were on their schedule stay off afterwards until you switch them back in ZHA."
     },
     "window_contact_suspect": {
       "title": "The window contact in {room} reports open, but the room is not cooling",
       "description": "The window contact in {room} has reported open for {minutes} minutes, yet the room temperature has not fallen by at least {drop} K since it opened.\n\nCheck whether the contact is stuck or its battery is flat. Easy TRV keeps the thermostats off while the contact reports open; this issue disappears when it reports closed."
+    },
+    "schedule_thermostat_off": {
+      "title": "{thermostat} in {room} stays off after the window was closed",
+      "description": "Easy TRV switched {thermostat} in {room} off while the window was open (or it was too warm outside). The thermostat was running its own weekly schedule. Easy TRV does not restore schedules and never writes \"auto\", so it stays off.\n\nSwitch it back to its schedule in ZHA. This issue disappears as soon as the thermostat reports auto or heat again."
     }
   },
   "options": {

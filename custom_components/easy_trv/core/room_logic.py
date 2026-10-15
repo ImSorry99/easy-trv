@@ -142,6 +142,7 @@ class RoomLogic:
 
         The last command is always exactly one ``SetStatus``.
         """
+        before = state
         match event:
             case Start():
                 state, commands = self._on_start(event, now, state)
@@ -169,7 +170,10 @@ class RoomLogic:
                 state, commands = self._on_hold_event(event, now, state)
             case _:
                 assert_never(event)
-        commands = self._drop_unsupported(state, commands)
+        commands = [
+            *self._drop_unsupported(state, commands),
+            *self._left_off(before, state),
+        ]
         state = self._supersede_pending(state, commands)
         return state, [*commands, self._status(state, now)]
 
@@ -1012,6 +1016,24 @@ class RoomLogic:
                     state, command.trv, replace(current, pending_retry=pending)
                 )
         return state
+
+    def _left_off(self, before: RoomState, after: RoomState) -> list[Command]:
+        """Raise or clear the issue of a thermostat a hold left off, as it changes."""
+        commands: list[Command] = []
+        for trv in self._cfg.trvs:
+            was = before.trvs[trv.entity_id].left_off
+            now = after.trvs[trv.entity_id].left_off
+            if now and not was:
+                commands.append(
+                    RaiseIssue(
+                        "schedule_thermostat_off",
+                        trv.entity_id,
+                        {"room": self._cfg.name},
+                    )
+                )
+            elif was and not now:
+                commands.append(ClearIssue("schedule_thermostat_off", trv.entity_id))
+        return commands
 
     @staticmethod
     def _with_trv(state: RoomState, trv: str, trv_state: TrvState) -> RoomState:

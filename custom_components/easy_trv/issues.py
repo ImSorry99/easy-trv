@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 _UNREACHABLE_PREFIX = "trv_unreachable_"
 _FIRMWARE_PREFIX = "trv_firmware_"
+_SCHEDULE_OFF_PREFIX = "schedule_thermostat_off_"
 _PROFILE_INVALID_PREFIX = "profile_invalid_"
 _ROOM_INVALID_PREFIX = "room_invalid_"
 _WINDOW_OPEN_LONG_PREFIX = "window_open_long_"
@@ -32,6 +33,11 @@ def issue_id_unreachable(ieee: str) -> str:
 def issue_id_firmware(ieee: str) -> str:
     """Return the id of the "firmware lacks a capability" issue."""
     return f"{_FIRMWARE_PREFIX}{ieee.replace(':', '')}"
+
+
+def issue_id_schedule_thermostat_off(ieee: str) -> str:
+    """Return the id of the "thermostat stays off after a hold" issue."""
+    return f"{_SCHEDULE_OFF_PREFIX}{ieee.replace(':', '')}"
 
 
 def issue_id_room_invalid(subentry_id: str) -> str:
@@ -142,6 +148,27 @@ def clear_firmware(hass: HomeAssistant, ieee: str) -> None:
     ir.async_delete_issue(hass, DOMAIN, issue_id_firmware(ieee))
 
 
+def raise_schedule_thermostat_off(
+    hass: HomeAssistant, ieee: str, *, room: str, thermostat: str
+) -> None:
+    """Report a schedule thermostat a hold switched off and that stays off.
+
+    Easy TRV never writes ``auto``, so the person has to switch it back.
+    """
+    _create(
+        hass,
+        issue_id_schedule_thermostat_off(ieee),
+        ir.IssueSeverity.WARNING,
+        "schedule_thermostat_off",
+        {"room": room, "thermostat": thermostat},
+    )
+
+
+def clear_schedule_thermostat_off(hass: HomeAssistant, ieee: str) -> None:
+    """Remove the "thermostat stays off after a hold" issue."""
+    ir.async_delete_issue(hass, DOMAIN, issue_id_schedule_thermostat_off(ieee))
+
+
 def raise_zha_api(hass: HomeAssistant, error: str) -> None:
     """Report that the installed ZHA no longer offers the API we rely on."""
     _create(
@@ -208,18 +235,23 @@ def clear_profile_issues(hass: HomeAssistant, keep: set[str]) -> None:
 def clear_thermostat_issues_except(hass: HomeAssistant, keep_ieees: set[str]) -> None:
     """Remove the thermostat issues of every thermostat not in ``keep_ieees``.
 
-    Covers ``trv_unreachable_*`` and ``trv_firmware_*``. ``keep_ieees`` holds
+    Covers ``trv_unreachable_*``, ``trv_firmware_*`` and
+    ``schedule_thermostat_off_*``. ``keep_ieees`` holds
     the IEEE addresses of the thermostats of all configured rooms, so the issues
     of a thermostat that was removed from its room (or whose room was deleted)
     do not outlive it.
     """
-    wanted = {issue_id_unreachable(ieee) for ieee in keep_ieees} | {
-        issue_id_firmware(ieee) for ieee in keep_ieees
-    }
+    wanted = (
+        {issue_id_unreachable(ieee) for ieee in keep_ieees}
+        | {issue_id_firmware(ieee) for ieee in keep_ieees}
+        | {issue_id_schedule_thermostat_off(ieee) for ieee in keep_ieees}
+    )
     for domain, issue_id in list(ir.async_get(hass).issues):
         if (
             domain == DOMAIN
-            and issue_id.startswith((_UNREACHABLE_PREFIX, _FIRMWARE_PREFIX))
+            and issue_id.startswith(
+                (_UNREACHABLE_PREFIX, _FIRMWARE_PREFIX, _SCHEDULE_OFF_PREFIX)
+            )
             and issue_id not in wanted
         ):
             ir.async_delete_issue(hass, DOMAIN, issue_id)

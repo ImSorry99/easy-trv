@@ -1519,6 +1519,48 @@ async def test_window_contact_opens_and_closes_the_hold(
     assert writes_to(gateway, IEEE_A, SETPOINT)[-1] == 2100
 
 
+async def test_a_schedule_thermostat_stays_off_and_says_so_in_repairs(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    gateway.inject(IEEE_B, MODE, 1)
+    await settle(hass)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    # The hold switches the schedule thermostat off as well.
+    assert writes_to(gateway, IEEE_B, MODE) == [0]
+    raised = issue(hass, "schedule_thermostat_off_0022")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_key == "schedule_thermostat_off"
+    assert raised.translation_placeholders == {
+        "room": "Living",
+        "thermostat": "climate.b",
+    }
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    # The room resumes A but leaves B off, and the issue stays.
+    assert writes_to(gateway, IEEE_A, MODE) == [0, 4]
+    assert writes_to(gateway, IEEE_B, MODE) == [0]
+    assert issue(hass, "schedule_thermostat_off_0022") is not None
+    # The person switches it back to its schedule: the issue resolves itself.
+    gateway.inject(IEEE_B, MODE, 1)
+    await settle(hass)
+    assert issue(hass, "schedule_thermostat_off_0022") is None
+
+
+async def test_start_clears_a_stale_schedule_thermostat_issue(
+    hass, climate_window
+) -> None:
+    issues.raise_schedule_thermostat_off(
+        hass, IEEE_B, room="Living", thermostat="climate.b"
+    )
+    await climate_window.async_start()
+    assert issue(hass, "schedule_thermostat_off_0022") is None
+
+
 @pytest.fixture
 def climate_window(make_controller, config) -> RoomController:
     return make_controller(

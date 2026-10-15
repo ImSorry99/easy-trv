@@ -370,17 +370,53 @@ def test_window_phase_ends_after_30_minutes_and_the_room_value_is_written() -> N
     assert writes(cmds) == []
 
 
-def test_window_phase_expiry_writes_nothing_while_the_room_is_off_or_held() -> None:
+def test_window_phase_expiry_writes_nothing_while_the_room_is_off() -> None:
     st = window_room()
     st, _ = logic().handle(reported(A, 12.0), AFTER, st)
     off, _ = logic().handle(SetRoomMode(RoomMode.OFF), AFTER, st)
     off, cmds = logic().handle(Tick(), AFTER + timedelta(minutes=31), off)
     assert writes(cmds) == []
     assert off.trvs[A].note is None
+
+
+def test_window_phase_expiry_during_a_hold_writes_off() -> None:
+    st = window_room()
+    st, _ = logic().handle(reported(A, 12.0), AFTER, st)
     held = replace(st, window_open=True)
     held, cmds = logic().handle(Tick(), AFTER + timedelta(minutes=31), held)
-    assert writes(cmds) == []
+    assert writes(cmds) == [(A, SetHvacMode("off"))]
     assert held.trvs[A].note is None
+    # An outdoor hold is the same.
+    held = replace(st, outdoor_hold=True)
+    held, cmds = logic().handle(Tick(), AFTER + timedelta(minutes=31), held)
+    assert writes(cmds) == [(A, SetHvacMode("off"))]
+
+
+def test_window_phase_expiry_skips_a_thermostat_that_is_away() -> None:
+    st = window_room()
+    st, _ = logic().handle(reported(A, 12.0), AFTER, st)
+    st = with_trv(st, A, available=False)
+    st, cmds = logic().handle(Tick(), AFTER + timedelta(minutes=31), st)
+    assert writes(cmds) == []
+    assert st.trvs[A].note is None
+
+
+def test_a_heat_report_from_a_thermostat_that_is_away_writes_nothing() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(auto(A), AFTER, st)
+    st = with_trv(st, A, available=False)
+    st, cmds = logic().handle(reported_mode(A, "heat"), AFTER, st)
+    assert writes(cmds) == []
+
+
+def test_window_phase_expiry_turns_a_thermostat_back_on_that_a_hold_switched_off() -> (
+    None
+):
+    st = window_room()
+    st, _ = logic().handle(reported(A, 12.0), AFTER, st)
+    st = with_trv(st, A, reported_mode="off")
+    st, cmds = logic().handle(Tick(), AFTER + timedelta(minutes=31), st)
+    assert writes(cmds) == [(A, SetHvacMode("heat")), (A, SetSetpoint(21.0))]
 
 
 def returning(st: RoomState, at=LATER) -> tuple[RoomState, list]:

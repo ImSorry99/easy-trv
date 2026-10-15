@@ -171,8 +171,9 @@ def expire_window_phase(
 ) -> _Step:
     """End the window phase of thermostats that stayed in it for 30 minutes.
 
-    The room setpoint is then written to them, unless the room is off or held
-    (the resume writes it).
+    The room setpoint is then written to them (and ``heat`` first to one a hold
+    left off), unless the room is off. During a hold they are switched off
+    instead; the resume at its end brings them back.
     """
     if cfg.setpoint_range is None:
         return state, []
@@ -188,10 +189,19 @@ def expire_window_phase(
     if not expired:
         return state, []
     state = replace(state, trvs=trvs)
-    if suspended(state) or state.setpoint is None:
-        return state, []
-    intent = SetSetpoint(state.setpoint)
-    writes = [(trv, intent) for trv in expired if trvs[trv].available]
+    writes: list[tuple[str, Intent]] = []
+    for name in expired:
+        if not trvs[name].available:
+            continue
+        if holding(state):
+            writes.append((name, SetHvacMode("off")))
+            continue
+        if suspended(state) or state.setpoint is None:
+            continue
+        # A hold may have switched it off while it showed its window phase.
+        if trvs[name].reported_mode == "off":
+            writes.append((name, SetHvacMode("heat")))
+        writes.append((name, SetSetpoint(state.setpoint)))
     return write(state, now, writes, capability_of)
 
 
@@ -219,7 +229,10 @@ def resync_trv(  # noqa: PLR0913
     ):
         return state, []
     known = state.trvs[trv]
-    if not known.available or device_driven(known):
+    if not known.available:
+        return state, []
+    # A hold switches off the thermostats that are left alone otherwise.
+    if not held and (device_driven(known) or known.left_off):
         return state, []
     writes: list[tuple[str, Intent]] = []
     if with_mode or held:
@@ -344,25 +357,40 @@ def _observe_mode(
         known, reported_mode=mode, reported_at={**known.reported_at, capability: now}
     )
     if mode not in OWN_MODES:
-        commands: list[Command] = []
-        if known.note is not Note.SCHEDULE:
-            known = replace(known, note=Note.SCHEDULE, note_since=now)
-            note = f"{cfg.name}: {trv} runs its own schedule, leaving it alone"
-            commands.append(Log("info", note))
-        known = replace(known, knob_pending={})
-        return _store(state, trv, known), commands
+        return _on_schedule_report(cfg, state, now, trv, known)
     if known.note is Note.SCHEDULE:
         known = replace(known, note=None, note_since=None)
+    if known.left_off and mode == "off":
+        # The thermostat shows what the hold made of it; it stays that way.
+        return _store(state, trv, known), []
+    if known.left_off and not holding(state):
+        # Switched back on by hand: it rejoins the room like one off its schedule.
+        known = replace(known, left_off=False)
+        was_on_schedule = True
     state = _store(state, trv, known)
-    if was_on_schedule:
-        return resync_trv(cfg, state, now, trv, capability_of)
     settled = echo or capability in known.resync_pending
-    if holding(state) and mode == "heat" and not settled:
-        # The thermostats are meant to be off: a stray ``heat`` is put right.
+    # Back from its schedule, or (held) a stray ``heat`` while the thermostats
+    # are meant to be off: it is brought in line with the room.
+    if was_on_schedule or (holding(state) and mode == "heat" and not settled):
         return resync_trv(cfg, state, now, trv, capability_of)
     if settled or holding(state) or previous is None or _equal(previous, mode):
         return state, []
     return _pend(state, trv, known, capability, mode)
+
+
+def _on_schedule_report(
+    cfg: RoomConfig, state: RoomState, now: datetime, trv: str, known: TrvState
+) -> _Step:
+    """Mark a thermostat that reports its schedule and leave it alone."""
+    commands: list[Command] = []
+    # Back on its schedule: it is no longer one the hold left off.
+    known = replace(known, left_off=False)
+    if known.note is not Note.SCHEDULE:
+        known = replace(known, note=Note.SCHEDULE, note_since=now)
+        note = f"{cfg.name}: {trv} runs its own schedule, leaving it alone"
+        commands.append(Log("info", note))
+    known = replace(known, knob_pending={})
+    return _store(state, trv, known), commands
 
 
 def _pend(

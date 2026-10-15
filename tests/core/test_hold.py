@@ -173,11 +173,16 @@ def test_start_held_without_a_restore_turns_heating_thermostats_off() -> None:
     assert room_writes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
 
 
-def test_start_held_with_thermostats_on_their_schedule_leaves_them_alone() -> None:
-    reported: dict = {A: (19.0, "auto"), B: (19.0, "auto")}
-    _, _, cmds = started_in_hold(None, reported, window_open=True)
+def test_start_held_switches_thermostats_on_their_schedule_off() -> None:
+    reported: dict = {A: (19.0, "auto"), B: (19.0, "heat")}
+    _, st, cmds = started_in_hold(None, reported, window_open=True)
 
-    assert room_writes(cmds) == []
+    assert room_writes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+    assert (st.trvs[A].left_off, st.trvs[B].left_off) == (True, False)
+    raised = [
+        c for c in of_type(cmds, RaiseIssue) if c.kind == "schedule_thermostat_off"
+    ]
+    assert raised == [RaiseIssue("schedule_thermostat_off", A, {"room": "Living"})]
 
 
 @pytest.mark.parametrize("restore", [RestoreRoom(21.0, RoomMode.HEAT, None), None])
@@ -313,10 +318,93 @@ def test_repeated_window_events_change_nothing() -> None:
     assert issue_kinds(cmds) == ([], [])
 
 
-def test_a_schedule_thermostat_gets_no_off_write() -> None:
+def schedule_issues(cmds: list[Command]) -> tuple[list[RaiseIssue], list[ClearIssue]]:
+    return (
+        [c for c in of_type(cmds, RaiseIssue) if c.kind == "schedule_thermostat_off"],
+        [c for c in of_type(cmds, ClearIssue) if c.kind == "schedule_thermostat_off"],
+    )
+
+
+def test_a_schedule_thermostat_is_switched_off_by_the_hold() -> None:
     st = with_trv(heating(), B, note=Note.SCHEDULE)
-    _, cmds = open_window(st)
-    assert executes(cmds) == [(A, SetHvacMode("off"))]
+    st, cmds = open_window(st)
+    assert executes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+    assert st.trvs[B].left_off is True
+    assert st.trvs[A].left_off is False
+    assert st.trvs[B].written_recently["hvac_mode"][-1] == ("off", OPEN_AT)
+    raised, cleared = schedule_issues(cmds)
+    assert raised == [RaiseIssue("schedule_thermostat_off", B, {"room": "Living"})]
+    assert cleared == []
+
+
+def test_a_schedule_thermostat_stays_off_after_the_hold() -> None:
+    st = with_trv(heating(), B, reported_mode="auto")
+    st, _ = open_window(st)
+    st, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert (A, SetHvacMode("heat")) in executes(cmds)
+    assert [
+        e for e in executes(cmds) if e[0] == B and isinstance(e[1], SetHvacMode)
+    ] == []
+    assert [
+        e for e in executes(cmds) if e[0] == B and isinstance(e[1], SetSetpoint)
+    ] == []
+    assert st.trvs[B].left_off is True
+    assert schedule_issues(cmds) == ([], [])
+    # Nothing else the room writes reaches it either.
+    st, cmds = room().handle(SetRoomSetpoint(23.0), LATER, st)
+    assert executes(cmds) == [(A, SetSetpoint(23.0))]
+
+
+def test_the_schedule_issue_clears_when_the_thermostat_reports_auto_or_heat() -> None:
+    st = with_trv(heating(), B, reported_mode="auto")
+    st, _ = open_window(st)
+    st, _ = room().handle(WindowChanged(open=False), LATER, st)
+    # The off it reports is the echo of the hold's write.
+    st, cmds = room().handle(mode_report(B, "off"), LATER, st)
+    assert (st.trvs[B].left_off, executes(cmds)) == (True, [])
+    back, cmds = room().handle(
+        TrvObserved(B, "hvac_mode", None, 1, "report"), LATER, st
+    )
+    assert back.trvs[B].left_off is False
+    assert schedule_issues(cmds) == ([], [ClearIssue("schedule_thermostat_off", B)])
+    heated, cmds = room().handle(mode_report(B, "heat"), LATER, st)
+    assert heated.trvs[B].left_off is False
+    assert schedule_issues(cmds) == ([], [ClearIssue("schedule_thermostat_off", B)])
+    # Heat again: the thermostat is brought to the room's values.
+    assert (B, SetSetpoint(21.0)) in executes(cmds)
+
+
+def test_a_heat_report_of_a_schedule_thermostat_during_the_hold_is_put_right() -> None:
+    st = with_trv(heating(), B, reported_mode="auto")
+    st, _ = open_window(st)
+    st, cmds = room().handle(mode_report(B, "heat"), LATER, st)
+    assert executes(cmds) == [(B, SetHvacMode("off"))]
+    assert st.trvs[B].left_off is True
+    assert schedule_issues(cmds) == ([], [])
+
+
+def test_a_window_phase_thermostat_is_switched_off_and_resumed() -> None:
+    st = heating()
+    st, _ = room().handle(setpoint_report(A, 12.0), T0 + timedelta(minutes=1), st)
+    assert st.trvs[A].note is Note.WINDOW_PHASE
+    st, cmds = open_window(st)
+    assert executes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+    # It shows its window phase, not a schedule: no issue, nothing is left off.
+    assert st.trvs[A].left_off is False
+    assert schedule_issues(cmds) == ([], [])
+    st, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert (A, SetHvacMode("heat")) in executes(cmds)
+    assert (A, SetSetpoint(21.0)) in executes(cmds)
+
+
+def test_an_off_room_still_switches_its_schedule_thermostat_off() -> None:
+    st, _ = room().handle(SetRoomMode(RoomMode.OFF), T0, heating())
+    st = with_trv(st, B, reported_mode="auto")
+    st, cmds = open_window(st)
+    assert executes(cmds) == [(B, SetHvacMode("off"))]
+    assert st.trvs[B].left_off is True
+    st, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert executes(cmds) == []
 
 
 def test_a_room_without_climate_enters_the_hold_and_writes_nothing() -> None:
@@ -580,14 +668,22 @@ def test_a_heat_report_during_the_hold_is_corrected_not_adopted() -> None:
 
 
 def test_leaving_the_window_phase_during_a_hold_writes_off() -> None:
-    st = heating()
-    st, _ = room().handle(setpoint_report(A, 12.0), T0 + timedelta(minutes=1), st)
+    st, _ = open_window(heating())
+    st, _ = room().handle(setpoint_report(A, 12.0), OPEN_AT + timedelta(minutes=1), st)
     assert st.trvs[A].note is Note.WINDOW_PHASE
-    st, cmds = open_window(st)
-    assert executes(cmds) == [(B, SetHvacMode("off"))]
     st, cmds = room().handle(setpoint_report(A, 21.0), LATER, st)
     assert st.trvs[A].note is None
     assert executes(cmds) == [(A, SetHvacMode("off"))]
+
+
+def test_a_window_phase_that_ends_by_itself_during_a_hold_writes_off() -> None:
+    st, _ = open_window(heating())
+    start = OPEN_AT + timedelta(minutes=1)
+    st, _ = room().handle(setpoint_report(A, 12.0), start, st)
+    assert st.trvs[A].note is Note.WINDOW_PHASE
+    st, cmds = room().handle(Tick(), start + timedelta(minutes=30), st)
+    assert executes(cmds) == [(A, SetHvacMode("off"))]
+    assert st.trvs[A].note is None
 
 
 # --- A knob turn during a hold changes the wish, not the mode ---------------------

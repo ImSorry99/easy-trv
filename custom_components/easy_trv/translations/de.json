@@ -185,11 +185,15 @@
     },
     "window_open_long": {
       "title": "Fenster in {room} seit {minutes} Minuten offen",
-      "description": "Das Fenster in {room} ist seit {minutes} Minuten offen, die Thermostate bleiben aus.\n\nSchließe das Fenster oder prüfe den Fensterkontakt, falls es schon zu ist. Die Heizung läuft von selbst wieder an, sobald der Kontakt „geschlossen“ meldet; dieses Problem verschwindet dann."
+      "description": "Das Fenster in {room} ist seit {minutes} Minuten offen, alle Thermostate bleiben aus, auch die, die nach ihrem eigenen Zeitplan heizen.\n\nSchließe das Fenster oder prüfe den Fensterkontakt, falls es schon zu ist. Die Heizung läuft von selbst wieder an, sobald der Kontakt „geschlossen“ meldet; dieses Problem verschwindet dann. Thermostate, die auf ihrem Zeitplan liefen, bleiben danach aus, bis du sie in ZHA zurückstellst."
     },
     "window_contact_suspect": {
       "title": "Fensterkontakt in {room} meldet offen, aber der Raum kühlt nicht ab",
       "description": "Der Fensterkontakt in {room} meldet seit {minutes} Minuten offen, die Raumtemperatur ist seit dem Öffnen aber nicht um mindestens {drop} K gefallen.\n\nPrüfe, ob der Kontakt klemmt oder seine Batterie leer ist. Easy TRV hält die Thermostate aus, solange der Kontakt offen meldet; dieses Problem verschwindet, sobald er „geschlossen“ meldet."
+    },
+    "schedule_thermostat_off": {
+      "title": "{thermostat} in {room} bleibt nach dem Lüften aus",
+      "description": "Easy TRV hat {thermostat} in {room} ausgeschaltet, während das Fenster offen war (oder es draußen zu warm war). Das Thermostat lief nach seinem eigenen Zeitplan. Easy TRV stellt Zeitpläne nicht wieder her und schreibt nie „auto“, deshalb bleibt es aus.\n\nStelle es in ZHA wieder auf seinen Zeitplan zurück. Dieses Problem verschwindet, sobald das Thermostat „auto“ oder „heat“ meldet."
     }
   },
   "options": {

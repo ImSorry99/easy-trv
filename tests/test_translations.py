@@ -200,6 +200,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "settings_migrated",
         "window_open_long",
         "window_contact_suspect",
+        "schedule_thermostat_off",
     }
 
 
@@ -262,6 +263,14 @@ def test_thermostat_issues_name_the_setting_and_the_thermostat(path: Path) -> No
         },
         "trv_firmware": {"room", "setting", "thermostat", "required", "current"},
     }
+    expected_without_setting = {"schedule_thermostat_off": {"room", "thermostat"}}
+    for key, allowed in expected_without_setting.items():
+        used = {
+            name.strip("{}")
+            for text in issues[key].values()
+            for name in PLACEHOLDER.findall(text)
+        }
+        assert used == allowed, f"{key}: {used}"
     for key, allowed in expected.items():
         used = {
             name.strip("{}")
@@ -291,6 +300,23 @@ def test_window_issues_name_the_room_and_the_numbers(path: Path) -> None:
     # The suspect issue also says by how much the room should have cooled.
     suspect = " ".join(issues["window_contact_suspect"].values())
     assert "{drop}" in suspect
+
+
+def test_the_window_hold_texts_say_that_all_thermostats_go_off() -> None:
+    en = load(EN)["issues"]["window_open_long"]["description"]
+    de = load(DE)["issues"]["window_open_long"]["description"]
+    assert "all its thermostats stay off" in en
+    assert "stay off afterwards" in en
+    assert "alle Thermostate bleiben aus" in de
+    assert "bleiben danach aus" in de
+    off = load(EN)["issues"]["schedule_thermostat_off"]
+    assert (
+        off["title"] == "{thermostat} in {room} stays off after the window was closed"
+    )
+    assert "ZHA" in off["description"]
+    assert load(DE)["issues"]["schedule_thermostat_off"]["title"] == (
+        "{thermostat} in {room} bleibt nach dem Lüften aus"
+    )
 
 
 def test_window_issue_titles() -> None:

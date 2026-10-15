@@ -1,8 +1,9 @@
 """Holds: window contacts and the outdoor cut-off.
 
 A hold keeps the thermostats of the room ``off`` while a window is open or the
-outdoor temperature is at or above the cut-off. The room keeps its mode and
-setpoint as its wish; they are written back when the last hold ends. The
+outdoor temperature is at or above the cut-off, those on their own schedule
+included (they stay off afterwards, see ``TrvState.left_off``). The room keeps
+its mode and setpoint as its wish; they are written back when the last hold ends. The
 functions are pure, in the shape of ``RoomLogic.handle``: they take the room
 configuration, the state and the time and return the next state with the
 commands to run.
@@ -226,10 +227,12 @@ def _transition(  # noqa: PLR0913
             Log("debug", f"{cfg.name}: no climate capability, hold writes nothing")
         ]
     if held(state):
-        # An off room has its thermostats off already.
+        trvs = setpoint.writable(cfg, state)
         if state.mode is RoomMode.OFF:
-            return state, []
-        writes = [(trv, SetHvacMode("off")) for trv in setpoint.writable(cfg, state)]
+            # An off room has its thermostats off already, the ones it leaves
+            # alone (schedule, window phase) excepted: a hold switches those off.
+            trvs = [trv for trv in trvs if setpoint.device_driven(state.trvs[trv])]
+        writes = [(trv, SetHvacMode("off")) for trv in trvs]
         return setpoint.write(state, now, writes, capability_of)
     if state.mode is not RoomMode.HEAT:
         return state, []

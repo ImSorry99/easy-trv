@@ -495,6 +495,7 @@ class RoomController:
         for trv in config.trvs:
             issues.clear_unreachable(self._hass, trv.ieee)
             issues.clear_firmware(self._hass, trv.ieee)
+            issues.clear_schedule_thermostat_off(self._hass, trv.ieee)
         issues.clear_window_open_long(self._hass, config.room_id)
         issues.clear_window_contact_suspect(self._hass, config.room_id)
         self._subscriptions.subscribe_all()
@@ -722,6 +723,14 @@ class RoomController:
                     attempts=found["attempts"],
                     error=found["error"],
                 )
+            case "schedule_thermostat_off":
+                ref = self._device_refs[command.trv]
+                issues.raise_schedule_thermostat_off(
+                    self._hass,
+                    ref.ieee,
+                    room=self._config.name,
+                    thermostat=thermostat_name(self._hass, ref.entity_id),
+                )
             case "firmware":
                 ref = self._device_refs[command.trv]
                 thermostat = thermostat_name(self._hass, ref.entity_id)
@@ -761,6 +770,10 @@ class RoomController:
                 )
             case "firmware":
                 issues.clear_firmware(self._hass, self._device_refs[command.trv].ieee)
+            case "schedule_thermostat_off":
+                issues.clear_schedule_thermostat_off(
+                    self._hass, self._device_refs[command.trv].ieee
+                )
             case _:
                 assert_never(command.kind)
 

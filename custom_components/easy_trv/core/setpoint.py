@@ -124,10 +124,13 @@ def resume(
 
     Per writable thermostat: mode ``heat``, the ``resync`` intents (source and
     value, which the room logic knows), then the setpoint. Used whenever the
-    room leaves ``off`` or a hold.
+    room leaves ``off`` or a hold. A thermostat a hold switched off while it ran
+    its schedule stays off (``left_off``).
     """
     writes: list[tuple[str, Intent]] = []
     for trv in writable(cfg, state):
+        if state.trvs[trv].left_off:
+            continue
         writes.append((trv, SetHvacMode("heat")))
         writes.extend((trv, intent) for intent in resync)
         if state.setpoint is not None:
@@ -373,24 +376,27 @@ def _sync_differing(
 ) -> _Step:
     """Write the room values to thermostats known to report something else.
 
-    A thermostat that runs its schedule or shows its window phase is left alone.
+    A thermostat that runs its schedule or shows its window phase is left alone,
+    except that a hold switches it off too.
     """
     writes: list[tuple[str, Intent]] = []
     # What the thermostats should show now: off when the room is off or held.
     mode: SetHvacMode = SetHvacMode("off" if suspended(state) else "heat")
     for trv in writable(cfg, state):
         known = state.trvs[trv]
-        if device_driven(known):
-            continue
+        driven = device_driven(known) or known.left_off
         # A mode nobody has reported counts as differing under a hold only: the
         # window must not leave a thermostat heating; elsewhere nothing is
         # written to a thermostat whose mode is unknown.
         if (
             with_mode
+            and (holding(state) or not driven)
             and known.reported_mode != mode.mode
             and (known.reported_mode is not None or holding(state))
         ):
             writes.append((trv, mode))
+        if driven:
+            continue
         if (
             state.setpoint is not None
             and not suspended(state)
@@ -409,8 +415,10 @@ def write(
 ) -> _Step:
     """Issue the writes in order and remember setpoint and mode as recent writes.
 
-    A thermostat on its own schedule or in its window phase gets no setpoint or
-    mode write, and a capability it lacks is not written at all.
+    A thermostat on its own schedule or in its window phase, or one a hold left
+    off, gets no setpoint or mode write, and a capability it lacks is not written
+    at all. The one exception is the ``off`` of a hold: it reaches every
+    thermostat, those too (see ``_held_off``).
     """
     trvs = dict(state.trvs)
     commands: list[Command] = []
@@ -420,12 +428,28 @@ def write(
         if capability in known.unsupported:
             continue
         if isinstance(intent, SetSetpoint | SetHvacMode):
-            if device_driven(known):
+            hold_off = holding(state) and intent == SetHvacMode("off")
+            if not hold_off and (device_driven(known) or known.left_off):
                 continue
             value = intent.celsius if isinstance(intent, SetSetpoint) else intent.mode
-            trvs[trv] = _remember(known, capability, value, now)
+            known = _remember(known, capability, value, now)
+            trvs[trv] = _held_off(known) if hold_off else known
         commands.append(Execute(trv, intent))
     return replace(state, trvs=trvs), commands
+
+
+def _held_off(known: TrvState) -> TrvState:
+    """Return a thermostat after a hold switched it off.
+
+    One on its schedule stays off after the hold (``left_off``; Easy TRV never
+    writes ``auto``). One in its window phase is an ordinary thermostat from now
+    on, so that the end of the hold brings it back.
+    """
+    if on_schedule(known):
+        known = replace(known, left_off=True)
+    if known.note is Note.WINDOW_PHASE:
+        known = replace(known, note=None, note_since=None)
+    return known
 
 
 def _remember(
