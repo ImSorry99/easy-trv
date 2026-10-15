@@ -1,5 +1,6 @@
 import pytest
 from homeassistant.components.climate import (
+    ATTR_HVAC_MODE,
     ATTR_HVAC_MODES,
     ATTR_MAX_TEMP,
     ATTR_MIN_TEMP,
@@ -22,6 +23,7 @@ from homeassistant.const import (
     SERVICE_TURN_ON,
 )
 from homeassistant.core import State
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.restore_state import async_get as async_restore_data
@@ -301,6 +303,101 @@ async def test_a_new_target_in_frost_protection_switches_to_heat(
     await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
     await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.HEAT)
     assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 19.5
+
+
+async def test_set_temperature_with_the_mode_auto_keeps_the_target_to_return_to(
+    hass, entry
+) -> None:
+    await start(hass, entry)
+
+    await call(
+        hass,
+        SERVICE_SET_TEMPERATURE,
+        **{ATTR_TEMPERATURE: 18.0, ATTR_HVAC_MODE: HVACMode.AUTO},
+    )
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("auto", 5.0)
+
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.HEAT)
+
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 18.0
+
+
+async def test_set_temperature_with_the_mode_off_switches_off_at_the_target(
+    hass, entry, fake_gateway
+) -> None:
+    await start(hass, entry)
+
+    await call(
+        hass,
+        SERVICE_SET_TEMPERATURE,
+        **{ATTR_TEMPERATURE: 20.0, ATTR_HVAC_MODE: HVACMode.OFF},
+    )
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("off", 20.0)
+    assert sorted(writes(fake_gateway, MODE)[-2:]) == [(IEEE_A, OFF), (IEEE_B, OFF)]
+
+
+async def test_set_temperature_with_the_mode_heat_leaves_frost_protection(
+    hass, entry
+) -> None:
+    await start(hass, entry)
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
+
+    await call(
+        hass,
+        SERVICE_SET_TEMPERATURE,
+        **{ATTR_TEMPERATURE: 22.0, ATTR_HVAC_MODE: HVACMode.HEAT},
+    )
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("heat", 22.0)
+
+
+async def test_set_temperature_with_an_unsupported_mode_changes_nothing(
+    hass, entry
+) -> None:
+    await start(hass, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await call(
+            hass,
+            SERVICE_SET_TEMPERATURE,
+            **{ATTR_TEMPERATURE: 18.0, ATTR_HVAC_MODE: HVACMode.COOL},
+        )
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("heat", 21.0)
+
+
+async def test_auto_during_a_window_hold_waits_for_the_window(
+    hass, fake_gateway
+) -> None:
+    thermostats_report_off(hass)
+    hass.states.async_set("binary_sensor.window", "on")
+    entry = make_entry(
+        hass, [room_data(window_contacts=["binary_sensor.window"])], FAST_OPTIONS
+    )
+    await start(hass, entry)
+    fake_gateway.writes.clear()
+
+    await call(hass, SERVICE_SET_HVAC_MODE, hvac_mode=HVACMode.AUTO)
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("auto", 5.0)
+    assert state.attributes["window_open"] is True
+    assert writes(fake_gateway, MODE) == []
+    assert writes(fake_gateway, SETPOINT) == []
+
+    hass.states.async_set("binary_sensor.window", "off")
+    await settle(hass)
+
+    state = hass.states.get(CLIMATE)
+    assert (state.state, state.attributes[ATTR_TEMPERATURE]) == ("auto", 5.0)
+    assert sorted(writes(fake_gateway, MODE)[-2:]) == [(IEEE_A, HEAT), (IEEE_B, HEAT)]
+    assert sorted(writes(fake_gateway, SETPOINT)) == [(IEEE_A, 500), (IEEE_B, 500)]
 
 
 async def test_the_state_follows_the_controller_without_a_service(hass, entry) -> None:

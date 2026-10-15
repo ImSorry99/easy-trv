@@ -123,7 +123,15 @@ async def test_setup_removes_the_operating_mode_select_of_0_4_0(hass, entry) -> 
         suggested_object_id="living_heating_mode",
     )
     # Neighbours that must stay: a select of another integration, and an
-    # entity of this one that merely looks similar.
+    # entity of this one (not a select) whose unique id merely looks similar.
+    lookalike = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{subentry_id}_operating_mode",
+        config_entry=entry,
+        config_subentry_id=subentry_id,
+        suggested_object_id="living_heating_lookalike",
+    )
     other_entry = MockConfigEntry(domain="other")
     other_entry.add_to_hass(hass)
     foreign = registry.async_get_or_create(
@@ -140,6 +148,7 @@ async def test_setup_removes_the_operating_mode_select_of_0_4_0(hass, entry) -> 
     assert registry.async_get(orphan.entity_id) is None
     assert hass.states.get(orphan.entity_id) is None
     assert registry.async_get(foreign.entity_id) is not None
+    assert registry.async_get(lookalike.entity_id) is not None
     assert registry.async_get("climate.living_heating") is not None
     assert registry.async_get("sensor.living_heating_status") is not None
 

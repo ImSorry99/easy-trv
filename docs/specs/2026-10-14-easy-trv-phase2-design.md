@@ -7,7 +7,7 @@ Phase 2 turns Easy TRV from "feeds the external temperature" into "the room's th
 | Plan | Scope | Depends on |
 |---|---|---|
 | **2a** | settings model (global + override), hysteresis always written, adaptive mode, frost protection temperature, device naming, texts, Repairs wording, migration | — |
-| **2b** | room `climate` entity: setpoint, mode heat/off, preset frost, setpoint range, device observation and echo filtering | 2a |
+| **2b** | room `climate` entity: setpoint, modes off/heat/frost protection (HA mode `auto`), setpoint range, device observation and echo filtering | 2a |
 | **2c** | window contacts (off + restore, stuck-contact detection), outdoor cut-off | 2b |
 
 ## 1. Principles carried over and changed
@@ -44,7 +44,7 @@ Settings and their types (built-in default in brackets):
 | `window_detection` | `on` / `off` / `leave` | `on` | 0x6000 |
 | `hysteresis` | `0_2` … `1_0` (no `leave`) | `0_4` | 0x6011, only while adaptive is not `on` |
 | `adaptive_mode` | `on` / `off` / `leave` | `on` | 0x6017 (FW ≥ 1.4.4) |
-| `frost_temperature` | float 4.0–16.0 step 0.5 | 5.0 | 0x6002 and preset `frost` (2b) |
+| `frost_temperature` | float 4.0–16.0 step 0.5 | 5.0 | 0x6002 and the frost protection mode of the room thermostat (2b) |
 | `setpoint_min` / `setpoint_max` | float 4.0–35.0 step 0.5, min < max | 5.0 / 30.0 | 2b |
 | `profile` | `auto` / profile id | `auto` | — |
 | `window_warn_minutes` | int 0–1440 (0 = off) | 120 | 2c |
@@ -106,16 +106,16 @@ One `ClimateEntity` per room, attached to the room device, created only when the
 
 | Property | Value |
 |---|---|
-| `hvac_modes` | `[HEAT, OFF]` |
-| `preset_modes` | `["none", "frost"]` |
-| `supported_features` | `TARGET_TEMPERATURE | TURN_ON | TURN_OFF | PRESET_MODE` |
+| `hvac_modes` | `[OFF, HEAT, AUTO]`; `auto` carries frost protection (Home Assistant has no mode for it) and is labelled Frost protection through the entity translation `entity.climate.room.state.auto` |
+| `preset_modes` | none |
+| `supported_features` | `TARGET_TEMPERATURE | TURN_ON | TURN_OFF` |
 | `min_temp` / `max_temp` / `target_temperature_step` | the *effective range*: the resolved `setpoint_min` / `setpoint_max` intersected with the device limits of every thermostat of the room (the `setpoint` capability declares `min`/`max`/`step` in the profile, 4.0 / 35.0 / 0.5 for the TRVZB); the narrowest limits win. The frost temperature is clamped into the same range. |
 | `current_temperature` | the value last sent to the thermostats (`state.last_written`), else the active sensor's value, else `None` |
 | `target_temperature` | the room setpoint |
 | `hvac_action` | not provided (TRVZB `running_state` is unreliable, wrong in adaptive mode) |
 | extra attributes | `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost`, `initial`), `in_sync` (every thermostat verified at what it should show now (off during a hold)), `thermostats` (list), `window_open` (2c), `outdoor_cutoff` (2c), `note` (`None`, `window_phase`, `schedule`) |
 
-The entity is a `RestoreEntity`: setpoint, mode and preset survive restarts.
+The entity is a `RestoreEntity`: setpoint, mode and frost protection survive restarts (a restored state `auto` counts as frost protection).
 
 No `hvac_action`, no humidity, no fan. The ZHA climate entities of the single thermostats stay; the README recommends hiding them, Easy TRV never touches the entity registry (P5).
 
@@ -123,13 +123,13 @@ No `hvac_action`, no humidity, no fan. The ZHA climate entities of the single th
 
 The room owns setpoint and mode. Rules, in order:
 
-1. **HA writes** (`set_temperature`, `set_hvac_mode`, `set_preset_mode`) set the room value, clamp the setpoint into `[setpoint_min, setpoint_max]` and to the 0.5 step, and are written to every writable thermostat with the Phase 1 pipeline (write → verify after `verify_delay` → retry with backoff → Repairs).
+1. **HA writes** (`set_temperature`, `set_hvac_mode`) set the room value, clamp the setpoint into `[setpoint_min, setpoint_max]` and to the 0.5 step, and are written to every writable thermostat with the Phase 1 pipeline (write → verify after `verify_delay` → retry with backoff → Repairs).
 2. **Knob turns** on one thermostat are adopted: the reported value becomes the room setpoint (clamped; a clamped value is written back to that thermostat too) and is written to the other thermostats. A reported `system_mode` change (heat ↔ off at the device) is adopted the same way. A knob turn while the room is `off` sets the room to `heat` (the person wants heat). Reports are debounced 3 s per thermostat so that turning through 20.5 → 21 → 21.5 produces one write.
 3. **Echoes** are never adopted: each thermostat keeps the set of raw values Easy TRV wrote to it in the last 120 s (`written_recently`, never cleared on timeout); a report whose raw value is in that set is an echo. The adapter also tags its own in-flight writes and verify reads so they never surface as observations.
 4. **Device-driven values** are shown, not adopted and not overwritten:
    - `system_mode = auto` (1) reported → `note: schedule`, this thermostat is excluded from setpoint/mode writes until it reports heat or off again, `in_sync = false`. Easy TRV never writes `auto` in Phase 2.
    - a reported setpoint of exactly 12.0 °C while the room setpoint is not 12.0 and the thermostat's window detection is enabled → `note: window_phase` for that thermostat; nothing is written until the next report differs from 12.0 or 30 min pass (then the room value is written). Spike S5 decides whether this branch is ever taken; the design does not depend on it.
-5. **Preset `frost`** sets the room setpoint to the resolved `frost_temperature` and remembers the previous setpoint; preset `none` restores it. Mode `off` writes `system_mode = off` to every thermostat; the thermostat's own frost protection (0x6002, written in 2a) protects the radiator. While the room is `off`, no external-temperature writes are sent (T6 amended); returning to `heat` resyncs source, value, mode and setpoint.
+5. **Mode `auto` (frost protection)** sets the room setpoint to the resolved `frost_temperature` and remembers the previous setpoint; mode `heat` restores it, and a new target from `set_temperature` ends frost protection at that target (`set_temperature` with an `hvac_mode` sets the target first, then the mode). Mode `off` writes `system_mode = off` to every thermostat; the thermostat's own frost protection (0x6002, written in 2a) protects the radiator. While the room is `off`, no external-temperature writes are sent (T6 amended); returning to `heat` resyncs source, value, mode and setpoint.
 6. **Restart:** the restored room setpoint and mode win; thermostats that report a different value after start get it written. A thermostat that reports a *change* after the first resync is a knob turn (rule 2).
 7. **Verify mismatch** on an observed capability (`setpoint`, `hvac_mode`) with a value that is not in `written_recently` is an *observation* (someone turned the knob between write and read-back): adopt it (rule 2) instead of retrying. Only mismatches that repeat our own value count as failures.
 

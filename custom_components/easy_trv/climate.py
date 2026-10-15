@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.climate import (
+    ATTR_HVAC_MODE,
     ClimateEntity,
     ClimateEntityFeature,
     HVACMode,
@@ -185,9 +186,19 @@ class RoomClimate(ClimateEntity, RestoreEntity):
         return RoomExtraData(controller.frost_return, controller.preset)
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Set the target temperature of the room."""
+        """Set the target temperature of the room, then the mode if one is given.
+
+        Home Assistant passes ``hvac_mode`` on without checking it. The target
+        comes first, so that ``auto`` remembers it as the target to return to
+        and ``off`` keeps it.
+        """
+        mode = kwargs.get(ATTR_HVAC_MODE)
+        if mode is not None:
+            self._valid_mode_or_raise("hvac", mode, self.hvac_modes)
         if (celsius := kwargs.get(ATTR_TEMPERATURE)) is not None:
             await self._controller.async_set_setpoint(float(celsius))
+        if mode is not None:
+            await self.async_set_hvac_mode(HVACMode(mode))
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Switch the room off, to frost protection (``auto``) or to heating.
