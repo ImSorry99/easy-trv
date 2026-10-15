@@ -290,6 +290,8 @@ class RoomState:
     window_open: bool = False
     window_opened_at: datetime | None = None
     window_open_value: float | None = None
+    # The sensor ``window_open_value`` came from (the stuck check needs the same).
+    window_open_sensor: str | None = None
     outdoor_hold: bool = False
     window_warned: bool = False
     window_suspect: bool = False

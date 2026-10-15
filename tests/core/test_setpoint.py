@@ -563,9 +563,10 @@ def test_a_mode_retry_sends_the_current_mode_and_records_it() -> None:
     st, _ = logic().handle(
         result("climate.a", SetHvacMode("off"), Failed("busy")), LATER, st
     )
-    held = replace(st, outdoor_hold=True)
+    # During a hold every thermostat is meant to be off, whatever the room wants.
+    held = replace(st, mode=RoomMode.HEAT, outdoor_hold=True)
     _, cmds = logic().handle(RetryDue("climate.a", "hvac_mode"), LATER, held)
-    assert executes(cmds) == []
+    assert executes(cmds) == [("climate.a", SetHvacMode("off"))]
 
 
 def test_initial_setpoint_ignores_a_thermostat_on_its_schedule() -> None:

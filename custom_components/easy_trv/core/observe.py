@@ -209,22 +209,21 @@ def resync_trv(  # noqa: PLR0913
     Used when it comes back and when it leaves its schedule. The thermostat is
     marked with the written values until the results of exactly those writes
     arrive: what it reports meanwhile may be the old value and must not be
-    mistaken for a knob turn. A room that is off only gets
-    ``off`` written; during a hold nothing (the hold's end resumes), and nothing
-    while the room has neither a setpoint nor been switched off (it has no say yet).
+    mistaken for a knob turn. A room that is off only gets ``off`` written; so
+    does one on hold, whatever ``with_mode`` says (the hold's end resumes). A room
+    that has neither a setpoint nor been switched off has no say yet: nothing.
     """
-    if (
-        cfg.setpoint_range is None
-        or holding(state)
-        or (state.setpoint is None and state.mode is RoomMode.HEAT)
+    held = holding(state)
+    if cfg.setpoint_range is None or (
+        not held and state.setpoint is None and state.mode is RoomMode.HEAT
     ):
         return state, []
     known = state.trvs[trv]
     if not known.available or device_driven(known):
         return state, []
     writes: list[tuple[str, Intent]] = []
-    if with_mode:
-        mode = SetHvacMode("off" if state.mode is RoomMode.OFF else "heat")
+    if with_mode or held:
+        mode = SetHvacMode("off" if suspended(state) else "heat")
         writes.append((trv, mode))
     if not suspended(state) and state.setpoint is not None:
         writes.append((trv, SetSetpoint(state.setpoint)))
@@ -314,7 +313,11 @@ def _leave_window_phase(  # noqa: PLR0913
     The value it shows now is not the user's: it is what the device went back
     to, so it is not adopted.
     """
-    if state.setpoint is not None and abs(value - state.setpoint) <= SAME:
+    if (
+        state.setpoint is not None
+        and abs(value - state.setpoint) <= SAME
+        and not holding(state)
+    ):
         return state, []
     return resync_trv(cfg, state, now, trv, capability_of, with_mode=False)
 
@@ -353,9 +356,11 @@ def _observe_mode(
     state = _store(state, trv, known)
     if was_on_schedule:
         return resync_trv(cfg, state, now, trv, capability_of)
-    if echo or capability in known.resync_pending or holding(state):
-        return state, []
-    if previous is None or _equal(previous, mode):
+    settled = echo or capability in known.resync_pending
+    if holding(state) and mode == "heat" and not settled:
+        # The thermostats are meant to be off: a stray ``heat`` is put right.
+        return resync_trv(cfg, state, now, trv, capability_of)
+    if settled or holding(state) or previous is None or _equal(previous, mode):
         return state, []
     return _pend(state, trv, known, capability, mode)
 
@@ -394,7 +399,7 @@ def _adopt_setpoint(  # noqa: PLR0913
     adopted = clamp(value, cfg.setpoint_range)
     capability = capability_of(SetSetpoint(adopted))
     changed = state.setpoint is None or abs(adopted - state.setpoint) > SAME
-    waking = state.mode is RoomMode.OFF
+    waking = state.mode is RoomMode.OFF and not holding(state)
     behind = [
         other
         for other in writable(cfg, state)
@@ -410,7 +415,8 @@ def _adopt_setpoint(  # noqa: PLR0913
         setpoint_source=f"device:{trv}",
         preset=Preset.NONE,
         frost_return=None,
-        mode=RoomMode.HEAT,
+        # A turn during a hold only changes the wish; the room stays as it was.
+        mode=state.mode if holding(state) else RoomMode.HEAT,
     )
     event = _adopted(cfg, trv, adopted)
     if holding(state):

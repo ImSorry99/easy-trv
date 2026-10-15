@@ -435,10 +435,12 @@ def test_a_returning_thermostat_of_an_off_room_gets_off_and_no_setpoint() -> Non
     assert st.trvs[A].resync_pending == {"hvac_mode": "off"}
 
 
-def test_a_returning_thermostat_gets_nothing_in_a_hold_or_on_its_schedule() -> None:
+def test_a_returning_thermostat_gets_off_in_a_hold_and_nothing_on_its_schedule() -> (
+    None
+):
     st = replace(started_with_setpoint(21.0), window_open=True)
     _, cmds = returning(st)
-    assert writes(cmds) == []
+    assert writes(cmds) == [(A, SetHvacMode("off"))]
     st = started_with_setpoint(21.0)
     st = with_trv(st, A, reported_mode="auto")
     _, cmds = returning(st)
@@ -463,15 +465,18 @@ def test_observations_during_a_hold_update_the_wish_and_write_nothing() -> None:
     st, cmds = logic().handle(reported_mode(A, "heat"), AFTER, st)
     assert of_type(cmds, ScheduleKnobSettle) == []
     assert st.trvs[A].reported_mode == "heat"
+    # The thermostats are meant to be off: the stray heat is corrected.
+    assert writes(cmds) == [(A, SetHvacMode("off"))]
+    assert st.mode is RoomMode.HEAT
 
 
-def test_a_knob_turn_while_off_and_held_turns_the_room_on_without_writes() -> None:
+def test_a_knob_turn_while_off_and_held_keeps_the_room_off() -> None:
     st = started_with_setpoint(21.0)
     st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
     st = replace(st, outdoor_hold=True)
     st, _ = logic().handle(reported(A, 22.0), AFTER, st)
     st, cmds = settle(st)
-    assert st.mode is RoomMode.HEAT
+    assert st.mode is RoomMode.OFF
     assert st.setpoint == 22.0
     assert writes(cmds) == []
 

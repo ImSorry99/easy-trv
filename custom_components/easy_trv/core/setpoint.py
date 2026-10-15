@@ -148,12 +148,13 @@ def leaving_off(cfg: RoomConfig, state: RoomState, mode: RoomMode | None) -> boo
 def current(state: RoomState, intent: Intent) -> Intent | None:
     """Return what a retry of a setpoint or mode write should send now.
 
-    Never an older value than the room's; ``None`` when the room has none.
+    Never an older value than the room's; ``None`` when the room has none. During
+    a hold every thermostat is meant to be off, whatever mode the room wants.
     """
     if isinstance(intent, SetSetpoint):
         return None if state.setpoint is None else SetSetpoint(state.setpoint)
     if isinstance(intent, SetHvacMode):
-        return SetHvacMode("off" if state.mode is RoomMode.OFF else "heat")
+        return SetHvacMode("off" if suspended(state) else "heat")
     return intent
 
 
@@ -167,9 +168,9 @@ def retry(
     """Resend a setpoint or mode write whose retry is due, with the newest value.
 
     A setpoint is not resent while the room is off or on hold (the resume writes
-    it); a mode is not resent during a hold, but ``off`` is while the room is off.
+    it). A mode is: ``off`` while the room is off or on hold.
     """
-    if holding(state) or (isinstance(intent, SetSetpoint) and suspended(state)):
+    if isinstance(intent, SetSetpoint) and suspended(state):
         return state, []
     newest = current(state, intent)
     if newest is None:

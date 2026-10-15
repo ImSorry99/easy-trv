@@ -5,15 +5,19 @@ from custom_components.easy_trv.core.model import (
     ClearIssue,
     Command,
     DebounceElapsed,
+    Failed,
     FireEvent,
+    KnobSettled,
     Log,
     Note,
     OutdoorChanged,
     RaiseIssue,
+    RetryDue,
     RoomConfig,
     RoomMode,
     RoomParams,
     RoomState,
+    ScheduleKnobSettle,
     SensorChanged,
     SetHvacMode,
     SetRoomMode,
@@ -23,6 +27,8 @@ from custom_components.easy_trv.core.model import (
     SetSource,
     Start,
     Tick,
+    TrvAvailabilityChanged,
+    TrvObserved,
     WindowChanged,
 )
 from custom_components.easy_trv.core.room_logic import RoomLogic
@@ -34,6 +40,7 @@ from tests.core.test_room_logic import (
     executes,
     of_type,
     reading,
+    result,
     with_trv,
 )
 
@@ -378,3 +385,159 @@ def test_unavailable_outdoor_sensor_ends_the_outdoor_hold() -> None:
     st, cmds = room().handle(OutdoorChanged(None), OPEN_AT, st)
     assert of_type(cmds, Log) == []
     assert executes(cmds) == []
+
+
+# --- The thermostats are off for the whole hold --------------------------------
+
+LATER = OPEN_AT + timedelta(minutes=10)
+
+
+def setpoint_report(trv: str, value: float) -> TrvObserved:
+    return TrvObserved(trv, "setpoint", value, round(value * 100), "report")
+
+
+def mode_report(trv: str, mode: str) -> TrvObserved:
+    return TrvObserved(trv, "hvac_mode", mode, 4 if mode == "heat" else 0, "report")
+
+
+def test_a_failed_off_write_is_retried_as_off_during_the_hold() -> None:
+    st, _ = open_window(heating())
+    st, cmds = room().handle(
+        result(A, SetHvacMode("off"), Failed("timeout")), OPEN_AT, st
+    )
+    assert st.trvs[A].pending_retry["hvac_mode"] == SetHvacMode("off")
+    st, cmds = room().handle(RetryDue(A, "hvac_mode"), LATER, st)
+    assert executes(cmds) == [(A, SetHvacMode("off"))]
+    assert st.trvs[A].written_recently["hvac_mode"][-1] == ("off", LATER)
+
+
+def test_a_setpoint_retry_is_still_suppressed_during_the_hold() -> None:
+    st = heating()
+    st, _ = room().handle(result(A, SetSetpoint(21.0), Failed("busy")), OPEN_AT, st)
+    st, _ = open_window(st)
+    _, cmds = room().handle(RetryDue(A, "setpoint"), LATER, st)
+    assert executes(cmds) == []
+
+
+def test_a_thermostat_that_returns_during_the_hold_is_turned_off() -> None:
+    st = with_trv(heating(), B, available=False)
+    st, cmds = open_window(st)
+    assert executes(cmds) == [(A, SetHvacMode("off"))]
+    st, cmds = room().handle(TrvAvailabilityChanged(B, available=True), LATER, st)
+    assert executes(cmds) == [(B, SetHvacMode("off"))]
+    assert st.trvs[B].resync_pending == {"hvac_mode": "off"}
+    # At the end of the hold it is brought back with the others.
+    _, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert (B, SetHvacMode("heat")) in executes(cmds)
+    assert (B, SetSetpoint(21.0)) in executes(cmds)
+
+
+def test_a_heat_report_during_the_hold_is_corrected_not_adopted() -> None:
+    st, _ = open_window(heating())
+    st, cmds = room().handle(mode_report(A, "heat"), LATER, st)
+    assert executes(cmds) == [(A, SetHvacMode("off"))]
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert st.mode is RoomMode.HEAT
+    assert st.setpoint == 21.0
+    # Its off report afterwards is the echo of the correction.
+    st, cmds = room().handle(mode_report(A, "off"), LATER, st)
+    assert executes(cmds) == []
+    # An off report that is no echo needs no correction either.
+    st, cmds = room().handle(mode_report(B, "off"), LATER + timedelta(minutes=10), st)
+    assert executes(cmds) == []
+    assert of_type(cmds, ScheduleKnobSettle) == []
+
+
+def test_leaving_the_window_phase_during_a_hold_writes_off() -> None:
+    st = heating()
+    st, _ = room().handle(setpoint_report(A, 12.0), T0 + timedelta(minutes=1), st)
+    assert st.trvs[A].note is Note.WINDOW_PHASE
+    st, cmds = open_window(st)
+    assert executes(cmds) == [(B, SetHvacMode("off"))]
+    st, cmds = room().handle(setpoint_report(A, 21.0), LATER, st)
+    assert st.trvs[A].note is None
+    assert executes(cmds) == [(A, SetHvacMode("off"))]
+
+
+# --- A knob turn during a hold changes the wish, not the mode ---------------------
+
+
+def knob_turn_during_hold(st: RoomState, value: float = 23.5) -> RoomState:
+    st, _ = open_window(st)
+    st, _ = room().handle(
+        setpoint_report(A, value), OPEN_AT + timedelta(seconds=10), st
+    )
+    st, cmds = room().handle(
+        KnobSettled(A, "setpoint"), OPEN_AT + timedelta(seconds=20), st
+    )
+    assert executes(cmds) == []
+    return st
+
+
+def test_a_knob_turn_during_a_hold_keeps_an_off_room_off() -> None:
+    st, _ = room().handle(SetRoomMode(RoomMode.OFF), T0, heating())
+    st = knob_turn_during_hold(st)
+    assert st.mode is RoomMode.OFF
+    assert st.setpoint == 23.5
+    st, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert executes(cmds) == []
+    assert st.mode is RoomMode.OFF
+    assert st.setpoint == 23.5
+
+
+def test_a_knob_turn_during_a_hold_is_written_at_the_close_of_a_heating_room() -> None:
+    st = knob_turn_during_hold(heating())
+    assert st.mode is RoomMode.HEAT
+    st, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert (A, SetSetpoint(23.5)) in executes(cmds)
+    assert (B, SetSetpoint(23.5)) in executes(cmds)
+
+
+# --- Stuck check: sensor identity, sensor loss -----------------------------------
+
+
+def test_the_stuck_check_is_skipped_when_another_sensor_is_active() -> None:
+    st, _ = open_window(heating())
+    assert st.window_open_sensor == "sensor.t1"
+    at = OPEN_AT + timedelta(minutes=30)
+    only_t2 = {"sensor.t2": st.readings["sensor.t2"]}
+    st = replace(st, readings=only_t2)  # t1 is gone, t2 (20.0) takes over
+    st, cmds = room().handle(Tick(), at, st)
+    assert of_type(cmds, RaiseIssue) == []
+    assert st.window_suspect is False
+
+
+def test_the_stuck_check_fires_once_the_sensor_is_usable_again() -> None:
+    st, _ = open_window(heating())
+    readings = st.readings
+    st = replace(st, readings={})
+    at = OPEN_AT + timedelta(minutes=40)
+    st, cmds = room().handle(Tick(), at, st)
+    assert of_type(cmds, RaiseIssue) == []
+    st = replace(st, readings=readings)
+    st, cmds = room().handle(Tick(), at + timedelta(minutes=1), st)
+    assert [c.kind for c in of_type(cmds, RaiseIssue)] == ["window_contact_suspect"]
+    st, cmds = room().handle(Tick(), at + timedelta(minutes=2), st)
+    assert of_type(cmds, RaiseIssue) == []
+
+
+# --- Boundaries and an off room -------------------------------------------------
+
+
+def test_the_outdoor_deadband_boundaries_are_exact() -> None:
+    st = heating()
+    st, _ = room().handle(OutdoorChanged(16.0), OPEN_AT, st)
+    assert st.outdoor_hold is True
+    st, _ = room().handle(OutdoorChanged(15.5), OPEN_AT, st)
+    assert st.outdoor_hold is True
+    st, _ = room().handle(OutdoorChanged(15.49), OPEN_AT, st)
+    assert st.outdoor_hold is False
+
+
+def test_warning_and_stuck_check_also_run_in_an_off_room() -> None:
+    st, _ = room().handle(SetRoomMode(RoomMode.OFF), T0, heating())
+    st, _ = open_window(st)
+    st, cmds = room().handle(Tick(), OPEN_AT + timedelta(minutes=30), st)
+    assert [c.kind for c in of_type(cmds, RaiseIssue)] == ["window_contact_suspect"]
+    st, cmds = room().handle(Tick(), OPEN_AT + timedelta(minutes=120), st)
+    assert [c.kind for c in of_type(cmds, RaiseIssue)] == ["window_open_long"]

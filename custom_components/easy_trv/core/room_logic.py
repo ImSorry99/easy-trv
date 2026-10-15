@@ -293,10 +293,14 @@ class RoomLogic:
         """Route a window or outdoor change to ``hold``."""
         cfg, capability_of = self._cfg, self._capability_of
         if isinstance(event, WindowChanged):
-            active = self._active(state, now)
-            value = None if active is None else active.value
             return hold.on_window(
-                cfg, state, now, event.open, value, capability_of, self._source_intents
+                cfg,
+                state,
+                now,
+                event.open,
+                self._active_pair(state, now),
+                capability_of,
+                self._source_intents,
             )
         return hold.on_outdoor(
             cfg, state, now, event.celsius, capability_of, self._source_intents
@@ -307,9 +311,8 @@ class RoomLogic:
         state, phase = observe.expire_window_phase(
             self._cfg, state, now, self._capability_of
         )
-        active = self._active(state, now)
         state, holds = hold.on_tick(
-            self._cfg, state, now, None if active is None else active.value
+            self._cfg, state, now, self._active_pair(state, now)
         )
         state, commands = self._on_tick_sensors(now, state)
         return state, [*phase, *holds, *commands]
@@ -1017,6 +1020,11 @@ class RoomLogic:
         if reading is None or reading.value is None:
             return None
         return _Active(reading.entity_id, reading.value)
+
+    def _active_pair(self, state: RoomState, now: datetime) -> tuple[str, float] | None:
+        """Return the active sensor and its value, for the window check."""
+        active = self._active(state, now)
+        return None if active is None else (active.entity_id, active.value)
 
     def _differs(self, state: RoomState, value: float) -> bool:
         """Return whether ``value`` is at least ``min_delta`` from the last write."""

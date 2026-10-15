@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from datetime import datetime
 
+# The active sensor and its value.
+type _Reading = tuple[str, float]
 type _Step = tuple[RoomState, list[Command]]
 type _Capabilities = Callable[[Intent], str]
 # Source and value intents that bring a thermostat up to date (room logic knows).
@@ -54,13 +56,13 @@ def on_window(  # noqa: PLR0913
     state: RoomState,
     now: datetime,
     open_: bool,  # noqa: FBT001
-    active: float | None,
+    active: _Reading | None,
     capability_of: _Capabilities,
     resync: _Resync,
 ) -> _Step:
     """Take the window contacts changing between open and closed.
 
-    ``active`` is the value of the active sensor, remembered at opening for the
+    ``active`` is the active sensor and its value, remembered at opening for the
     stuck-contact check.
     """
     if open_ is state.window_open:
@@ -71,7 +73,8 @@ def on_window(  # noqa: PLR0913
             state,
             window_open=True,
             window_opened_at=now,
-            window_open_value=active,
+            window_open_sensor=None if active is None else active[0],
+            window_open_value=None if active is None else active[1],
             window_warned=False,
             window_suspect=False,
             window_checked=False,
@@ -82,6 +85,7 @@ def on_window(  # noqa: PLR0913
             state,
             window_open=False,
             window_opened_at=None,
+            window_open_sensor=None,
             window_open_value=None,
             window_warned=False,
             window_suspect=False,
@@ -149,7 +153,7 @@ def on_outdoor(  # noqa: PLR0913
 
 
 def on_tick(
-    cfg: RoomConfig, state: RoomState, now: datetime, active: float | None
+    cfg: RoomConfig, state: RoomState, now: datetime, active: _Reading | None
 ) -> _Step:
     """Raise the long-open warning and run the stuck-contact check when due."""
     opened = state.window_opened_at
@@ -174,9 +178,11 @@ def on_tick(
         and elapsed >= check
         and before is not None
         and active is not None
+        # Only the sensor of the opening can tell whether the room cooled.
+        and active[0] == state.window_open_sensor
     ):
         state = replace(state, window_checked=True)
-        if before - active < cfg.window_check_drop - _TOLERANCE:
+        if before - active[1] < cfg.window_check_drop - _TOLERANCE:
             state = replace(state, window_suspect=True)
             commands.append(
                 RaiseIssue(
