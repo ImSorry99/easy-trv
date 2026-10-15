@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Frost protection is selected in the room thermostat's mode list again (HA mode `auto`, shown as Frost protection); the separate operating mode select is removed. Automations using `select.select_option` on `select.<room>_heating_mode` switch to `climate.set_hvac_mode` with `auto`/`heat`/`off`
+
 ## [0.4.0] - 2026-10-15
 
 ### Added

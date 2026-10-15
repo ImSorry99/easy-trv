@@ -120,10 +120,10 @@ Needs sections 2 and 3 done: Wohnzimmer (three thermostats) and Schlafzimmer run
 
 ### 6.1 The climate entity
 
-1. Expected: `climate.wohnzimmer_heating` and `climate.schlafzimmer_heating` exist on the room devices, modes heat and off, presets none and frost. Attributes: `setpoint_source`, `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff`, `note`; no `hvac_action`.
+1. Expected: `climate.wohnzimmer_heating` and `climate.schlafzimmer_heating` exist on the room devices, modes off, heat and frost protection (HA mode `auto`, shown as Frost protection), no presets and no `select.<room>_heating_mode`. Attributes: `setpoint_source`, `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff`, `note`; no `hvac_action`.
 2. Set the target to 21.5 °C. Expected: after the verify delay all three living-room thermostats read `0x0012 = 2150`, `in_sync` is true again, `setpoint_source` is `ha`, the debug log shows one setpoint write per thermostat and `-> ok`.
 3. Try 3 °C and 36 °C in the more-info dialog or `climate.set_temperature`. Expected: the slider stops at 5 and 30 (the room's range); Home Assistant rejects a service call outside the range.
-4. Preset **frost**. Expected: target 5 °C (the frost temperature), `setpoint_source` `frost`. Preset **none**: back to 21.5 °C. Repeat with frost on, then restart Home Assistant: the room comes back in frost and **none** still returns to 21.5 °C.
+4. Mode **Frost protection** (`auto`). Expected: state `auto`, target 5 °C (the frost temperature), `setpoint_source` `frost`. Mode **heat**: back to 21.5 °C. Set a new target (19 °C) while on frost protection: expected the mode switches to `heat` at 19 °C. Repeat with frost on, then restart Home Assistant: the room comes back as `auto` and **heat** still returns to the target from before.
 5. Mode **off**. Expected: all three read `0x001C = 0`, no `0x600D` line appears in the debug log while off (for S1). Mode **heat**: `0x001C = 4`, source, room temperature and target (`0x0012 = 2150`) follow.
 6. Restart Home Assistant with the room at 22 °C: expected the room returns at 22 °C and heat, and no setpoint or mode write is sent unless a thermostat reported something else.
 7. Put one thermostat into its schedule (`auto`, `0x001C = 1`, in ZHA or on the device). Expected after its report: `note` is `schedule`, the room Status sensor lists it under `schedule_thermostats`, `in_sync` false, and a target change in HA does not touch that thermostat (the others get it). Set it back to heat: it is brought up to the room's target.

@@ -2,7 +2,7 @@
 
 Easy TRV is a Home Assistant integration that lets Sonoff TRVZB radiator thermostats regulate on the temperature of the room instead of the temperature at the radiator. It groups thermostats and temperature sensors into rooms, writes the room temperature to the thermostats' own external-sensor input, and checks by read-back that every write arrived.
 
-It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one status sensor, one thin room thermostat (`climate`) that sets the same target and mode on all its thermostats, and an operating mode (`select`: off, frost protection, heating enabled).
+It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one status sensor, one thin room thermostat (`climate`) that sets the same target and mode (off, heat, frost protection) on all its thermostats.
 
 Status: version 0.4.0 is released (room thermostat with operating mode, window contacts, outdoor cut-off); see the [`CHANGELOG`](CHANGELOG.md) for what each version brought. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
 
@@ -61,7 +61,7 @@ Every setting exists in three layers, and the most specific one that is set wins
 | Thermostat's open-window detection | detection on, detection off, leave as set in the thermostat | on | Switches the thermostat's own detection (see below). |
 | Hysteresis | 0.2, 0.4, 0.6, 0.8 or 1.0 K | 0.4 K | The thermostat's temperature hysteresis. Needs firmware 1.3.0 or newer. Written only while the adaptive mode is not on (see below). |
 | Adaptive mode | adaptive on, adaptive off, leave as set in the thermostat | on | The thermostat adapts to the room itself. Needs firmware 1.4.4 or newer. |
-| Frost protection temperature | 4 to 16 °C | 5 | The temperature the thermostat keeps as its own frost protection. It is also the target of the room's operating mode **Frost protection**. |
+| Frost protection temperature | 4 to 16 °C | 5 | The temperature the thermostat keeps as its own frost protection. It is also the target of the room thermostat's mode **Frost protection**. |
 | Setpoint range | automatic (from the thermostat), manual | automatic | The range of the room thermostat's target (see [Room thermostat](#room-thermostat)). Automatic takes the minimum and maximum target temperature the thermostats show in Home Assistant when the room is set up. |
 | Minimum / maximum target temperature | 4 to 35 °C in 0.5 K steps, minimum below maximum | 5 / 30 | Only used with the setpoint range **manual**. |
 | Delay before a window counts as open (seconds) | 0 (immediately) to 600 | 30 | A contact must stay open this long before the heating is switched off; closing is never delayed (see [Window contacts](#window-contacts)). |
@@ -87,26 +87,28 @@ Hide the ZHA climate entities of the single thermostats (entity settings > Visib
 
 Each room has one `climate.<room>_heating` (for example `climate.living_room_heating`) as soon as the room's profile can set the target temperature and the mode. The shipped profile can. It is a pass-through: it stores what a person asked for and writes it to every thermostat of the room, with the same verified writes as everything else. It does not regulate and it shows no `hvac_action`.
 
-- **Modes:** `heat` and `off`. Off switches every thermostat off (their own frost protection keeps the radiator safe) and stops the external-temperature writes; heat resyncs mode, source, temperature and target.
-- **No presets.** Frost protection is an operating mode of the room (below); in it the room thermostat shows `heat` at the frost protection temperature.
+- **Modes:** **Off** (`off`), **Heat** (`heat`) and **Frost protection** (`auto`), see [Modes](#modes). Off switches every thermostat off (their own frost protection keeps the radiator safe) and stops the external-temperature writes; heat resyncs mode, source, temperature and target.
+- **No presets.** Frost protection is a mode of the room thermostat, not a preset.
 - **Range:** with the setpoint range **automatic** (the default), the `min_temp` and `max_temp` the thermostats show in Home Assistant when the room is set up; with several thermostats the narrowest range that all of them accept. A thermostat that shows no limits is left out, and without any the profile's range applies (4 to 35 °C for the TRVZB). With **manual**, the room's minimum and maximum target temperature. Either way the range is narrowed to the profile's limits, in 0.5 K steps for the TRVZB. A changed limit on a thermostat is read at the next reload of the integration.
 - **`current_temperature`:** the value last sent to the thermostats, else the active sensor's.
 - **Attributes:** `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost` or `initial`), `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff` and `note`.
 - **`in_sync`** is true when every thermostat is verified at what it should show now (off during a hold).
 
-### Operating mode
+### Modes
 
-Each room with a room thermostat also has `select.<room>_heating_mode` (for example `select.living_room_heating_mode`, named **Operating mode** / **Betriebsart**) with three options:
+The mode list of the room thermostat has three entries:
 
-| Option | What the room does |
-|---|---|
-| `off` (Off / Aus) | The room thermostat is `off`: every thermostat is switched off. |
-| `frost` (Frost protection / Frostschutz) | The room heats only to its frost protection temperature (default 5 °C, can be set per room). The target from before is remembered. |
-| `heat` (Heating enabled / Heizbetrieb freigegeben) | The room heats to its target. Coming from frost protection, the target from before is back. |
+| Mode | HA mode | What the room does |
+|---|---|---|
+| Off / Aus | `off` | Every thermostat is switched off. |
+| Heat / Heizen | `heat` | The room heats to its target. Coming from frost protection, the target from before is back. |
+| Frost protection / Frostschutz | `auto` | The room heats only to its frost protection temperature (default 5 °C, can be set per room). The target from before is remembered. |
 
-Off ends frost protection, so heating enabled afterwards brings back the target from before, not 5 °C. A new target, in Home Assistant or at a knob, ends frost protection too (the selection shows `heat`). A window or the outdoor cut-off holds the room as before; the selection shows what the room returns to. The operating mode survives a restart.
+Home Assistant offers only its fixed modes, so frost protection sits in the slot of `auto` and is shown as **Frost protection** (with its own icon where the frontend uses state icons). For voice assistants, HomeKit and automations the frost mode is therefore the HA mode `auto`: use `climate.set_hvac_mode` with `auto` for frost protection, `heat` to heat and `off` to switch off. Easy TRV does not use the thermostat's own schedule, which `auto` otherwise means on a thermostat.
 
-**Update note.** Up to 0.3.0 frost protection was the preset `frost` of the room thermostat. Automations that call `climate.set_preset_mode` need `select.select_option` on the room's operating mode instead. A room that was on frost protection keeps it after the update.
+Off ends frost protection, so heat afterwards brings back the target from before, not 5 °C. A new target, in Home Assistant or at a knob, ends frost protection too (the mode shows `heat` at the new target). A window or the outdoor cut-off holds the room as before; the mode shows what the room returns to. The mode survives a restart.
+
+**Update note.** Up to 0.3.0 frost protection was the preset `frost` of the room thermostat; 0.4.0 moved it to `select.<room>_heating_mode`. Automations that call `climate.set_preset_mode` or `select.select_option` on that select now call `climate.set_hvac_mode` with `auto` (frost protection), `heat` or `off`. The select entity is removed at the first start after the update. A room that was on frost protection keeps it.
 
 <details>
 <summary>Knob turns, schedules and restarts</summary>
@@ -116,7 +118,7 @@ Off ends frost protection, so heating enabled afterwards brings back the target 
 - **During an open window or the outdoor cut-off** a knob turn changes only the wish: the thermostats stay off (the room thermostat keeps showing the wish) and the new target is written when the hold ends.
 - **Schedule.** A thermostat that is switched to its weekly schedule (`auto`) is shown (`note: schedule`, listed in the status sensor), left alone and excluded from the room's writes until it is back on `heat` or `off`, when it is brought up to date. Easy TRV never writes `auto`. A window or the outdoor cut-off is the exception: it switches such a thermostat off too (also one that is switched to its schedule during the hold), and it stays off afterwards (see [Window contacts](#window-contacts)).
 - **Open-window phase of the thermostat.** A thermostat that shows exactly 12 °C while the room wants something else and the room's open-window detection is on is treated as being in its own window phase (`note: window_phase`). It is left alone until it shows another value or 30 minutes have passed.
-- **Restart.** The remembered target, mode and operating mode win; a thermostat that reports something else is corrected. A thermostat whose mode is not known yet is only switched off, and only when a hold is active. If the room thermostat entity is disabled in Home Assistant, there is nothing to restore from: the room starts as on a first start.
+- **Restart.** The remembered target and mode (including frost protection) win; a thermostat that reports something else is corrected. A thermostat whose mode is not known yet is only switched off, and only when a hold is active. If the room thermostat entity is disabled in Home Assistant, there is nothing to restore from: the room starts as on a first start.
 - **First start** (nothing remembered): the room takes the target of the first thermostat that reports one (`setpoint_source: initial`) and writes it to the others, so the setpoints are unified. It starts off only if every thermostat reports off; otherwise the thermostats that report off are switched on.
 
 </details>
