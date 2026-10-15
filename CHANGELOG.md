@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- The global options form shows every number with its value, the built-in default until it is changed (for example 30 s window delay instead of an empty field); a number left at its default is not stored
+- The sections of the global options form start collapsed
+
 ### Fixed
 
 - A room whose profile is left at 'global' could not be set up ('profile 'global' does not exist'); it now uses the global profile choice

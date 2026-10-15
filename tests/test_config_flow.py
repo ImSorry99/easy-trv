@@ -1565,7 +1565,7 @@ async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
         "windows_outdoor",
     ]
     for group in fields(result).values():
-        assert group.options == {"collapsed": False}
+        assert group.options == {"collapsed": True}
     assert list(section_fields(result, "writes")) == [
         *WRITES,
         "sensor_timeout_minutes",
@@ -1590,11 +1590,30 @@ async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
     ]
 
 
-async def test_options_form_suggests_only_saved_numbers(hass, entry) -> None:
+async def test_options_form_shows_the_saved_number_else_the_default(
+    hass, entry
+) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    # Nothing saved: the numbers stay empty, the selects start at the defaults.
-    assert suggested_values(result, "writes") == {}
-    assert suggested_values(result, "thermostat") == {}
+    # Nothing saved: the numbers and the selects show the built-in defaults.
+    assert suggested_values(result, "writes") == {
+        "refresh_minutes": 20,
+        "verify_delay_seconds": 10,
+        "max_attempts": 3,
+        "min_delta_kelvin": 0.1,
+        "sensor_timeout_minutes": 120,
+    }
+    assert suggested_values(result, "thermostat") == {"frost_temperature": 5.0}
+    assert suggested_values(result, "room_thermostat") == {
+        "setpoint_min": 5.0,
+        "setpoint_max": 30.0,
+    }
+    # No outdoor sensor and no cut-off are set by default.
+    assert suggested_values(result, "windows_outdoor") == {
+        "window_open_delay_seconds": 30,
+        "window_warn_minutes": 120,
+        "window_check_minutes": 30,
+        "window_check_drop_kelvin": 0.3,
+    }
     assert defaults(result, "thermostat") == {
         "window_detection": const.DEFAULT_WINDOW_DETECTION,
         "hysteresis": const.DEFAULT_HYSTERESIS,
@@ -1623,7 +1642,7 @@ async def test_options_form_suggests_only_saved_numbers(hass, entry) -> None:
         {"refresh_minutes": 45, "hysteresis": "0_8", "frost_temperature": 9.0},
     )
     result = await hass.config_entries.options.async_init(saved.entry_id)
-    assert suggested_values(result, "writes") == {"refresh_minutes": 45}
+    assert suggested_values(result, "writes")["refresh_minutes"] == 45
     assert defaults(result, "thermostat")["hysteresis"] == "0_8"
     assert suggested_values(result, "thermostat") == {"frost_temperature": 9.0}
 
@@ -1642,13 +1661,12 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert set(entry.options) == {"window_detection", "hysteresis", "adaptive_mode"}
 
-    # Opening and saving the form again does not turn the defaults into options.
+    # Saving the defaults the form shows does not turn them into options.
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert suggested_values(result, "writes") == {}
-    assert suggested_values(result, "thermostat") == {}
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], submitted
-    )
+    shown = options_input()
+    for name in ("writes", "thermostat", "room_thermostat", "windows_outdoor"):
+        shown[name].update(suggested_values(result, name))
+    result = await hass.config_entries.options.async_configure(result["flow_id"], shown)
     assert set(entry.options) == {"window_detection", "hysteresis", "adaptive_mode"}
 
 
@@ -1736,8 +1754,10 @@ async def test_options_empty_number_falls_back_to_default(hass, entry) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert "refresh_minutes" not in entry.options
     assert "frost_temperature" not in entry.options
-    assert entry.options["max_attempts"] == 3
+    # A number left at its default is not stored either.
+    assert "max_attempts" not in entry.options
     settings = resolve_settings(entry.options, {})
+    assert settings.max_attempts == const.DEFAULT_MAX_ATTEMPTS
     assert settings.refresh_minutes == const.DEFAULT_REFRESH_MINUTES
     assert settings.frost_temperature == const.DEFAULT_FROST_TEMPERATURE
 
@@ -1870,9 +1890,15 @@ async def test_options_form_suggests_the_saved_window_and_outdoor_values(hass) -
     )
     result = await hass.config_entries.options.async_init(saved.entry_id)
 
-    assert suggested_values(result, "room_thermostat") == {"setpoint_max": 26.0}
+    assert suggested_values(result, "room_thermostat") == {
+        "setpoint_min": 5.0,
+        "setpoint_max": 26.0,
+    }
     assert suggested_values(result, "windows_outdoor") == {
+        "window_open_delay_seconds": 30,
+        "window_warn_minutes": 120,
         "window_check_minutes": 0,
+        "window_check_drop_kelvin": 0.3,
         "outdoor_sensor": "sensor.outdoor",
         "outdoor_cutoff_celsius": 15.0,
     }
