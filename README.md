@@ -62,7 +62,8 @@ Every setting exists in three layers, and the most specific one that is set wins
 | Hysteresis | 0.2, 0.4, 0.6, 0.8 or 1.0 K | 0.4 K | The thermostat's temperature hysteresis. Needs firmware 1.3.0 or newer. Written only while the adaptive mode is not on (see below). |
 | Adaptive mode | adaptive on, adaptive off, leave as set in the thermostat | on | The thermostat adapts to the room itself. Needs firmware 1.4.4 or newer. |
 | Frost protection temperature | 4 to 16 °C | 5 | The temperature the thermostat keeps as its own frost protection. It is also the target of the room's operating mode **Frost protection**. |
-| Minimum / maximum target temperature | 4 to 35 °C in 0.5 K steps, minimum below maximum | 5 / 30 | The range of the room thermostat's target (see [Room thermostat](#room-thermostat)). |
+| Setpoint range | automatic (from the thermostat), manual | automatic | The range of the room thermostat's target (see [Room thermostat](#room-thermostat)). Automatic takes the minimum and maximum target temperature the thermostats show in Home Assistant when the room is set up. |
+| Minimum / maximum target temperature | 4 to 35 °C in 0.5 K steps, minimum below maximum | 5 / 30 | Only used with the setpoint range **manual**. |
 | Delay before a window counts as open (seconds) | 0 (immediately) to 600 | 30 | A contact must stay open this long before the heating is switched off; closing is never delayed (see [Window contacts](#window-contacts)). |
 | Open-window warning (minutes) | 0 (never) to 1440 | 120 | A Repairs issue after a window has been open this long. |
 | Window contact check (minutes) | 0 (off) to 240 | 30 | After this long, check whether the room cools (see [Window contacts](#window-contacts)). |
@@ -87,7 +88,7 @@ Each room has one `climate.<room>_heating` (for example `climate.living_room_hea
 
 - **Modes:** `heat` and `off`. Off switches every thermostat off (their own frost protection keeps the radiator safe) and stops the external-temperature writes; heat resyncs mode, source, temperature and target.
 - **No presets.** Frost protection is an operating mode of the room (below); in it the room thermostat shows `heat` at the frost protection temperature.
-- **Range:** the room's minimum and maximum target temperature, narrowed to the limits of the thermostats (4 to 35 °C, 0.5 K steps for the TRVZB).
+- **Range:** with the setpoint range **automatic** (the default), the `min_temp` and `max_temp` the thermostats show in Home Assistant when the room is set up; with several thermostats the narrowest range that all of them accept. A thermostat that shows no limits is left out, and without any the profile's range applies (4 to 35 °C for the TRVZB). With **manual**, the room's minimum and maximum target temperature. Either way the range is narrowed to the profile's limits, in 0.5 K steps for the TRVZB. A changed limit on a thermostat is read at the next reload of the integration.
 - **`current_temperature`:** the value last sent to the thermostats, else the active sensor's.
 - **Attributes:** `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost` or `initial`), `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff` and `note`.
 - **`in_sync`** is true when every thermostat is verified at what it should show now (off during a hold).

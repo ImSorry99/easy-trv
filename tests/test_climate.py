@@ -84,8 +84,9 @@ async def test_room_climate_entity_properties(hass, entry) -> None:
     assert state.state == "heat"
     attributes = state.attributes
     assert attributes[ATTR_TEMPERATURE] == 21.0
-    assert attributes[ATTR_MIN_TEMP] == 5.0
-    assert attributes[ATTR_MAX_TEMP] == 30.0
+    # The thermostats show no limits: the range of the profile applies.
+    assert attributes[ATTR_MIN_TEMP] == 4.0
+    assert attributes[ATTR_MAX_TEMP] == 35.0
     assert attributes[ATTR_TARGET_TEMP_STEP] == 0.5
     assert attributes[ATTR_HVAC_MODES] == [HVACMode.HEAT, HVACMode.OFF]
     # Frost protection is an operating mode of the room, not a preset.
@@ -150,11 +151,34 @@ async def test_set_setpoint_is_clamped_into_the_range(hass, entry) -> None:
 
     await controller.async_set_setpoint(40.0)
     await settle(hass)
-    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 30.0
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 35.0
 
     await controller.async_set_setpoint(1.0)
     await settle(hass)
-    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 5.0
+    assert hass.states.get(CLIMATE).attributes[ATTR_TEMPERATURE] == 4.0
+
+
+async def test_the_range_follows_the_limits_the_thermostats_show(hass) -> None:
+    hass.states.async_set("climate.a", "heat", {"min_temp": 6.0, "max_temp": 30.0})
+    hass.states.async_set("climate.b", "heat", {"min_temp": 8.0, "max_temp": 26.0})
+    entry = make_entry(hass, [room_data()], FAST_OPTIONS)
+
+    await start(hass, entry)
+
+    # The narrowest range that every thermostat accepts.
+    attributes = hass.states.get(CLIMATE).attributes
+    assert (attributes[ATTR_MIN_TEMP], attributes[ATTR_MAX_TEMP]) == (8.0, 26.0)
+
+
+async def test_a_manual_range_ignores_the_thermostats(hass) -> None:
+    hass.states.async_set("climate.a", "heat", {"min_temp": 8.0, "max_temp": 26.0})
+    options = {**FAST_OPTIONS, "setpoint_range": "manual", "setpoint_max": 24.0}
+    entry = make_entry(hass, [room_data()], options)
+
+    await start(hass, entry)
+
+    attributes = hass.states.get(CLIMATE).attributes
+    assert (attributes[ATTR_MIN_TEMP], attributes[ATTR_MAX_TEMP]) == (5.0, 24.0)
 
 
 async def test_turn_off_and_on(hass, entry, fake_gateway) -> None:

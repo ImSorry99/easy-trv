@@ -83,6 +83,7 @@
             "max_attempts": "Attempts",
             "min_delta_kelvin": "Minimum change (K)",
             "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)",
+            "setpoint_range": "Setpoint range",
             "setpoint_min": "Minimum target temperature",
             "setpoint_max": "Maximum target temperature",
             "window_open_delay_seconds": "Delay before a window counts as open (seconds, 0 = immediately)",
@@ -103,8 +104,9 @@
             "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Global is currently {global_max_attempts}.",
             "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Global is currently {global_min_delta_kelvin}.",
             "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}.",
-            "setpoint_min": "The lowest target temperature the room accepts. 4.0 to 35.0 °C and below the maximum. Global is currently {global_setpoint_min}.",
-            "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Global is currently {global_setpoint_max}.",
+            "setpoint_range": "Automatic reads, when the room is set up, the minimum and maximum target temperature the thermostats show in Home Assistant (with several, the narrowest common range, else the range of the profile). Manual takes the minimum and maximum below. Global is currently {global_setpoint_range}.",
+            "setpoint_min": "The lowest target temperature the room accepts. 4.0 to 35.0 °C and below the maximum. Only used with the setpoint range Manual. Global is currently {global_setpoint_min}.",
+            "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Only used with the setpoint range Manual. Global is currently {global_setpoint_max}.",
             "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Global is currently {global_window_open_delay_seconds}.",
             "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Global is currently {global_window_warn_minutes}.",
             "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the amount set in \"Cooling expected by the check (K)\", otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
@@ -240,12 +242,14 @@
             "name": "Room thermostat",
             "description": "The limits of the target temperature that can be set on a room.",
             "data": {
+              "setpoint_range": "Setpoint range",
               "setpoint_min": "Minimum target temperature",
               "setpoint_max": "Maximum target temperature"
             },
             "data_description": {
-              "setpoint_min": "The lowest target temperature a room accepts. 4.0 to 35.0 °C and below the maximum. Empty = {default_setpoint_min}.",
-              "setpoint_max": "The highest target temperature a room accepts. 4.0 to 35.0 °C and above the minimum. Empty = {default_setpoint_max}."
+              "setpoint_range": "Automatic reads, when the room is set up, the minimum and maximum target temperature the thermostats show in Home Assistant (with several, the narrowest common range, else the range of the profile). Manual takes the minimum and maximum below.",
+              "setpoint_min": "The lowest target temperature a room accepts. 4.0 to 35.0 °C and below the maximum. Only used with the setpoint range Manual. Empty = {default_setpoint_min}.",
+              "setpoint_max": "The highest target temperature a room accepts. 4.0 to 35.0 °C and above the minimum. Only used with the setpoint range Manual. Empty = {default_setpoint_max}."
             }
           },
           "windows_outdoor": {
@@ -330,6 +334,13 @@
       "options": {
         "global": "Global",
         "off": "Off"
+      }
+    },
+    "setpoint_range": {
+      "options": {
+        "global": "Global",
+        "auto": "Automatic (from the thermostat)",
+        "manual": "Manual"
       }
     }
   }

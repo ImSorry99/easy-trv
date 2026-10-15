@@ -264,6 +264,7 @@ ALL_GLOBAL = {
     "window_detection": "global",
     "hysteresis": "global",
     "adaptive_mode": "global",
+    "setpoint_range": "global",
     "outdoor_cutoff": "global",
 }
 
@@ -880,6 +881,7 @@ SETTINGS_FIELDS = [
     "max_attempts",
     "min_delta_kelvin",
     "sensor_timeout_minutes",
+    "setpoint_range",
     "setpoint_min",
     "setpoint_max",
     "window_open_delay_seconds",
@@ -926,6 +928,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_max_attempts": "3",
         "global_min_delta_kelvin": "0.1 K",
         "global_sensor_timeout_minutes": "120 min",
+        "global_setpoint_range": "Automatic (from the thermostat)",
         "global_setpoint_min": "5.0 °C",
         "global_setpoint_max": "30.0 °C",
         "global_window_open_delay_seconds": "30 s",
@@ -1577,6 +1580,7 @@ async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
         "frost_temperature",
     ]
     assert list(section_fields(result, "room_thermostat")) == [
+        "setpoint_range",
         "setpoint_min",
         "setpoint_max",
     ]
@@ -1659,7 +1663,12 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         result["flow_id"], submitted
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert set(entry.options) == {"window_detection", "hysteresis", "adaptive_mode"}
+    assert set(entry.options) == {
+        "window_detection",
+        "hysteresis",
+        "adaptive_mode",
+        "setpoint_range",
+    }
 
     # Saving the defaults the form shows does not turn them into options.
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -1667,7 +1676,12 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
     for name in ("writes", "thermostat", "room_thermostat", "windows_outdoor"):
         shown[name].update(suggested_values(result, name))
     result = await hass.config_entries.options.async_configure(result["flow_id"], shown)
-    assert set(entry.options) == {"window_detection", "hysteresis", "adaptive_mode"}
+    assert set(entry.options) == {
+        "window_detection",
+        "hysteresis",
+        "adaptive_mode",
+        "setpoint_range",
+    }
 
 
 async def test_options_form_ranges_units_and_select_options(hass, entry) -> None:
@@ -1726,6 +1740,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
         "hysteresis": "0_6",
         "adaptive_mode": "off",
         "frost_temperature": 8.5,
+        "setpoint_range": "auto",
     }
     # Whole numbers are stored as integers, not as the selector's floats.
     assert all(
@@ -1804,6 +1819,7 @@ async def test_options_new_numbers_have_ranges_and_units(hass, entry) -> None:
         **section_fields(result, "windows_outdoor"),
     }
     outdoor = numbers.pop("outdoor_sensor")
+    numbers.pop("setpoint_range")
     assert {
         name: (
             selector.config["min"],
@@ -1818,8 +1834,8 @@ async def test_options_new_numbers_have_ranges_and_units(hass, entry) -> None:
     assert outdoor.config["domain"] == ["sensor"]
     assert outdoor.config["device_class"] == ["temperature"]
     assert "multiple" not in outdoor.config or outdoor.config["multiple"] is False
-    # Nothing is required and nothing has a default: empty = not stored.
-    assert defaults(result, "room_thermostat") == {}
+    # Only the range choice has a default; an empty number is not stored.
+    assert defaults(result, "room_thermostat") == {"setpoint_range": "auto"}
     assert defaults(result, "windows_outdoor") == {}
 
 
@@ -1941,5 +1957,8 @@ async def test_options_flow_rejects_a_setpoint_range_that_is_not_a_range(
     else:
         assert result["type"] is FlowResultType.FORM
         assert result["errors"] == {"base": "setpoint_range"}
-        assert suggested_values(result, "room_thermostat") == submitted
+        assert suggested_values(result, "room_thermostat") == {
+            **submitted,
+            "setpoint_range": "auto",
+        }
         assert not entry.options

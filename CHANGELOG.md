@@ -9,9 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Operating mode per room (`select.<room>_heating_mode`): off, frost protection or heating enabled
+- Setting **Setpoint range** (global and per room): automatic, the default, takes the minimum and maximum target temperature the thermostats show in Home Assistant; manual uses the minimum and maximum as before
 
 ### Changed
 
+- The room thermostat's range is automatic by default: rooms without their own choice take the thermostats' limits (4 to 35 °C for a TRVZB that shows none) instead of 5 to 30 °C. Choose **manual** to keep your minimum and maximum
 - Frost protection is no longer the preset `frost` of the room thermostat but an operating mode; the room thermostat has no presets. Automations that call `climate.set_preset_mode` need `select.select_option` instead. A room on frost protection keeps it after the update
 - Switching a room off ends frost protection; heating enabled afterwards brings back the target from before
 - The global options form shows every number with its value, the built-in default until it is changed (for example 30 s window delay instead of an empty field); a number left at its default is not stored

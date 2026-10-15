@@ -22,6 +22,7 @@ DEFAULT_HYSTERESIS: Final = "0_4"
 DEFAULT_ADAPTIVE_MODE: Final = "on"
 DEFAULT_FROST_TEMPERATURE: Final = 5.0
 DEFAULT_PROFILE: Final = "auto"
+DEFAULT_SETPOINT_RANGE: Final = "auto"
 DEFAULT_SETPOINT_MIN: Final = 5.0
 DEFAULT_SETPOINT_MAX: Final = 30.0
 DEFAULT_WINDOW_WARN_MINUTES: Final = 120
@@ -51,6 +52,7 @@ DEFAULTS: Final[Mapping[str, Any]] = {
     "adaptive_mode": DEFAULT_ADAPTIVE_MODE,
     "frost_temperature": DEFAULT_FROST_TEMPERATURE,
     "profile": DEFAULT_PROFILE,
+    "setpoint_range": DEFAULT_SETPOINT_RANGE,
     _KEY_SETPOINT_MIN: DEFAULT_SETPOINT_MIN,
     _KEY_SETPOINT_MAX: DEFAULT_SETPOINT_MAX,
     "window_warn_minutes": DEFAULT_WINDOW_WARN_MINUTES,
@@ -75,6 +77,8 @@ class RoomSettings:
     adaptive_mode: Literal["on", "off", "leave"]
     frost_temperature: float  # celsius
     profile: str  # "auto" or a profile id
+    # auto: the limits the thermostats show; manual: setpoint_min..setpoint_max
+    setpoint_range: Literal["auto", "manual"]
     setpoint_min: float  # celsius
     setpoint_max: float  # celsius
     window_warn_minutes: int  # 0 = off

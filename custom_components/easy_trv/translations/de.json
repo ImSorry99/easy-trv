@@ -83,6 +83,7 @@
             "max_attempts": "Versuche",
             "min_delta_kelvin": "Mindeständerung (K)",
             "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)",
+            "setpoint_range": "Sollwertbereich",
             "setpoint_min": "Minimale Solltemperatur (°C)",
             "setpoint_max": "Maximale Solltemperatur (°C)",
             "window_open_delay_seconds": "Verzögerung, bis ein Fenster als offen gilt (Sekunden, 0 = sofort)",
@@ -103,8 +104,9 @@
             "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10. Global ist derzeit {global_max_attempts}.",
             "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Global ist derzeit {global_min_delta_kelvin}.",
             "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}.",
-            "setpoint_min": "Die niedrigste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Global ist derzeit {global_setpoint_min}.",
-            "setpoint_max": "Die höchste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Global ist derzeit {global_setpoint_max}.",
+            "setpoint_range": "Automatisch liest beim Einrichten des Raums die minimale und maximale Solltemperatur, die die Thermostate in Home Assistant zeigen (bei mehreren gilt der engste gemeinsame Bereich, sonst der Bereich des Profils). Manuell nimmt das Minimum und das Maximum unten. Global ist derzeit {global_setpoint_range}.",
+            "setpoint_min": "Die niedrigste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_min}.",
+            "setpoint_max": "Die höchste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_max}.",
             "window_open_delay_seconds": "Wie lange ein Fensterkontakt offen sein muss, bis das Fenster als offen gilt und die Heizung ausgeschaltet wird. Kurzes Lüften schaltet nichts aus. 0 = sofort, sonst 1 bis 600 Sekunden. Global ist derzeit {global_window_open_delay_seconds}.",
             "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Global ist derzeit {global_window_warn_minutes}.",
             "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um den Wert unter „Erwartete Abkühlung bei der Prüfung (K)“ abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Global ist derzeit {global_window_check_minutes}.",
@@ -240,12 +242,14 @@
             "name": "Raumthermostat",
             "description": "Die Grenzen der Solltemperatur, die an einem Raum eingestellt werden kann.",
             "data": {
+              "setpoint_range": "Sollwertbereich",
               "setpoint_min": "Minimale Solltemperatur (°C)",
               "setpoint_max": "Maximale Solltemperatur (°C)"
             },
             "data_description": {
-              "setpoint_min": "Die niedrigste Solltemperatur, die ein Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Leer = {default_setpoint_min}.",
-              "setpoint_max": "Die höchste Solltemperatur, die ein Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Leer = {default_setpoint_max}."
+              "setpoint_range": "Automatisch liest beim Einrichten des Raums die minimale und maximale Solltemperatur, die die Thermostate in Home Assistant zeigen (bei mehreren gilt der engste gemeinsame Bereich, sonst der Bereich des Profils). Manuell nimmt das Minimum und das Maximum unten.",
+              "setpoint_min": "Die niedrigste Solltemperatur, die ein Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Gilt nur bei Sollwertbereich Manuell. Leer = {default_setpoint_min}.",
+              "setpoint_max": "Die höchste Solltemperatur, die ein Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Gilt nur bei Sollwertbereich Manuell. Leer = {default_setpoint_max}."
             }
           },
           "windows_outdoor": {
@@ -330,6 +334,13 @@
       "options": {
         "global": "Global",
         "off": "Aus"
+      }
+    },
+    "setpoint_range": {
+      "options": {
+        "global": "Global",
+        "auto": "Automatisch (vom Thermostat)",
+        "manual": "Manuell"
       }
     }
   }

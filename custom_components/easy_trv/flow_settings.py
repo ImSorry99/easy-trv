@@ -36,6 +36,7 @@ from custom_components.easy_trv.const import (
     CONF_SENSOR_TIMEOUT,
     CONF_SETPOINT_MAX,
     CONF_SETPOINT_MIN,
+    CONF_SETPOINT_RANGE,
     CONF_VERIFY_DELAY,
     CONF_WINDOW_CHECK_DROP,
     CONF_WINDOW_CHECK_MINUTES,
@@ -60,6 +61,7 @@ SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
     CONF_WINDOW_DETECTION: ("on", "off", "leave"),
     CONF_HYSTERESIS: ("0_2", "0_4", "0_6", "0_8", "1_0"),
     CONF_ADAPTIVE_MODE: ("on", "off", "leave"),
+    CONF_SETPOINT_RANGE: ("auto", "manual"),
 }
 # A choice that only a room has: the global outdoor cut-off threshold is the
 # value to keep ("global") or to ignore ("off") in this room.
@@ -120,7 +122,11 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
         CONF_ADAPTIVE_MODE,
         CONF_FROST_TEMPERATURE,
     ),
-    _SECTION_ROOM_THERMOSTAT: (CONF_SETPOINT_MIN, CONF_SETPOINT_MAX),
+    _SECTION_ROOM_THERMOSTAT: (
+        CONF_SETPOINT_RANGE,
+        CONF_SETPOINT_MIN,
+        CONF_SETPOINT_MAX,
+    ),
     _SECTION_WINDOWS_OUTDOOR: (
         CONF_WINDOW_OPEN_DELAY,
         CONF_WINDOW_WARN_MINUTES,
@@ -142,6 +148,7 @@ ROOM_SETTING_KEYS: Final = (
     CONF_MAX_ATTEMPTS,
     CONF_MIN_DELTA,
     CONF_SENSOR_TIMEOUT,
+    CONF_SETPOINT_RANGE,
     CONF_SETPOINT_MIN,
     CONF_SETPOINT_MAX,
     CONF_WINDOW_OPEN_DELAY,
