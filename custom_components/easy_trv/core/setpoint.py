@@ -13,17 +13,23 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from custom_components.easy_trv.core.model import (
+    EVENT_SETPOINT_ADOPTED,
     Command,
     Execute,
+    FireEvent,
     Intent,
+    KnobSettled,
+    Log,
     Note,
     Preset,
     RestoreRoom,
     RoomConfig,
     RoomMode,
     RoomState,
+    ScheduleKnobSettle,
     SetHvacMode,
     SetSetpoint,
+    TrvObserved,
     TrvState,
 )
 
@@ -40,6 +46,16 @@ ECHO_WINDOW = timedelta(seconds=120)
 _SAME = 1e-6
 # Reported system modes the room writes over; ``auto`` is the thermostat's schedule.
 _OWN_MODES = ("heat", "off")
+_AUTO = "auto"
+# The raw ``system_mode`` of the thermostat's own schedule.
+_AUTO_RAW = 1
+# How long a knob must rest before its value is taken over (turning through
+# 20.5, 21, 21.5 is one adoption).
+KNOB_DEBOUNCE = 3.0
+# The setpoint a thermostat shows during its open-window phase, and how long
+# the room waits for it to leave that value before it writes its own again.
+WINDOW_PHASE_SETPOINT = 12.0
+WINDOW_PHASE_LIMIT = timedelta(minutes=30)
 
 
 def clamp(value: float, rng: tuple[float, float, float]) -> float:
@@ -292,14 +308,381 @@ def reconcile_start(
     return _sync_differing(cfg, state, now, capability_of, with_mode=False)
 
 
+def is_echo(
+    known: TrvState, capability: str, value: float | str | None, now: datetime
+) -> bool:
+    """Return whether ``value`` is one the room wrote in the last ``ECHO_WINDOW``."""
+    if value is None:
+        return False
+    return any(
+        _equal(written, value) and now - at <= ECHO_WINDOW
+        for written, at in known.written_recently.get(capability, ())
+    )
+
+
+def on_observed(
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    event: TrvObserved,
+    capability_of: _Capabilities,
+) -> _Step:
+    """Take a value a thermostat reported (or had written by someone else).
+
+    Every report updates what the thermostat is known to show. An echo of a
+    recent write stops there. ``auto`` and the open-window setpoint are shown,
+    not adopted. Any other change is a knob turn: it waits for the debounce
+    (``KnobSettled``) so that several steps become one adoption.
+    """
+    if cfg.setpoint_range is None or event.trv not in state.trvs:
+        return state, []
+    value = event.value
+    if event.capability == capability_of(SetSetpoint(0.0)):
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return _observe_setpoint(cfg, state, now, event, float(value))
+        return state, []
+    if event.capability == capability_of(SetHvacMode("heat")):
+        return _observe_mode(cfg, state, now, event, capability_of)
+    return state, []
+
+
+def knob_wakes_room(
+    cfg: RoomConfig,
+    state: RoomState,
+    event: KnobSettled,
+    capability_of: _Capabilities,
+) -> bool:
+    """Return whether adopting the settled knob turn takes the room out of ``off``."""
+    if (
+        cfg.setpoint_range is None
+        or event.trv not in state.trvs
+        or state.mode is not RoomMode.OFF
+        or holding(state)
+    ):
+        return False
+    known = state.trvs[event.trv]
+    pending = known.knob_pending.get(event.capability)
+    if (
+        pending is None
+        or _device_driven(known)
+        or event.capability in known.resync_pending
+    ):
+        return False
+    if event.capability == capability_of(SetSetpoint(0.0)):
+        return True
+    return event.capability == capability_of(SetHvacMode("heat")) and pending == "heat"
+
+
+def on_knob_settled(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    event: KnobSettled,
+    capability_of: _Capabilities,
+    resync: Sequence[Intent] = (),
+) -> _Step:
+    """Adopt the knob turn whose debounce elapsed: the room follows the thermostat.
+
+    A setpoint is clamped (a clamped value goes back to that thermostat too),
+    becomes the room setpoint and is written to the other thermostats; a mode
+    change heat <-> off is adopted the same way. A knob turn while the room is
+    off turns it on again. During a hold only the wish is taken over.
+    """
+    if cfg.setpoint_range is None or event.trv not in state.trvs:
+        return state, []
+    trv, capability = event.trv, event.capability
+    known = state.trvs[trv]
+    pending = known.knob_pending.get(capability)
+    if pending is None:
+        return state, []
+    state = _store(
+        state,
+        trv,
+        replace(known, knob_pending=_dropped(known.knob_pending, capability)),
+    )
+    if _device_driven(known) or capability in known.resync_pending:
+        return state, []
+    if capability == capability_of(SetSetpoint(0.0)) and isinstance(pending, float):
+        return _adopt_setpoint(cfg, state, now, trv, pending, capability_of, resync)
+    if capability == capability_of(SetHvacMode("heat")) and pending in _OWN_MODES:
+        mode = RoomMode(str(pending))
+        return _adopt_mode(cfg, state, now, trv, mode, capability_of, resync)
+    return state, []
+
+
+def expire_window_phase(
+    cfg: RoomConfig, state: RoomState, now: datetime, capability_of: _Capabilities
+) -> _Step:
+    """End the window phase of thermostats that stayed in it for 30 minutes.
+
+    The room setpoint is then written to them, unless the room is off or held
+    (the resume writes it).
+    """
+    if cfg.setpoint_range is None:
+        return state, []
+    trvs = dict(state.trvs)
+    expired: list[str] = []
+    for trv in cfg.trvs:
+        known = trvs[trv.entity_id]
+        if known.note is Note.WINDOW_PHASE and (
+            known.note_since is None or now - known.note_since >= WINDOW_PHASE_LIMIT
+        ):
+            trvs[trv.entity_id] = replace(known, note=None, note_since=None)
+            expired.append(trv.entity_id)
+    if not expired:
+        return state, []
+    state = replace(state, trvs=trvs)
+    if suspended(state) or state.setpoint is None:
+        return state, []
+    intent = SetSetpoint(state.setpoint)
+    writes = [(trv, intent) for trv in expired if trvs[trv].available]
+    return _write(state, now, writes, capability_of)
+
+
+def resync_trv(
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    trv: str,
+    capability_of: _Capabilities,
+) -> _Step:
+    """Bring one thermostat that was out of reach up to the room's mode and setpoint.
+
+    Used when it comes back and when it leaves its schedule. The thermostat is
+    marked until the results arrive: what it reports meanwhile may be the old
+    value and must not be mistaken for a knob turn. A room that is off only gets
+    ``off`` written; during a hold nothing (the hold's end resumes), and nothing
+    while the room has neither a setpoint nor been switched off (it has no say yet).
+    """
+    if (
+        cfg.setpoint_range is None
+        or holding(state)
+        or (state.setpoint is None and state.mode is RoomMode.HEAT)
+    ):
+        return state, []
+    known = state.trvs[trv]
+    if not known.available or _device_driven(known):
+        return state, []
+    writes: list[tuple[str, Intent]] = [
+        (trv, SetHvacMode("off" if state.mode is RoomMode.OFF else "heat"))
+    ]
+    if not suspended(state) and state.setpoint is not None:
+        writes.append((trv, SetSetpoint(state.setpoint)))
+    state, commands = _write(state, now, writes, capability_of)
+    written = frozenset(
+        capability_of(command.intent)
+        for command in commands
+        if isinstance(command, Execute)
+    )
+    if written:
+        known = state.trvs[trv]
+        known = replace(known, resync_pending=known.resync_pending | written)
+        state = _store(state, trv, known)
+    return state, commands
+
+
+# --- Observations --------------------------------------------------------
+
+
+def _observe_setpoint(
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    event: TrvObserved,
+    value: float,
+) -> _Step:
+    """Handle a reported setpoint: echo, window phase, schedule or knob turn."""
+    trv, capability = event.trv, event.capability
+    known = state.trvs[trv]
+    echo = is_echo(known, capability, value, now)
+    known = replace(known, reported_setpoint=value)
+    at_window_value = abs(value - WINDOW_PHASE_SETPOINT) <= _SAME
+    if known.note is Note.WINDOW_PHASE and not at_window_value:
+        known = replace(known, note=None, note_since=None)
+    if echo:
+        return _store(state, trv, known), []
+    wants_window_value = state.setpoint is not None and (
+        abs(state.setpoint - WINDOW_PHASE_SETPOINT) <= _SAME
+    )
+    if (
+        known.note is None
+        and not _on_schedule(known)
+        and at_window_value
+        and not wants_window_value
+        and cfg.window_detection == "on"
+    ):
+        known = replace(known, note=Note.WINDOW_PHASE, note_since=now)
+    if _device_driven(known) or capability in known.resync_pending:
+        known = replace(known, knob_pending=_dropped(known.knob_pending, capability))
+        return _store(state, trv, known), []
+    if state.setpoint is not None and abs(value - state.setpoint) <= _SAME:
+        known = replace(known, knob_pending=_dropped(known.knob_pending, capability))
+        return _store(state, trv, known), []
+    return _pend(state, trv, known, capability, value)
+
+
+def _observe_mode(
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    event: TrvObserved,
+    capability_of: _Capabilities,
+) -> _Step:
+    """Handle a reported mode: schedule, return from it, echo or knob turn."""
+    trv, capability = event.trv, event.capability
+    mode: str | None = event.value if isinstance(event.value, str) else None
+    if mode is None and event.raw == _AUTO_RAW:
+        mode = _AUTO
+    if mode is None:
+        return state, []
+    known = state.trvs[trv]
+    was_on_schedule = _on_schedule(known)
+    echo = is_echo(known, capability, mode, now)
+    known = replace(known, reported_mode=mode)
+    if mode not in _OWN_MODES:
+        commands: list[Command] = []
+        if known.note is not Note.SCHEDULE:
+            known = replace(known, note=Note.SCHEDULE, note_since=now)
+            commands.append(
+                Log(
+                    "info", f"{cfg.name}: {trv} runs its own schedule, leaving it alone"
+                )
+            )
+        known = replace(known, knob_pending={})
+        return _store(state, trv, known), commands
+    if known.note is Note.SCHEDULE:
+        known = replace(known, note=None, note_since=None)
+    state = _store(state, trv, known)
+    if was_on_schedule:
+        return resync_trv(cfg, state, now, trv, capability_of)
+    if echo or capability in known.resync_pending or holding(state):
+        return state, []
+    room_mode = "off" if state.mode is RoomMode.OFF else "heat"
+    if mode == room_mode:
+        known = replace(known, knob_pending=_dropped(known.knob_pending, capability))
+        return _store(state, trv, known), []
+    return _pend(state, trv, known, capability, mode)
+
+
+def _pend(
+    state: RoomState,
+    trv: str,
+    known: TrvState,
+    capability: str,
+    value: float | str,
+) -> _Step:
+    """Remember a knob value and (re)arm the debounce for it."""
+    known = replace(known, knob_pending={**known.knob_pending, capability: value})
+    return _store(state, trv, known), [
+        ScheduleKnobSettle(trv, capability, KNOB_DEBOUNCE)
+    ]
+
+
+def _adopt_setpoint(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    trv: str,
+    value: float,
+    capability_of: _Capabilities,
+    resync: Sequence[Intent],
+) -> _Step:
+    """Make a thermostat's knob value the room setpoint."""
+    if cfg.setpoint_range is None:  # pragma: no cover - checked by the caller
+        return state, []
+    adopted = clamp(value, cfg.setpoint_range)
+    changed = state.setpoint is None or abs(adopted - state.setpoint) > _SAME
+    clamped = abs(adopted - value) > _SAME
+    waking = state.mode is RoomMode.OFF
+    state = replace(
+        state,
+        setpoint=adopted,
+        setpoint_source=f"device:{trv}",
+        preset=Preset.NONE,
+        frost_return=None,
+        mode=RoomMode.HEAT,
+    )
+    event = _adopted(cfg, trv, adopted)
+    if holding(state):
+        return state, [event]
+    if waking:
+        state, commands = resume(cfg, state, now, capability_of, resync)
+        return state, [*commands, event]
+    intent = SetSetpoint(adopted)
+    writes = [
+        (other, intent)
+        for other in _writable(cfg, state)
+        if (other == trv and clamped) or (other != trv and changed)
+    ]
+    state, commands = _write(state, now, writes, capability_of)
+    return state, [*commands, event]
+
+
+def _adopt_mode(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    trv: str,
+    mode: RoomMode,
+    capability_of: _Capabilities,
+    resync: Sequence[Intent],
+) -> _Step:
+    """Make a thermostat's mode change (heat <-> off) the room's mode."""
+    if state.mode is mode or holding(state):
+        return state, []
+    state = replace(state, mode=mode, setpoint_source=f"device:{trv}")
+    event = _adopted(cfg, trv, mode.value)
+    if mode is RoomMode.HEAT:
+        state, commands = resume(cfg, state, now, capability_of, resync)
+        return state, [*commands, event]
+    writes = [
+        (other, SetHvacMode("off")) for other in _writable(cfg, state) if other != trv
+    ]
+    state, commands = _write(state, now, writes, capability_of)
+    return state, [*commands, event]
+
+
+def _adopted(cfg: RoomConfig, trv: str, value: float | str) -> FireEvent:
+    """Return the bus event that announces a taken-over knob turn."""
+    return FireEvent(
+        EVENT_SETPOINT_ADOPTED, {"room": cfg.name, "trv": trv, "value": value}
+    )
+
+
+def _equal(left: float | str, right: float | str) -> bool:
+    """Return whether two reported values are the same one."""
+    if isinstance(left, str) or isinstance(right, str):
+        return left == right
+    return abs(left - right) <= _SAME
+
+
+def _store(state: RoomState, trv: str, known: TrvState) -> RoomState:
+    """Return ``state`` with the state of one thermostat replaced."""
+    return replace(state, trvs={**state.trvs, trv: known})
+
+
+def _dropped[V](mapping: Mapping[str, V], key: str) -> dict[str, V]:
+    """Return a copy of ``mapping`` without ``key``."""
+    return {k: v for k, v in mapping.items() if k != key}
+
+
 # --- Helpers -------------------------------------------------------------
 
 
-def _schedule_driven(known: TrvState) -> bool:
-    """Return whether a thermostat runs its own schedule and is left alone."""
+def _on_schedule(known: TrvState) -> bool:
+    """Return whether a thermostat runs its own schedule."""
     return known.note is Note.SCHEDULE or (
         known.reported_mode is not None and known.reported_mode not in _OWN_MODES
     )
+
+
+def _device_driven(known: TrvState) -> bool:
+    """Return whether a thermostat shows a value of its own and is left alone.
+
+    That is its schedule and its open-window phase: nothing is written to it and
+    nothing it reports is adopted.
+    """
+    return known.note is not None or _on_schedule(known)
 
 
 def _writable(cfg: RoomConfig, state: RoomState) -> list[str]:
@@ -328,13 +711,13 @@ def _sync_differing(
 ) -> _Step:
     """Write the room values to thermostats known to report something else.
 
-    A thermostat in ``auto`` runs its own schedule and is left alone.
+    A thermostat that runs its schedule or shows its window phase is left alone.
     """
     writes: list[tuple[str, Intent]] = []
     mode: SetHvacMode = SetHvacMode("off" if state.mode is RoomMode.OFF else "heat")
     for trv in _writable(cfg, state):
         known = state.trvs[trv]
-        if _schedule_driven(known):
+        if _device_driven(known):
             continue
         if (
             with_mode
@@ -361,8 +744,8 @@ def _write(
 ) -> _Step:
     """Issue the writes in order and remember setpoint and mode as recent writes.
 
-    A thermostat on its own schedule gets no setpoint or mode write, and a
-    capability it lacks is not written at all.
+    A thermostat on its own schedule or in its window phase gets no setpoint or
+    mode write, and a capability it lacks is not written at all.
     """
     trvs = dict(state.trvs)
     commands: list[Command] = []
@@ -372,7 +755,7 @@ def _write(
         if capability in known.unsupported:
             continue
         if isinstance(intent, SetSetpoint | SetHvacMode):
-            if _schedule_driven(known):
+            if _device_driven(known):
                 continue
             value = intent.celsius if isinstance(intent, SetSetpoint) else intent.mode
             trvs[trv] = _remember(known, capability, value, now)

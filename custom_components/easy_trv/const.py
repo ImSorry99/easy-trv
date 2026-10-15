@@ -11,6 +11,9 @@ from .core import settings as _settings
 # The aliases mark them as explicit re-exports.
 from .core.model import EVENT_FAILSAFE as EVENT_FAILSAFE  # noqa: PLC0414
 from .core.model import EVENT_RECOVERED as EVENT_RECOVERED  # noqa: PLC0414
+from .core.model import (
+    EVENT_SETPOINT_ADOPTED as EVENT_SETPOINT_ADOPTED,  # noqa: PLC0414
+)
 from .core.model import EVENT_WRITE_FAILED as EVENT_WRITE_FAILED  # noqa: PLC0414
 
 DOMAIN: Final = "easy_trv"

@@ -261,6 +261,10 @@ class TrvState:
     )
     # capability -> last observed value awaiting the knob debounce
     knob_pending: Mapping[str, float | str] = field(default_factory=dict)
+    # capabilities written to bring the thermostat in line (it came back, or left
+    # its schedule) whose result is still outstanding: reports of them are not
+    # adopted meanwhile, they may still show the old value
+    resync_pending: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -496,6 +500,7 @@ Event = (
 EVENT_WRITE_FAILED: Final = "easy_trv_write_failed"
 EVENT_RECOVERED: Final = "easy_trv_recovered"
 EVENT_FAILSAFE: Final = "easy_trv_failsafe_detected"
+EVENT_SETPOINT_ADOPTED: Final = "easy_trv_setpoint_adopted"
 
 IssueKind = Literal["unreachable", "firmware"]
 

@@ -159,8 +159,14 @@ class RoomLogic:
                 state, commands = self._on_result(event, now, state)
             case SetRoomSetpoint() | SetRoomMode() | SetRoomPreset() | RestoreRoom():
                 state, commands = self._on_room_event(event, now, state)
-            case TrvObserved() | KnobSettled() | WindowChanged() | OutdoorChanged():
-                # Handled from the observation tasks on; no effect yet.
+            case TrvObserved():
+                state, commands = setpoint.on_observed(
+                    self._cfg, state, now, event, self._capability_of
+                )
+            case KnobSettled():
+                state, commands = self._on_knob_settled(event, now, state)
+            case WindowChanged() | OutdoorChanged():
+                # Handled from the window tasks on; no effect yet.
                 commands = []
             case _:
                 assert_never(event)
@@ -233,6 +239,17 @@ class RoomLogic:
             self._cfg, state, now, event.mode, self._capability_of, resync
         )
 
+    def _on_knob_settled(
+        self, event: KnobSettled, now: datetime, state: RoomState
+    ) -> _Step:
+        """Adopt a settled knob turn; one that wakes the room resyncs source first."""
+        resync: list[Intent] = []
+        if setpoint.knob_wakes_room(self._cfg, state, event, self._capability_of):
+            state, resync = self._source_intents(state, now)
+        return setpoint.on_knob_settled(
+            self._cfg, state, now, event, self._capability_of, resync
+        )
+
     def _on_sensor_changed(
         self, event: SensorChanged, now: datetime, state: RoomState
     ) -> _Step:
@@ -272,6 +289,14 @@ class RoomLogic:
         return self._write_value(state, active, now)
 
     def _on_tick(self, now: datetime, state: RoomState) -> _Step:
+        """Handle sensor timeouts and window phases, then resend what is due."""
+        state, phase = setpoint.expire_window_phase(
+            self._cfg, state, now, self._capability_of
+        )
+        state, commands = self._on_tick_sensors(now, state)
+        return state, [*phase, *commands]
+
+    def _on_tick_sensors(self, now: datetime, state: RoomState) -> _Step:
         """Handle sensor timeouts, then resend what is due: failed writes, the value."""
         before_source = state.source
         before_sensor = state.active_sensor
@@ -296,11 +321,20 @@ class RoomLogic:
         if current.available == event.available:
             return state, []
         if not event.available:
-            gone = replace(current, available=False, health=TrvHealth.UNAVAILABLE)
+            gone = replace(
+                current,
+                available=False,
+                health=TrvHealth.UNAVAILABLE,
+                resync_pending=frozenset(),
+            )
             return self._with_trv(state, trv, gone), []
         back = replace(current, available=True)
         back = replace(back, health=self._baseline(back))
-        return self._resync_trv(self._with_trv(state, trv, back), now, trv)
+        state, commands = self._resync_trv(self._with_trv(state, trv, back), now, trv)
+        state, climate = setpoint.resync_trv(
+            self._cfg, state, now, trv, self._capability_of
+        )
+        return state, [*commands, *climate]
 
     def _on_retry_due(self, event: RetryDue, now: datetime, state: RoomState) -> _Step:
         """Resend the newest intent that is still waiting for its retry."""
@@ -331,11 +365,21 @@ class RoomLogic:
     ) -> _Step:
         """Route the outcome of a finished operation."""
         outcome = event.outcome
+        guarded = False
+        if isinstance(event.intent, SetSetpoint | SetHvacMode):
+            # The result of a resync write ends the time its reports are not trusted.
+            known = state.trvs[event.trv]
+            guarded = event.capability in known.resync_pending
+            if guarded:
+                known = replace(
+                    known, resync_pending=known.resync_pending - {event.capability}
+                )
+                state = self._with_trv(state, event.trv, known)
         match outcome:
             case Ok():
                 return self._on_ok(event, now, state)
             case Failed() | Mismatch():
-                return self._on_failure(event, outcome, now, state)
+                return self._on_failed(event, outcome, now, state, guarded=guarded)
             case Unsupported():
                 return self._on_unsupported(event, outcome, state)
             case Signal(name="failsafe") if isinstance(event.intent, SetSource):
@@ -343,10 +387,103 @@ class RoomLogic:
                 # fail-safe, otherwise a thermostat that stays in fail-safe
                 # would be re-enabled again and again.
                 return self._on_failure(event, outcome, now, state)
+            case Signal(name="schedule") if isinstance(event.intent, SetHvacMode):
+                return self._on_schedule_readback(event, now, state)
             case Signal():
                 return self._on_signal(event, outcome, now, state)
             case _:
                 assert_never(outcome)
+
+    def _on_failed(
+        self,
+        event: OperationResult,
+        outcome: Failed | Mismatch,
+        now: datetime,
+        state: RoomState,
+        *,
+        guarded: bool,
+    ) -> _Step:
+        """Retry a failed write, unless the read-back found somebody else's value.
+
+        A mismatch on a resync write is never taken for such a value: the
+        thermostat may just not have taken our write yet.
+        """
+        if (
+            isinstance(outcome, Mismatch)
+            and not guarded
+            and self._is_foreign(event, outcome, now, state)
+        ):
+            return self._on_foreign_readback(event, outcome, now, state)
+        return self._on_failure(event, outcome, now, state)
+
+    def _is_foreign(
+        self,
+        event: OperationResult,
+        outcome: Mismatch,
+        now: datetime,
+        state: RoomState,
+    ) -> bool:
+        """Return whether a read-back shows a value somebody else set, not ours."""
+        if (
+            not isinstance(event.intent, SetSetpoint | SetHvacMode)
+            or outcome.observed is None
+            or outcome.actual is None
+        ):
+            return False
+        known = state.trvs[event.trv]
+        return not setpoint.is_echo(known, event.capability, outcome.observed, now)
+
+    def _on_foreign_readback(
+        self,
+        event: OperationResult,
+        outcome: Mismatch,
+        now: datetime,
+        state: RoomState,
+    ) -> _Step:
+        """Treat a read-back that found somebody else's value as an observation.
+
+        The write is over (the value that was there supersedes it): no retry.
+        """
+        trv, capability = event.trv, event.capability
+        current = state.trvs[trv]
+        state = self._with_trv(
+            state,
+            trv,
+            replace(
+                current,
+                attempts=_without(current.attempts, capability),
+                pending_retry=_without(current.pending_retry, capability),
+            ),
+        )
+        observed = TrvObserved(
+            trv, capability, outcome.observed, outcome.actual or 0, "report"
+        )
+        return setpoint.on_observed(
+            self._cfg, state, now, observed, self._capability_of
+        )
+
+    def _on_schedule_readback(
+        self, event: OperationResult, now: datetime, state: RoomState
+    ) -> _Step:
+        """Handle a mode write whose read-back found the thermostat on its schedule.
+
+        The write is no failure: the thermostat is left alone from now on.
+        """
+        trv, capability = event.trv, event.capability
+        current = state.trvs[trv]
+        state = self._with_trv(
+            state,
+            trv,
+            replace(
+                current,
+                attempts=_without(current.attempts, capability),
+                pending_retry=_without(current.pending_retry, capability),
+            ),
+        )
+        observed = TrvObserved(trv, capability, None, 1, "report")
+        return setpoint.on_observed(
+            self._cfg, state, now, observed, self._capability_of
+        )
 
     def _on_ok(self, event: OperationResult, now: datetime, state: RoomState) -> _Step:
         """Forget earlier trouble with the capability and record a verified value.
