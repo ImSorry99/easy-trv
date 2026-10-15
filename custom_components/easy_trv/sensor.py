@@ -89,7 +89,8 @@ class RoomStateSensor(SensorEntity):
     sensor, the temperature source, where the setpoint came from, whether the
     thermostats are in sync and the last error. Until the room has started the
     state is unknown and the hint, the reasons and the time of the change are
-    empty.
+    empty, as is whatever the room has not published yet; the attributes are
+    always all there.
     """
 
     _attr_has_entity_name = True
@@ -144,14 +145,13 @@ class RoomStateSensor(SensorEntity):
             "thermostats": controller.deviations,
             "silent_contacts": list(controller.silent_contacts),
         }
-        # What the room publishes is missing until it has started.
-        for key in ("active_sensor", "source"):
-            if key in published:
-                attributes[key] = published[key]
+        # What the room publishes is not known until it has started: the keys are
+        # there all the same, empty, so the set of attributes never changes.
+        attributes["active_sensor"] = published.get("active_sensor")
+        attributes["source"] = published.get("source")
         attributes["setpoint_source"] = controller.setpoint_source
         attributes["in_sync"] = controller.in_sync
-        if "last_error" in published:
-            attributes["last_error"] = published["last_error"]
+        attributes["last_error"] = published.get("last_error")
         return attributes
 
     def _hint(self) -> str | None:

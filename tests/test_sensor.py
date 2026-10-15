@@ -407,9 +407,11 @@ async def test_state_sensor_unknown_before_start(hass, entry) -> None:
     # No reasons either: emergency mode next to an unknown state would mislead.
     assert state.attributes["reasons"] == []
     assert state.attributes["hint"] is None
-    # The room has not published its sensor yet.
-    assert "source" not in state.attributes
-    assert "active_sensor" not in state.attributes
+    # The room has not published its sensor yet: the keys are there, empty.
+    assert [key for key in state.attributes if key in ATTRIBUTES] == ATTRIBUTES
+    assert state.attributes["source"] is None
+    assert state.attributes["active_sensor"] is None
+    assert state.attributes["last_error"] is None
 
     hass.set_state(CoreState.running)
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)

@@ -169,7 +169,8 @@ async def test_rooms_start_only_when_home_assistant_has_started(
     await settle(hass)
     state = hass.states.get("sensor.living_heating_state")
     assert state is not None
-    assert "source" not in state.attributes
+    assert "source" in state.attributes
+    assert state.attributes["source"] is None
     assert fake_gateway.writes == []
 
     hass.set_state(CoreState.running)
@@ -509,7 +510,7 @@ async def test_start_is_logged_and_one_failing_room_does_not_block_the_others(
         hass.states.get("sensor.bedroom_heating_state").attributes["source"]
         == "external"
     )
-    assert "source" not in hass.states.get("sensor.living_heating_state").attributes
+    assert hass.states.get("sensor.living_heating_state").attributes["source"] is None
 
 
 async def test_subentries_of_other_types_are_ignored(hass) -> None:
