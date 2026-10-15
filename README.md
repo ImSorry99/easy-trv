@@ -2,7 +2,7 @@
 
 Easy TRV is a Home Assistant integration that lets Sonoff TRVZB radiator thermostats regulate on the temperature of the room instead of the temperature at the radiator. It groups thermostats and temperature sensors into rooms, writes the room temperature to the thermostats' own external-sensor input, and checks by read-back that every write arrived.
 
-It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets two sensors, a diagnostic one for its health (Heating status) and a visible one for what it is doing (Heating state), and one thin room thermostat (`climate`) that sets the same target and mode (off, heat, frost protection) on all its thermostats.
+It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one diagnostic sensor for what it is doing and why (Heating state) and one thin room thermostat (`climate`) that sets the same target and mode (off, heat, frost protection) on all its thermostats.
 
 Status: version 0.5.0 is released (room thermostat with frost protection in its mode list, window contacts, outdoor cut-off, a heating state sensor per room, a report of silent window contacts, an area for every room and optional hiding of the thermostat entities); see the [`CHANGELOG`](CHANGELOG.md) for what each version brought. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
 
@@ -41,7 +41,7 @@ The room form asks for:
 
 A further page, **Room settings**, lets the room deviate from the global settings (see below). To change a room later, or to remove it, open the room's menu on the integration page (edit or delete). Saving a change reloads the integration.
 
-A room is a device named **Heizung <room>** in German and **<room> heating** in English, for example "Heizung Wohnzimmer" or "Living room heating". A name you gave the device yourself is kept. The entity ids of the two sensors are suggested as `sensor.<room>_heating_status` and `sensor.<room>_heating_state`, for example `sensor.living_room_heating_status` (an existing entity keeps its id).
+A room is a device named **Heizung <room>** in German and **<room> heating** in English, for example "Heizung Wohnzimmer" or "Living room heating". A name you gave the device yourself is kept. The entity id of the sensor is suggested as `sensor.<room>_heating_state`, for example `sensor.living_room_heating_state` (an existing entity keeps its id).
 
 **Area.** A room created from an area has that area. For a custom room the area is an optional field of the form, and the form for editing a room has it for every room. The room's device is put into the area and its entities follow the device. Easy TRV does this when it creates the device and at every start for a device that has no area yet, so rooms from older versions get their area too. An area you set on the device page yourself stays, as long as you do not change the room's area. If you choose another area when editing the room, the device moves there; emptying the field leaves the device where it is. Easy TRV never sets the area of a single entity.
 
@@ -80,7 +80,7 @@ The thermostat settings (open-window detection, adaptive mode, hysteresis, frost
 
 **The thermostat's open-window detection.** This is a function of the TRVZB itself, not of Easy TRV, and it has nothing to do with window contacts in Home Assistant. The thermostat treats a temperature drop of more than 1.5 K within 4.5 minutes as an open window: it closes the valve and holds 12 °C, and it ends this pause after 30 minutes at the latest. Easy TRV only switches the detection on or off.
 
-**Adaptive mode and hysteresis.** With the adaptive mode on, the thermostat ignores the hysteresis, so Easy TRV does not write it; it writes the hysteresis only while the room's adaptive mode is not on ("off" or "leave as set in the thermostat"). The adaptive mode is on by default and written to every thermostat with firmware 1.4.4 or newer; a thermostat below 1.4.4 gets the hysteresis instead, but also a firmware warning and the room shows degraded, until you update the firmware or set the adaptive mode to off or leave (globally or for that room).
+**Adaptive mode and hysteresis.** With the adaptive mode on, the thermostat ignores the hysteresis, so Easy TRV does not write it; it writes the hysteresis only while the room's adaptive mode is not on ("off" or "leave as set in the thermostat"). The adaptive mode is on by default and written to every thermostat with firmware 1.4.4 or newer; a thermostat below 1.4.4 gets the hysteresis instead, but also a firmware warning and the room's heating state is `restricted_unsupported`, until you update the firmware or set the adaptive mode to off or leave (globally or for that room).
 
 **Update note.** The hysteresis no longer has a "leave unchanged" choice: rooms that had it follow the global value now, and a Repairs notice (`settings_migrated`) lists them once after the update, which you can dismiss. "Leave as set in the thermostat" still exists for the open-window detection and the adaptive mode.
 
@@ -121,7 +121,7 @@ Off ends frost protection, so heat afterwards brings back the target from before
 - **The last person who changes it wins**, in Home Assistant or at a knob. A knob turn on one thermostat is taken over as the room's target and spread to the other thermostats once the knob has rested for 3 seconds (turning through several steps is one change). A value outside the range is clamped, also on the thermostat that was turned. The event `easy_trv_setpoint_adopted` fires and `setpoint_source` becomes `device:<entity_id>`. The 3 second spread and the rule below that a knob turn while the room is off switches it on are not yet verified on hardware (spike S8 in [`docs/testing-on-device.md`](docs/testing-on-device.md)).
 - **Knob turn while the room is off** switches the room on (`heat`), but only a turn made after the room went off. A turn made just before is not taken as a wish.
 - **During an open window or the outdoor cut-off** a knob turn changes only the wish: the thermostats stay off (the room thermostat keeps showing the wish) and the new target is written when the hold ends.
-- **Schedule.** A thermostat that is switched to its weekly schedule (`auto`) is shown (`note: schedule`, listed in the status sensor), left alone and excluded from the room's writes until it is back on `heat` or `off`, when it is brought up to date. Easy TRV never writes `auto`. A window or the outdoor cut-off is the exception: it switches such a thermostat off too (also one that is switched to its schedule during the hold), and it stays off afterwards (see [Window contacts](#window-contacts)).
+- **Schedule.** A thermostat that is switched to its weekly schedule (`auto`) is shown (`note: schedule`, shown as `restricted_schedule` by the heating state sensor), left alone and excluded from the room's writes until it is back on `heat` or `off`, when it is brought up to date. Easy TRV never writes `auto`. A window or the outdoor cut-off is the exception: it switches such a thermostat off too (also one that is switched to its schedule during the hold), and it stays off afterwards (see [Window contacts](#window-contacts)).
 - **Open-window phase of the thermostat.** A thermostat that shows exactly 12 °C while the room wants something else and the room's open-window detection is on is treated as being in its own window phase (`note: window_phase`). It is left alone until it shows another value or 30 minutes have passed.
 - **Restart.** The remembered target and mode (including frost protection) win; a thermostat that reports something else is corrected. A thermostat whose mode is not known yet is only switched off, and only when a hold is active. If the room thermostat entity is disabled in Home Assistant, there is nothing to restore from: the room starts as on a first start.
 - **First start** (nothing remembered): the room takes the target of the first thermostat that reports one (`setpoint_source: initial`) and writes it to the others, so the setpoints are unified. It starts off only if every thermostat reports off; otherwise the thermostats that report off are switched on.
@@ -137,7 +137,7 @@ Choose any number of window, door, opening or garage door `binary_sensor` entiti
 - **All contacts closed:** the previous mode and target come back. Changes made in Home Assistant during the hold are applied now. A thermostat that was on its schedule stays off, because Easy TRV never writes `auto`: the Repairs issue `schedule_thermostat_off` asks you to switch it back to its schedule in ZHA and disappears when it reports `auto` or `heat` again.
 - **No time limit.** After the open-window warning (default 120 minutes, 0 = never) a Repairs issue `window_open_long` is raised. By default it is raised only while it is colder outside than the room's active sensor shows (setting **Warn only when it is colder outside**, needs the outdoor temperature sensor of the integration options); if it gets colder later, it is raised then, and with the outdoor temperature unknown it is raised as before. Set it to **Always** to warn regardless of the outdoor temperature. The heating is switched off while the window is open either way.
 - **Stuck contact hint.** If the room temperature has not fallen by the expected cooling (default 0.3 K) after the window contact check (default 30 minutes, 0 = off), the Repairs issue `window_contact_suspect` says the contact may be stuck or its battery flat. The hold continues; you decide.
-- **A contact that becomes unavailable or unknown keeps its last state:** one that was open stays open (nobody said it was closed), so the hold and its Repairs issues stay. A contact that has never reported a state counts as closed. `in_sync` is false while a contact says neither open nor closed; the log notes the change once at debug level. Easy TRV does not act on the silence, but it shows it: the room's heating state is `restricted` (or `restricted` is listed among the `reasons` when a state with higher priority holds), with the contact in the attribute `silent_contacts`, and after 10 minutes of silence the Repairs issue `window_contact_unavailable` names the contacts. The issue disappears when every contact reports a state again.
+- **A contact that becomes unavailable or unknown keeps its last state:** one that was open stays open (nobody said it was closed), so the hold and its Repairs issues stay. A contact that has never reported a state counts as closed. `in_sync` is false while a contact says neither open nor closed; the log notes the change once at debug level. Easy TRV does not act on the silence, but it shows it: the room's heating state is `restricted_contact` (or `restricted_contact` is listed among the `reasons` when a state with higher priority holds), with the contact in the attribute `silent_contacts` and named in the `hint`, and after 10 minutes of silence the Repairs issue `window_contact_unavailable` names the contacts. The issue disappears when every contact reports a state again.
 
 <details>
 <summary>Restart and Home Assistant down</summary>
@@ -158,64 +158,68 @@ Choose an outdoor temperature sensor in the integration options (**Windows and o
 - **Writes.** When the active sensor's value changes by at least the minimum change, the value is written to every thermostat of the room after a 5 second pause that merges bursts of reports. Independently it is written again every refresh interval. Writes do not depend on the thermostat's own mode, but while the room is switched off or held by a window or the cut-off, no temperature is written; it follows when the room heats again.
 - **Verification.** Every write is read back after the read-back delay and compared. A write that does not arrive is retried with a growing pause (5, 15, then 45 seconds) up to the configured number of attempts. After that the thermostat is marked as failing (see the status sensor, Repairs and events below). The write that failed is sent again at every refresh interval, and a verified write of that capability clears the problem by itself. A failing thermostat never blocks the others in the room, and writes within a room happen one at a time so the Zigbee network is not flooded.
 - **Fail-safe.** When a TRVZB gets no external value for about two hours it silently falls back to its internal sensor. ZHA still shows the external source as on. Easy TRV reads the source flag back together with every value write, notices the fallback, switches the external source on again, writes the value and fires `easy_trv_failsafe_detected`.
-- **No usable sensor.** If none of the room's sensors is usable, the thermostats are switched to their internal sensor and the room is `degraded`. When a sensor is usable again, the external source is switched on again.
+- **No usable sensor.** If none of the room's sensors is usable, the thermostats are switched to their internal sensor and the room's heating state is `emergency`. When a sensor is usable again, the external source is switched on again.
 - **Unavailable thermostats.** A thermostat that Home Assistant reports as unavailable is skipped without an issue and brought up to date when it returns.
 
 Rooms start once Home Assistant has fully started.
 
 ## What you see
 
-Each room is a device ("Heizung Wohnzimmer", see above) with two sensors: the diagnostic **Heating status** (German "Heizungsstatus") for the health of the room, and the visible **Heating state** ("Heizungszustand") for what the room is doing.
-
-### Heating status
-
-The diagnostic sensor, for example `sensor.living_room_heating_status`. It says whether the room works.
-
-| State | Meaning |
-|---|---|
-| `ok` | All thermostats work and, if the room has sensors, the external source is active. |
-| `degraded` | No usable sensor although some are configured, a thermostat is unavailable or lacks a firmware feature, or a fail-safe was handled within the last refresh interval. |
-| `error` | At least one thermostat did not accept a write after all attempts. |
-
-Attributes:
-
-| Attribute | Content |
-|---|---|
-| `active_sensor` | Entity id of the sensor in use, or empty. |
-| `source` | `external`, `internal` or `none` (no sensors configured, nothing switched yet). |
-| `trv_health` | Per thermostat: `ok`, `unavailable`, `unsupported` or `error`. |
-| `last_error` | The last write error of a failing thermostat, or empty. |
-| `window_open`, `outdoor_cutoff` | Whether a window or the outdoor cut-off holds the room. |
-| `setpoint_source`, `in_sync` | As on the room thermostat. |
-| `schedule_thermostats` | Thermostats that run their own schedule. |
+Each room is a device ("Heizung Wohnzimmer", see above) with one sensor, **Heating state** (German "Heizungszustand"), which says what the room is doing and why.
 
 ### Heating state
 
-The visible sensor, for example `sensor.living_room_heating_state`, is meant for dashboards and automations. It has one state: the first of the following conditions that holds. Until the room has started (Home Assistant fully started) the state is unknown.
+The sensor, for example `sensor.living_room_heating_state`, sits in the diagnostic group of the room's device and is meant for dashboards and automations. It has one state: the first of the following conditions that holds. Until the room has started (Home Assistant fully started) the state is unknown.
 
 | State | Shown as | Holds when |
 |---|---|---|
-| `fault` | Fault / Störung | A thermostat did not accept a write after all attempts (the heating status is `error`). |
+| `fault` | Fault / Störung | A thermostat did not accept a write after all attempts. |
 | `off_manual` | Off (manual) / Aus (manuell) | The room's mode is off. It comes before the holds: while you have switched the room off, a window decides nothing, and the room stays off after the window closes. |
 | `off_window` | Off: window/door open / Aus: Fenster/Tür offen | An open window contact holds the room off (the opening delay has passed). |
 | `off_outdoor` | Off: outdoor temperature / Aus: Außentemperatur | The outdoor cut-off holds the room off. |
 | `off_away` | Off: away / Aus: Abwesenheit | Does not occur yet; reserved for presence. |
 | `window_pending` | Window open, switching off soon / Fenster offen, schaltet gleich ab | A contact is open and the opening delay is still running. |
-| `emergency` | Emergency mode / Notbetrieb | The room has temperature sensors but the thermostats are not on the external source (no usable sensor, for example), or a thermostat signalled its fail-safe within the last refresh interval. These are the two sensor conditions that make the heating status `degraded`. |
-| `restricted` | Restricted / Eingeschränkt | A thermostat is unavailable or unsupported, a thermostat runs its schedule or its own open-window phase, or a window contact says nothing. |
+| `emergency` | Emergency mode / Notbetrieb | The room has temperature sensors but the thermostats are not on the external source (no usable sensor, for example), or a thermostat signalled its fail-safe within the last refresh interval. |
+| `restricted_unavailable` | Restricted: thermostat not reachable / Eingeschränkt: TRV nicht erreichbar | A thermostat is unavailable. |
+| `restricted_contact` | Restricted: window contact silent / Eingeschränkt: Fensterkontakt meldet nichts | A window contact says nothing (`unavailable`, `unknown` or missing). |
+| `restricted_unsupported` | Restricted: thermostat lacks a function / Eingeschränkt: TRV-Funktion fehlt | A thermostat lacks a function the profile has: its firmware is too old for a setting or the device reports it as unsupported. |
+| `restricted_schedule` | Restricted: thermostat on its schedule / Eingeschränkt: TRV im Wochenplan | A thermostat runs its own weekly schedule (`auto`). |
+| `restricted_window_phase` | Restricted: thermostat's window detection active / Eingeschränkt: TRV-Fenstererkennung aktiv | A thermostat is in its own open-window phase (it shows 12 °C). |
 | `boost` | Manual (boost) / Handbetrieb (Boost) | Does not occur yet; reserved for boost. |
 | `frost` | Frost protection / Frostschutz | The room's mode is frost protection. |
 | `heating` | Heating / Heizbetrieb | The room's mode is heat. |
 
-Attributes:
+The five `restricted_*` states are in the order of the table: when several hold, the first one is the state and all of them are in the `reasons`.
+
+Attributes, in this order:
 
 | Attribute | Content |
 |---|---|
+| `hint` | Plain text naming the thermostats and window contacts behind a `fault` or `restricted_*` reason, in the language of Home Assistant; empty (`None`) when there is nothing to name and before the room has started. See below. |
 | `reasons` | Every condition above that holds, in the same order. The first one is the state. The room's mode (`off_manual`, `frost` or `heating`) is always in the list. |
 | `since` | When the state last changed, as an ISO timestamp. After a restart it is the time of the first evaluation. |
 | `window_off_at` | While the opening delay runs: when it ends and the room is switched off. Otherwise empty. |
 | `thermostats` | Thermostat climate entity and why it deviates: `error`, `unavailable`, `unsupported`, `schedule` or `window_phase` (the first that applies). Only thermostats that deviate are listed. |
 | `silent_contacts` | Window contacts that say nothing (`unavailable`, `unknown` or missing), sorted. |
+| `active_sensor` | Entity id of the sensor in use, or empty. |
+| `source` | `external`, `internal` or `none` (no sensors configured, nothing switched yet). |
+| `setpoint_source`, `in_sync` | As on the room thermostat. |
+| `last_error` | The last write error of a failing thermostat, or empty. |
+
+**The hint.** The `hint` has one phrase for each thermostat or contact behind a reason that holds, in the order of the `reasons`, joined by `; `. A thermostat is named as on its device page, a window contact by its name (its entity id if the entity does not exist). The phrases, here in English:
+
+| Reason | Phrase |
+|---|---|
+| `fault` | `<thermostat>: error` |
+| `restricted_unavailable` | `<thermostat> not reachable` |
+| `restricted_contact` | `<contact> reports nothing (<why>)` with `unavailable`, `unknown` or `does not exist` as the reason |
+| `restricted_unsupported` | `<thermostat>: lacks a function (<functions>)` with the plain-language names of the settings it lacks |
+| `restricted_schedule` | `<thermostat> runs its own schedule` |
+| `restricted_window_phase` | `<thermostat>: own window detection active` |
+
+For example "Sofa valve not reachable; Balcony door reports nothing (unavailable)" or, in German, "Sofa valve nicht erreichbar; Balkontür meldet nichts (nicht verfügbar)".
+
+The status sensor of 0.5.0 (`sensor.<room>_heating_status`) is gone; the heating state replaces it (see the [`CHANGELOG`](CHANGELOG.md)).
 
 The event `easy_trv_state_changed` (`room`, `state`, `previous`, `reasons`) fires whenever the state changes from one value to another. It does not fire for the first evaluation after a start.
 
@@ -228,7 +232,7 @@ The event `easy_trv_state_changed` (`room`, `state`, `previous`, `reasons`) fire
 | `settings_migrated` | Warning | After the update to Phase 2a: rooms that had "leave unchanged" for the hysteresis now follow the global hysteresis. The notice lists them. | When you dismiss it. |
 | `window_open_long` | Error | A window has been open longer than the window warning. | When the contacts report closed, or on a reload of the integration (raised again if the window is still open). |
 | `window_contact_suspect` | Warning | A contact reports open but the room did not cool by the drop within the check time. | When the contacts report closed, or on a reload of the integration. |
-| `window_contact_unavailable` | Warning | A window contact has said nothing (`unavailable`, `unknown` or missing) for 10 minutes. The message names the contacts that are silent at that moment and says how Easy TRV treats them: a contact last seen closed (or never seen) counts as closed, one last seen open keeps the heating off until it reports again. The room shows `restricted`, or lists it among the `reasons` when a state with higher priority holds. | When every contact reports a state again, or on a reload of the integration (raised again after 10 minutes if the problem persists). |
+| `window_contact_unavailable` | Warning | A window contact has said nothing (`unavailable`, `unknown` or missing) for 10 minutes. The message names the contacts that are silent at that moment and says how Easy TRV treats them: a contact last seen closed (or never seen) counts as closed, one last seen open keeps the heating off until it reports again. The room shows `restricted_contact`, or lists it among the `reasons` when a state with higher priority holds. | When every contact reports a state again, or on a reload of the integration (raised again after 10 minutes if the problem persists). |
 | `schedule_thermostat_off` | Warning | A window or the outdoor cut-off switched off a thermostat that was running its own schedule. It stays off after the hold, because Easy TRV never writes `auto`. The message names the thermostat and the room. | When the thermostat reports `auto` or `heat` again, or on a reload of the integration (the room then brings it to `heat`). |
 | `zha_api_incompatible` | Error | Easy TRV cannot use the installed ZHA's internal API. Setup is retried. | When setup works. |
 | `profile_invalid` | Warning | A user profile file is invalid and is ignored. The issue names the file and the problem. | When the file loads cleanly after you fix it and reload the integration. |

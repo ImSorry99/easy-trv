@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Attribute `hint` on the heating state sensor: plain text in the language of Home Assistant that names the thermostats and window contacts behind a fault or a restriction, for example "Sofa valve not reachable; Balcony door reports nothing (unavailable)"
+- The heating state sensor shows the attributes `active_sensor`, `source`, `setpoint_source`, `in_sync` and `last_error` that the status sensor showed
+
+### Changed
+
+- The status sensor is merged into the heating state sensor, which is now a diagnostic entity (it sits in the diagnostic group of the room device). The status sensor is removed on update; automations on `sensor.<room>_heating_status` move to `sensor.<room>_heating_state`: `ok` is about `heating`, `frost` and the `off_*` states, `degraded` about `emergency` and the `restricted_*` states, `error` is `fault`. Its attributes `trv_health`, `window_open`, `outdoor_cutoff` and `schedule_thermostats` are gone; `thermostats` and `reasons` say the same
+- The heating state `restricted` is split into five states that say what restricts the room: `restricted_unavailable`, `restricted_contact`, `restricted_unsupported`, `restricted_schedule` and `restricted_window_phase`. When several hold, the first of them is the state and all are in the `reasons`
+
 ## [0.5.0] - 2026-10-15
 
 ### Added

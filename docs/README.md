@@ -8,7 +8,7 @@
 | exactly how the Sonoff TRVZB is addressed (attributes, firmware, spikes) | `profiles/sonoff-trvzb-native.md` |
 | how the code is structured (for implementers) | `specs/2026-10-12-easy-trv-design.md` |
 | what Phase 2 adds (settings model, room thermostat, window contacts, outdoor cut-off) | `specs/2026-10-14-easy-trv-phase2-design.md` |
-| what 0.5 adds (heating state sensor, silent window contacts, areas, hiding the thermostat entities) | `specs/2026-10-15-easy-trv-0.5-room-state-design.md` |
+| what 0.5 adds (heating state sensor, silent window contacts, areas, hiding the thermostat entities) and how 0.5.1 changes the sensor (one diagnostic sensor, five restrictions, hint) | `specs/2026-10-15-easy-trv-0.5-room-state-design.md` |
 | how to test on real thermostats (checklist and spikes S1–S5, S8–S10) | `testing-on-device.md` |
 | which Home Assistant quality scale rules are met | `../custom_components/easy_trv/quality_scale.yaml` |
 | the research behind the decisions (German) | `research/` |
