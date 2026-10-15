@@ -382,10 +382,13 @@ def _sync_differing(
         known = state.trvs[trv]
         if device_driven(known):
             continue
+        # A mode nobody has reported counts as differing under a hold only: the
+        # window must not leave a thermostat heating; elsewhere nothing is
+        # written to a thermostat whose mode is unknown.
         if (
             with_mode
-            and known.reported_mode is not None
             and known.reported_mode != mode.mode
+            and (known.reported_mode is not None or holding(state))
         ):
             writes.append((trv, mode))
         if (

@@ -1,6 +1,8 @@
 from dataclasses import replace
 from datetime import timedelta
 
+import pytest
+
 from custom_components.easy_trv.core.model import (
     ClearIssue,
     Command,
@@ -172,10 +174,36 @@ def test_start_held_without_a_restore_turns_heating_thermostats_off() -> None:
 
 
 def test_start_held_with_thermostats_on_their_schedule_leaves_them_alone() -> None:
-    reported: dict = {A: (19.0, None), B: (19.0, None)}
+    reported: dict = {A: (19.0, "auto"), B: (19.0, "auto")}
     _, _, cmds = started_in_hold(None, reported, window_open=True)
 
     assert room_writes(cmds) == []
+
+
+@pytest.mark.parametrize("restore", [RestoreRoom(21.0, RoomMode.HEAT, None), None])
+@pytest.mark.parametrize("hold", [{"window_open": True}, {"outdoor": 20.0}])
+def test_start_held_turns_off_a_thermostat_with_an_unknown_mode(restore, hold) -> None:
+    reported = {A: (21.0, None), B: (21.0, "heat")}
+    _, _, cmds = started_in_hold(restore, reported, **hold)
+
+    assert (A, SetHvacMode("off")) in room_writes(cmds)
+    assert (B, SetHvacMode("off")) in room_writes(cmds)
+
+
+def test_start_held_turns_off_when_no_mode_is_known() -> None:
+    reported: dict = {A: (None, None), B: (None, None)}
+    _, _, cmds = started_in_hold(
+        RestoreRoom(21.0, RoomMode.HEAT, None), reported, window_open=True
+    )
+
+    assert room_writes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+
+
+def test_start_not_held_writes_no_heat_to_an_unknown_mode() -> None:
+    reported: dict = {A: (21.0, None), B: (21.0, "off")}
+    _, _, cmds = started_in_hold(RestoreRoom(21.0, RoomMode.HEAT, None), reported)
+
+    assert [w for w in room_writes(cmds) if w[0] == A] == []
 
 
 def test_start_with_a_warm_outdoor_holds() -> None:
