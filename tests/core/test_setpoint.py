@@ -10,6 +10,7 @@ from custom_components.easy_trv.core.model import (
     RestoreRoom,
     RetryDue,
     RoomMode,
+    RoomParams,
     RoomState,
     SensorChanged,
     SetHvacMode,
@@ -24,6 +25,7 @@ from custom_components.easy_trv.core.model import (
     Start,
     Tick,
     TrvAvailabilityChanged,
+    TrvHealth,
 )
 from custom_components.easy_trv.core.room_logic import RoomLogic
 from custom_components.easy_trv.core.setpoint import clamp
@@ -630,3 +632,65 @@ def test_a_setpoint_retry_without_a_room_setpoint_sends_nothing() -> None:
     st = replace(failed_setpoint(21.0), setpoint=None)
     _, cmds = logic().handle(RetryDue("climate.a", "setpoint"), LATER, st)
     assert executes(cmds) == []
+
+
+# --- Exhausted setpoint and mode writes are sent again at the refresh interval ---
+
+
+def exhausted(st: RoomState, trv: str, intent) -> RoomState:
+    for _ in range(3):
+        st, _ = logic().handle(result(trv, intent, Failed("busy")), T0, st)
+    assert st.trvs[trv].error_capability == capability_of(intent)
+    return st
+
+
+def test_an_exhausted_setpoint_write_is_sent_again_with_the_current_setpoint() -> None:
+    st = exhausted(started_with_setpoint(21.0), "climate.a", SetSetpoint(21.0))
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=19), st)
+    assert writes(cmds) == []
+    st, _ = logic().handle(SetRoomSetpoint(23.0), T0 + timedelta(minutes=20), st)
+    again = T0 + timedelta(minutes=21)
+    st, cmds = logic().handle(Tick(), again, st)
+    assert (("climate.a", SetSetpoint(23.0))) in writes(cmds)
+    assert [w for w in writes(cmds) if w[0] == "climate.b"] == []
+    assert st.trvs["climate.a"].written_recently["setpoint"][-1] == (23.0, again)
+    _, cmds = logic().handle(Tick(), again + timedelta(minutes=1), st)
+    assert writes(cmds) == []
+
+
+def test_an_exhausted_mode_write_is_sent_again_as_heat() -> None:
+    st = exhausted(started_with_setpoint(21.0), "climate.a", SetHvacMode("heat"))
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=21), st)
+    assert writes(cmds) == [("climate.a", SetHvacMode("heat"))]
+
+
+def test_an_exhausted_setpoint_write_is_not_sent_while_the_room_is_off() -> None:
+    st = exhausted(started_with_setpoint(21.0), "climate.a", SetSetpoint(21.0))
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=21), st)
+    assert writes(cmds) == []
+
+
+def test_exhausted_writes_are_not_sent_to_a_thermostat_left_alone() -> None:
+    st = exhausted(started_with_setpoint(21.0), "climate.a", SetSetpoint(21.0))
+    st = with_trv(st, "climate.a", note=Note.SCHEDULE)
+    _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=21), st)
+    assert writes(cmds) == []
+
+
+def test_a_room_without_a_climate_does_not_resend_setpoint_or_mode() -> None:
+    cfg = replace(CFG, setpoint_range=None)
+    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    st, _ = room.handle(
+        Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
+    )
+    st = with_trv(
+        st,
+        "climate.a",
+        health=TrvHealth.ERROR,
+        error_capability="setpoint",
+        last_error="busy",
+        last_error_retry=T0,
+    )
+    _, cmds = room.handle(Tick(), T0 + timedelta(minutes=21), st)
+    assert writes(cmds) == []

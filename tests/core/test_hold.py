@@ -31,6 +31,7 @@ from custom_components.easy_trv.core.model import (
     Start,
     Tick,
     TrvAvailabilityChanged,
+    TrvHealth,
     TrvObserved,
     WindowChanged,
 )
@@ -684,6 +685,65 @@ def test_a_window_phase_that_ends_by_itself_during_a_hold_writes_off() -> None:
     st, cmds = room().handle(Tick(), start + timedelta(minutes=30), st)
     assert executes(cmds) == [(A, SetHvacMode("off"))]
     assert st.trvs[A].note is None
+
+
+# --- An exhausted off write is sent again at the refresh interval ------------------
+
+
+def exhausted(st: RoomState, trv: str, intent, at=OPEN_AT) -> RoomState:
+    for _ in range(3):
+        st, _ = room().handle(result(trv, intent, Failed("timeout")), at, st)
+    assert st.trvs[trv].health is TrvHealth.ERROR
+    return st
+
+
+def test_an_exhausted_off_write_of_a_hold_is_sent_again_at_the_refresh() -> None:
+    st, _ = open_window(heating())
+    st = exhausted(st, A, SetHvacMode("off"))
+    assert st.trvs[A].error_capability == "hvac_mode"
+    _, cmds = room().handle(Tick(), OPEN_AT + timedelta(minutes=19), st)
+    assert writes_of(cmds) == []
+    again = OPEN_AT + timedelta(minutes=21)
+    st, cmds = room().handle(Tick(), again, st)
+    assert writes_of(cmds) == [(A, SetHvacMode("off"))]
+    assert st.trvs[A].written_recently["hvac_mode"][-1] == ("off", again)
+    # Once per interval, not on every tick.
+    _, cmds = room().handle(Tick(), again + timedelta(minutes=1), st)
+    assert writes_of(cmds) == []
+
+
+def test_an_exhausted_mode_write_follows_the_room_after_the_hold() -> None:
+    st, _ = open_window(heating())
+    st = exhausted(st, A, SetHvacMode("off"))
+    st, _ = room().handle(WindowChanged(open=False), OPEN_AT, st)
+    _, cmds = room().handle(Tick(), OPEN_AT + timedelta(minutes=21), st)
+    assert writes_of(cmds) == [(A, SetHvacMode("heat"))]
+
+
+def test_an_exhausted_mode_write_of_an_off_room_is_off() -> None:
+    st, _ = room().handle(SetRoomMode(RoomMode.OFF), T0, heating())
+    st = exhausted(st, A, SetHvacMode("off"), T0)
+    _, cmds = room().handle(Tick(), T0 + timedelta(minutes=21), st)
+    assert writes_of(cmds) == [(A, SetHvacMode("off"))]
+
+
+def test_an_exhausted_setpoint_write_is_not_sent_while_the_room_is_held() -> None:
+    st = exhausted(heating(), A, SetSetpoint(21.0), T0)
+    st, _ = open_window(st)
+    _, cmds = room().handle(Tick(), T0 + timedelta(minutes=21), st)
+    assert writes_of(cmds) == []
+
+
+def test_an_exhausted_off_write_of_a_schedule_thermostat_is_sent_again() -> None:
+    st = with_trv(heating(), B, note=Note.SCHEDULE)
+    st, _ = open_window(st)
+    st = exhausted(st, B, SetHvacMode("off"))
+    _, cmds = room().handle(Tick(), OPEN_AT + timedelta(minutes=21), st)
+    assert writes_of(cmds) == [(B, SetHvacMode("off"))]
+
+
+def writes_of(cmds: list[Command]) -> list[tuple[str, object]]:
+    return room_writes(cmds)
 
 
 # --- A knob turn during a hold changes the wish, not the mode ---------------------

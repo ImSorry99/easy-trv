@@ -853,10 +853,9 @@ class RoomLogic:
         that raised the error is issued again with a fresh set of attempts. The
         value write that follows in the same tick covers an error on the value.
         """
-        trvs = dict(state.trvs)
         commands: list[Command] = []
         for trv in self._writable(state):
-            current = trvs[trv]
+            current = state.trvs[trv]
             capability = current.error_capability
             intents = self._reissuable(state, current)
             intent = intents.get(capability) if capability is not None else None
@@ -875,14 +874,25 @@ class RoomLogic:
                 or (setpoint.suspended(state) and isinstance(intent, SetSource))
             ):
                 continue
-            trvs[trv] = replace(
-                current,
-                attempts=_without(current.attempts, capability),
-                pending_retry=_without(current.pending_retry, capability),
-                last_error_retry=now,
+            state = self._with_trv(
+                state,
+                trv,
+                replace(
+                    current,
+                    attempts=_without(current.attempts, capability),
+                    pending_retry=_without(current.pending_retry, capability),
+                    last_error_retry=now,
+                ),
             )
-            commands.append(Execute(trv, intent))
-        return replace(state, trvs=trvs), commands
+            if isinstance(intent, SetSetpoint | SetHvacMode):
+                # Through the room's writes, which remember them as echoes.
+                state, written = setpoint.write(
+                    state, now, [(trv, intent)], self._capability_of
+                )
+                commands.extend(written)
+            else:
+                commands.append(Execute(trv, intent))
+        return state, commands
 
     def _settings(self, trv_state: TrvState) -> list[Intent]:
         """Return the settings to write to a thermostat, in write order.
@@ -912,13 +922,25 @@ class RoomLogic:
         )
 
     def _reissuable(self, state: RoomState, trv_state: TrvState) -> dict[str, Intent]:
-        """Map each capability the room writes besides the value to its intent."""
+        """Map each capability the room writes besides the value to its intent.
+
+        That includes the mode and setpoint the room wants on the thermostat now
+        (``off`` while the room is off or held, the setpoint only when it heats),
+        not for a thermostat the room leaves alone outside a hold.
+        """
         intents: list[Intent] = []
         if state.source is Source.EXTERNAL:
             intents.append(SetSource("external"))
         elif state.source is Source.INTERNAL:
             intents.append(SetSource("internal"))
         intents.extend(self._settings(trv_state))
+        if self._cfg.setpoint_range is not None and (
+            setpoint.holding(state)
+            or not (setpoint.device_driven(trv_state) or trv_state.left_off)
+        ):
+            intents.append(SetHvacMode("off" if setpoint.suspended(state) else "heat"))
+            if state.setpoint is not None and not setpoint.suspended(state):
+                intents.append(SetSetpoint(state.setpoint))
         return {self._capability_of(intent): intent for intent in intents}
 
     def _resync_trv(self, state: RoomState, now: datetime, trv: str) -> _Step:
