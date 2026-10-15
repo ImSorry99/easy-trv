@@ -116,6 +116,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "setpoint_max",
         "window_open_delay_seconds",
         "window_warn_minutes",
+        "window_warn_colder",
         "window_check_minutes",
         "window_check_drop_kelvin",
         "outdoor_cutoff",
@@ -161,6 +162,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(options["windows_outdoor"]["data"]) == {
         "window_open_delay_seconds",
         "window_warn_minutes",
+        "window_warn_colder",
         "window_check_minutes",
         "window_check_drop_kelvin",
         "outdoor_sensor",

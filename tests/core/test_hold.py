@@ -522,6 +522,60 @@ def test_no_warning_when_window_warn_is_off() -> None:
     assert of_type(cmds, RaiseIssue) == []
 
 
+COLDER_CFG = replace(
+    HOLD_CFG, outdoor_cutoff=None, window_check=None, window_warn_only_colder=True
+)
+WARN_AT = OPEN_AT + timedelta(minutes=121)
+
+
+def outdoor(st: RoomState, celsius: float | None, cfg: RoomConfig = COLDER_CFG):
+    st, _ = room(cfg).handle(OutdoorChanged(celsius), OPEN_AT, st)
+    return st
+
+
+def test_the_room_keeps_the_outdoor_temperature_without_a_cut_off() -> None:
+    st = outdoor(heating(COLDER_CFG), 12.5)
+    assert st.outdoor == 12.5
+    assert st.outdoor_hold is False
+    assert outdoor(st, None).outdoor is None
+
+
+def test_no_warning_while_it_is_warmer_outside() -> None:
+    st = outdoor(heating(COLDER_CFG), 24.0)  # the room shows 21.3
+    st, _ = room(COLDER_CFG).handle(WindowChanged(open=True), OPEN_AT, st)
+    st, cmds = room(COLDER_CFG).handle(Tick(), WARN_AT, st)
+    assert of_type(cmds, RaiseIssue) == []
+    assert st.window_warned is False
+    # It gets colder outside: the warning comes then.
+    st = outdoor(st, 15.0)
+    st, cmds = room(COLDER_CFG).handle(Tick(), WARN_AT + timedelta(minutes=30), st)
+    assert of_type(cmds, RaiseIssue) == [
+        RaiseIssue("window_open_long", "room1", {"room": "Living", "minutes": "151"})
+    ]
+
+
+def test_warning_when_it_is_colder_outside() -> None:
+    st = outdoor(heating(COLDER_CFG), 10.0)
+    st, _ = room(COLDER_CFG).handle(WindowChanged(open=True), OPEN_AT, st)
+    _, cmds = room(COLDER_CFG).handle(Tick(), WARN_AT, st)
+    assert [i.kind for i in of_type(cmds, RaiseIssue)] == ["window_open_long"]
+
+
+def test_warning_when_the_outdoor_temperature_is_unknown() -> None:
+    st = heating(COLDER_CFG)
+    st, _ = room(COLDER_CFG).handle(WindowChanged(open=True), OPEN_AT, st)
+    _, cmds = room(COLDER_CFG).handle(Tick(), WARN_AT, st)
+    assert [i.kind for i in of_type(cmds, RaiseIssue)] == ["window_open_long"]
+
+
+def test_warning_regardless_of_the_outdoor_temperature_when_switched_off() -> None:
+    cfg = replace(COLDER_CFG, window_warn_only_colder=False)
+    st = outdoor(heating(cfg), 24.0, cfg)
+    st, _ = room(cfg).handle(WindowChanged(open=True), OPEN_AT, st)
+    _, cmds = room(cfg).handle(Tick(), WARN_AT, st)
+    assert [i.kind for i in of_type(cmds, RaiseIssue)] == ["window_open_long"]
+
+
 def test_suspect_contact_when_the_room_does_not_cool() -> None:
     st, _ = open_window(heating())
     at = OPEN_AT + timedelta(minutes=29)

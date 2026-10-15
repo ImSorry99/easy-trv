@@ -2047,6 +2047,30 @@ async def test_outdoor_sensor_drives_the_outdoor_hold(
     assert writes_to(gateway, IEEE_A, MODE) == [0, 4]
 
 
+@pytest.mark.parametrize(
+    ("only_colder", "contacts", "watched"),
+    [(True, (CONTACT,), True), (False, (CONTACT,), False), (True, (), False)],
+)
+async def test_the_outdoor_sensor_is_read_for_the_window_warning(  # noqa: PLR0913
+    hass, make_controller, config, only_colder, contacts, watched
+) -> None:
+    hass.states.async_set(OUTDOOR, "12.0", {"unit_of_measurement": "°C"})
+    controller = make_controller(
+        cfg=with_climate(
+            config, window_contacts=contacts, window_warn_only_colder=only_colder
+        ),
+        outdoor_sensor=OUTDOOR,
+    )
+    await controller.async_start()
+    await settle(hass)
+    assert controller._state.outdoor == (12.0 if watched else None)  # noqa: SLF001
+
+    hass.states.async_set(OUTDOOR, "9.5", {"unit_of_measurement": "°C"})
+    await settle(hass)
+    assert controller._state.outdoor == (9.5 if watched else None)  # noqa: SLF001
+    assert controller.outdoor_hold is False
+
+
 async def test_an_outdoor_temperature_at_start_is_taken_over(
     hass, climate_outdoor
 ) -> None:

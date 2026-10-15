@@ -45,6 +45,7 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
         setpoint_range=(4.0, 35.0, 0.5),
         window_contacts=(),
         window_warn=timedelta(minutes=120),
+        window_warn_only_colder=True,
         window_check=timedelta(minutes=30),
         window_check_drop=0.3,
         outdoor_cutoff=None,

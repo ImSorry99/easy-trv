@@ -201,6 +201,7 @@ def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shape
             if settings.window_warn_minutes
             else None
         ),
+        window_warn_only_colder=settings.window_warn_colder == "on",
         window_check=(
             timedelta(minutes=settings.window_check_minutes)
             if settings.window_check_minutes

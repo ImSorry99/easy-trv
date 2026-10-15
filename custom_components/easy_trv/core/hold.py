@@ -127,6 +127,7 @@ def on_outdoor(  # noqa: PLR0913
     temperature ends it too (and says so), for the room must not stay off on a
     value nobody can see. ``at_start`` takes the state without writing.
     """
+    state = replace(state, outdoor=celsius)
     cutoff = cfg.outdoor_cutoff
     if cutoff is None:
         return state, []
@@ -165,7 +166,11 @@ def on_outdoor(  # noqa: PLR0913
 def on_tick(
     cfg: RoomConfig, state: RoomState, now: datetime, active: _Reading | None
 ) -> _Step:
-    """Raise the long-open warning and run the stuck-contact check when due."""
+    """Raise the long-open warning and run the stuck-contact check when due.
+
+    With ``window_warn_only_colder`` the warning waits while it is not colder
+    outside than the room's active sensor shows; an unknown temperature warns.
+    """
     opened = state.window_opened_at
     if not state.window_open or opened is None:
         return state, []
@@ -173,7 +178,12 @@ def on_tick(
     minutes = str(int(elapsed.total_seconds() // 60))
     commands: list[Command] = []
     warn = cfg.window_warn
-    if warn is not None and not state.window_warned and elapsed >= warn:
+    if (
+        warn is not None
+        and not state.window_warned
+        and elapsed >= warn
+        and _colder_outside(cfg, state, active)
+    ):
         state = replace(state, window_warned=True)
         commands.append(
             RaiseIssue(
@@ -209,6 +219,17 @@ def on_tick(
 
 
 # --- Helpers -------------------------------------------------------------
+
+
+def _colder_outside(cfg: RoomConfig, state: RoomState, active: _Reading | None) -> bool:
+    """Return whether the long-open warning may be raised now.
+
+    Always, unless the room warns only while it is colder outside; then also
+    whenever the outdoor or the room temperature is not known.
+    """
+    if not cfg.window_warn_only_colder or state.outdoor is None or active is None:
+        return True
+    return state.outdoor < active[1]
 
 
 def _transition(  # noqa: PLR0913

@@ -88,6 +88,7 @@
             "setpoint_max": "Maximum target temperature",
             "window_open_delay_seconds": "Delay before a window counts as open (seconds, 0 = immediately)",
             "window_warn_minutes": "Open-window warning (minutes, 0 = never)",
+            "window_warn_colder": "Warn only when it is colder outside",
             "window_check_minutes": "Window contact check (minutes, 0 = off)",
             "window_check_drop_kelvin": "Cooling expected by the check (K)",
             "outdoor_cutoff": "Outdoor cut-off",
@@ -109,6 +110,7 @@
             "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Only used with the setpoint range Manual. Global is currently {global_setpoint_max}.",
             "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Global is currently {global_window_open_delay_seconds}.",
             "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Global is currently {global_window_warn_minutes}.",
+            "window_warn_colder": "The open-window warning is raised only while the outdoor temperature is below the room temperature. If it gets colder later, it is raised then. Needs the outdoor temperature sensor; with the outdoor temperature unknown, it warns. The heating is switched off while the window is open either way. Global is currently {global_window_warn_colder}.",
             "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the amount set in \"Cooling expected by the check (K)\", otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
             "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Global is currently {global_window_check_drop_kelvin}.",
             "outdoor_cutoff": "Global follows the outdoor cut-off temperature of the integration options (currently {global_outdoor_cutoff_celsius}), unless you enter a temperature of your own below. Off never switches this room off because of the outdoor temperature.",
@@ -258,6 +260,7 @@
             "data": {
               "window_open_delay_seconds": "Delay before a window counts as open (seconds, 0 = immediately)",
               "window_warn_minutes": "Open-window warning (minutes, 0 = never)",
+              "window_warn_colder": "Warn only when it is colder outside",
               "window_check_minutes": "Window contact check (minutes, 0 = off)",
               "window_check_drop_kelvin": "Cooling expected by the check (K)",
               "outdoor_sensor": "Outdoor temperature sensor",
@@ -266,6 +269,7 @@
             "data_description": {
               "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Empty = {default_window_open_delay_seconds}.",
               "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Empty = {default_window_warn_minutes}.",
+              "window_warn_colder": "The open-window warning is raised only while the outdoor temperature is below the room temperature. If it gets colder later, it is raised then. Needs the outdoor temperature sensor; with the outdoor temperature unknown, it warns. The heating is switched off while the window is open either way.",
               "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the amount set in \"Cooling expected by the check (K)\", otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Empty = {default_window_check_minutes}.",
               "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Empty = {default_window_check_drop_kelvin}.",
               "outdoor_sensor": "The temperature sensor the outdoor cut-off reads. Without it the cut-off does nothing.",
@@ -341,6 +345,13 @@
         "global": "Global",
         "auto": "Automatic (from the thermostat)",
         "manual": "Manual"
+      }
+    },
+    "window_warn_colder": {
+      "options": {
+        "global": "Global",
+        "on": "Only when it is colder outside",
+        "off": "Always"
       }
     }
   }
