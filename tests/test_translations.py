@@ -213,6 +213,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "settings_migrated",
         "window_open_long",
         "window_contact_suspect",
+        "window_contact_unavailable",
         "schedule_thermostat_off",
     }
 
@@ -314,6 +315,7 @@ def test_window_issues_name_the_room_and_the_numbers(path: Path) -> None:
     expected = {
         "window_open_long": ({"room", "minutes"}, {"room", "minutes"}),
         "window_contact_suspect": ({"room", "minutes", "drop"}, {"room"}),
+        "window_contact_unavailable": ({"room", "contacts"}, {"room", "contacts"}),
     }
     for key, (allowed, required) in expected.items():
         assert set(issues[key]) == {"title", "description"}
@@ -327,6 +329,25 @@ def test_window_issues_name_the_room_and_the_numbers(path: Path) -> None:
     # The suspect issue also says by how much the room should have cooled.
     suspect = " ".join(issues["window_contact_suspect"].values())
     assert "{drop}" in suspect
+    # The room is in the title, the silent contacts in the text.
+    silent = issues["window_contact_unavailable"]
+    assert "{room}" in silent["title"]
+    assert "{contacts}" in silent["description"]
+
+
+def test_the_silent_contact_issue_says_what_stays_as_it_is() -> None:
+    de = load(DE)["issues"]["window_contact_unavailable"]
+    assert de["title"] == "Fensterkontakt im Raum {room} nicht erreichbar"
+    assert de["description"] == (
+        "{contacts} meldet seit mindestens 10 Minuten keinen Zustand. Easy TRV "
+        "behandelt den Kontakt so, wie er zuletzt war, ein nie gesehener Kontakt "
+        "gilt als geschlossen. Ein offenes Fenster schaltet die Heizung deshalb "
+        "gerade nicht ab. Prüfe Batterie und Funkverbindung des Kontakts."
+    )
+    en = load(EN)["issues"]["window_contact_unavailable"]
+    assert "at least 10 minutes" in en["description"]
+    assert "never seen" in en["description"]
+    assert "does not switch the heating off" in en["description"]
 
 
 def test_the_window_hold_texts_say_that_all_thermostats_go_off() -> None:

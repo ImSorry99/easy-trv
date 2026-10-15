@@ -263,6 +263,7 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
         "settings_migrated",
         "window_open_long",
         "window_contact_suspect",
+        "window_contact_unavailable",
         "schedule_thermostat_off",
     }
     icon = icons["entity"]["sensor"]["room_status"]

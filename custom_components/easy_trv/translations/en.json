@@ -192,6 +192,10 @@
       "title": "The window contact in {room} reports open, but the room is not cooling",
       "description": "The window contact in {room} has reported open for {minutes} minutes, yet the room temperature has not fallen by at least {drop} K since it opened.\n\nCheck whether the contact is stuck or its battery is flat. Easy TRV keeps the thermostats off while the contact reports open; this issue disappears when it reports closed."
     },
+    "window_contact_unavailable": {
+      "title": "Window contact in {room} is not reachable",
+      "description": "{contacts} has not reported a state for at least 10 minutes. Easy TRV treats the contact as it was last, and a contact that was never seen counts as closed. An open window therefore does not switch the heating off right now. Check the contact's battery and radio connection."
+    },
     "schedule_thermostat_off": {
       "title": "{thermostat} in {room} stays off after the window was closed",
       "description": "Easy TRV switched {thermostat} in {room} off while the window was open (or it was too warm outside). The thermostat was running its own weekly schedule. Easy TRV does not restore schedules and never writes \"auto\", so it stays off.\n\nSwitch it back to its schedule in ZHA. This issue disappears as soon as the thermostat reports auto or heat again."

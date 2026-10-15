@@ -18,6 +18,9 @@ from .core.model import EVENT_WRITE_FAILED as EVENT_WRITE_FAILED  # noqa: PLC041
 
 DOMAIN: Final = "easy_trv"
 
+# Bus event fired when the heating state of a room changes.
+EVENT_STATE_CHANGED: Final = "easy_trv_state_changed"
+
 # Room setting value meaning "use the global setting"
 SETTING_GLOBAL: Final = _settings.GLOBAL
 
@@ -81,6 +84,9 @@ DEBOUNCE_SECONDS: Final = 5.0
 OPERATION_TIMEOUT: Final = 20.0
 BACKOFF_SECONDS: Final = (5.0, 15.0, 45.0)
 TICK_SECONDS: Final = 60
+# How long a window contact may stay silent before Repairs says so. Not a setting:
+# it rides out ZHA's start-up.
+CONTACT_SILENT_ISSUE_MINUTES: Final = 10
 
 # Repairs issues
 ISSUE_ZHA_API: Final = "zha_api_incompatible"

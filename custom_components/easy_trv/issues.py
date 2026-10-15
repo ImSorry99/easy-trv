@@ -23,6 +23,7 @@ _PROFILE_INVALID_PREFIX = "profile_invalid_"
 _ROOM_INVALID_PREFIX = "room_invalid_"
 _WINDOW_OPEN_LONG_PREFIX = "window_open_long_"
 _WINDOW_CONTACT_SUSPECT_PREFIX = "window_contact_suspect_"
+_WINDOW_CONTACT_UNAVAILABLE_PREFIX = "window_contact_unavailable_"
 
 
 def issue_id_unreachable(ieee: str) -> str:
@@ -53,6 +54,11 @@ def issue_id_window_open_long(room_id: str) -> str:
 def issue_id_window_contact_suspect(room_id: str) -> str:
     """Return the id of the "window contact looks stuck" issue of a room."""
     return f"{_WINDOW_CONTACT_SUSPECT_PREFIX}{room_id}"
+
+
+def issue_id_window_contact_unavailable(room_id: str) -> str:
+    """Return the id of the "window contact says nothing" issue of a room."""
+    return f"{_WINDOW_CONTACT_UNAVAILABLE_PREFIX}{room_id}"
 
 
 def _issue_id_profile_invalid(file: str) -> str:
@@ -329,21 +335,50 @@ def clear_window_contact_suspect(hass: HomeAssistant, room_id: str) -> None:
     ir.async_delete_issue(hass, DOMAIN, issue_id_window_contact_suspect(room_id))
 
 
+def raise_window_contact_unavailable(
+    hass: HomeAssistant, room_id: str, room: str, contacts: str
+) -> None:
+    """Report window contacts that have said nothing for some minutes.
+
+    ``contacts`` is the comma-separated list of their names. Raising the issue
+    again with another list updates it.
+    """
+    _create(
+        hass,
+        issue_id_window_contact_unavailable(room_id),
+        ir.IssueSeverity.WARNING,
+        "window_contact_unavailable",
+        {"room": room, "contacts": contacts},
+    )
+
+
+def clear_window_contact_unavailable(hass: HomeAssistant, room_id: str) -> None:
+    """Remove the "window contact says nothing" issue of a room."""
+    ir.async_delete_issue(hass, DOMAIN, issue_id_window_contact_unavailable(room_id))
+
+
 def clear_window_issues_except(hass: HomeAssistant, keep_room_ids: set[str]) -> None:
     """Remove the window issues of every room not in ``keep_room_ids``.
 
-    Covers ``window_open_long_*`` and ``window_contact_suspect_*``. The rooms
-    that are kept are those that still have a controller; the issues of a room
-    that was deleted or can no longer be set up do not outlive it.
+    Covers ``window_open_long_*``, ``window_contact_suspect_*`` and
+    ``window_contact_unavailable_*``. The rooms that are kept are those that
+    still have a controller; the issues of a room that was deleted or can no
+    longer be set up do not outlive it.
     """
-    wanted = {issue_id_window_open_long(room_id) for room_id in keep_room_ids} | {
-        issue_id_window_contact_suspect(room_id) for room_id in keep_room_ids
-    }
+    wanted = (
+        {issue_id_window_open_long(room_id) for room_id in keep_room_ids}
+        | {issue_id_window_contact_suspect(room_id) for room_id in keep_room_ids}
+        | {issue_id_window_contact_unavailable(room_id) for room_id in keep_room_ids}
+    )
     for domain, issue_id in list(ir.async_get(hass).issues):
         if (
             domain == DOMAIN
             and issue_id.startswith(
-                (_WINDOW_OPEN_LONG_PREFIX, _WINDOW_CONTACT_SUSPECT_PREFIX)
+                (
+                    _WINDOW_OPEN_LONG_PREFIX,
+                    _WINDOW_CONTACT_SUSPECT_PREFIX,
+                    _WINDOW_CONTACT_UNAVAILABLE_PREFIX,
+                )
             )
             and issue_id not in wanted
         ):

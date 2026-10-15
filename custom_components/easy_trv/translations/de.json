@@ -192,6 +192,10 @@
       "title": "Fensterkontakt in {room} meldet offen, aber der Raum kühlt nicht ab",
       "description": "Der Fensterkontakt in {room} meldet seit {minutes} Minuten offen, die Raumtemperatur ist seit dem Öffnen aber nicht um mindestens {drop} K gefallen.\n\nPrüfe, ob der Kontakt klemmt oder seine Batterie leer ist. Easy TRV hält die Thermostate aus, solange der Kontakt offen meldet; dieses Problem verschwindet, sobald er „geschlossen“ meldet."
     },
+    "window_contact_unavailable": {
+      "title": "Fensterkontakt im Raum {room} nicht erreichbar",
+      "description": "{contacts} meldet seit mindestens 10 Minuten keinen Zustand. Easy TRV behandelt den Kontakt so, wie er zuletzt war, ein nie gesehener Kontakt gilt als geschlossen. Ein offenes Fenster schaltet die Heizung deshalb gerade nicht ab. Prüfe Batterie und Funkverbindung des Kontakts."
+    },
     "schedule_thermostat_off": {
       "title": "{thermostat} in {room} bleibt nach dem Lüften aus",
       "description": "Easy TRV hat {thermostat} in {room} ausgeschaltet, während das Fenster offen war (oder es draußen zu warm war). Das Thermostat lief nach seinem eigenen Zeitplan. Easy TRV stellt Zeitpläne nicht wieder her und schreibt nie „auto“, deshalb bleibt es aus.\n\nStelle es in ZHA wieder auf seinen Zeitplan zurück. Dieses Problem verschwindet, sobald das Thermostat „auto“ oder „heat“ meldet."

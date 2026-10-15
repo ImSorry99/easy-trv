@@ -22,7 +22,9 @@ from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
+from custom_components.easy_trv import issues
 from custom_components.easy_trv.adapters.zha_gateway import GatewayError
+from custom_components.easy_trv.const import CONTACT_SILENT_ISSUE_MINUTES
 from custom_components.easy_trv.core.model import (
     KnobSettled,
     OutdoorChanged,
@@ -226,8 +228,9 @@ class HoldInputs:
 
         The outdoor sensor is needed for a cut-off, and for window contacts
         whose long-open warning waits until it is colder outside. ``changed``
-        is called when the contacts become (un)reliable, which the room shows
-        as ``in_sync`` although the logic has no event for it.
+        is called when the set of silent contacts changes and when the open delay
+        starts or is cancelled, which the room shows although the logic has no
+        event for it.
         """
         self._hass = hass
         self._config = config
@@ -242,13 +245,28 @@ class HoldInputs:
         self._unreliable: frozenset[str] = frozenset()
         # contact -> whether it was open the last time it said anything
         self._last: dict[str, bool] = {}
-        # The timer of a window that is open but not yet counted as such.
+        # The timer of a window that is open but not yet counted as such, and
+        # when it ends.
         self._pending_open: CALLBACK_TYPE | None = None
+        self._window_off_at: datetime | None = None
+        # The timer that raises the issue of silent contacts, and whether it has.
+        self._silent_timer: CALLBACK_TYPE | None = None
+        self._silent_raised = False
 
     @property
     def contacts_reliable(self) -> bool:
         """Return whether every window contact reports open or closed."""
         return not self._unreliable
+
+    @property
+    def silent_contacts(self) -> frozenset[str]:
+        """Return the contacts that say nothing: unavailable, unknown or missing."""
+        return self._unreliable
+
+    @property
+    def window_off_at(self) -> datetime | None:
+        """Return when the running open delay switches the room off, else ``None``."""
+        return self._window_off_at
 
     def start(self) -> tuple[bool, float | None]:
         """Start tracking; return whether a window is open and the outdoor °C.
@@ -266,6 +284,7 @@ class HoldInputs:
                 )
             )
             self._window_open = self._resolve()
+            self._track_silent(frozenset())
         if self._outdoor is not None:
             self._unsubscribers.append(
                 async_track_state_change_event(
@@ -276,11 +295,17 @@ class HoldInputs:
         return self._window_open, outdoor
 
     def stop(self) -> None:
-        """Stop tracking."""
+        """Stop tracking, drop both timers and take the contacts issue back.
+
+        Nobody is told: the room is going away.
+        """
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
-        self._cancel_pending_open()
+        self._drop_pending_open()
+        self._cancel_silent_timer()
+        self._silent_raised = False
+        issues.clear_window_contact_unavailable(self._hass, self._config.room_id)
 
     def _resolve(self) -> bool:
         """Return whether any contact is open; note the contacts that say nothing.
@@ -330,8 +355,9 @@ class HoldInputs:
         contact is still open then, so that airing for a moment does not switch
         the heating off.
         """
-        reliable = self.contacts_reliable
+        silent_before = self._unreliable
         is_open = self._resolve()
+        self._track_silent(silent_before)
         fed = False
         if is_open and not self._window_open:
             fed = self._open_after_delay()
@@ -341,8 +367,59 @@ class HoldInputs:
                 self._window_open = False
                 self._feed(WindowChanged(open=False))
                 fed = True
-        if not fed and reliable != self.contacts_reliable:
+        if not fed and silent_before != self._unreliable:
             self._changed()
+
+    def _track_silent(self, before: frozenset[str]) -> None:
+        """Time the silence of the contacts, raise the issue and take it back.
+
+        The timer starts when the silent set goes from empty to non-empty and
+        stops when it empties again, so a contact that comes and goes starts
+        over each time; a change of the set in between leaves it running. While
+        the issue is raised, a change of the set updates it.
+        """
+        silent = self._unreliable
+        if not silent:
+            self._cancel_silent_timer()
+            if self._silent_raised:
+                self._silent_raised = False
+                issues.clear_window_contact_unavailable(
+                    self._hass, self._config.room_id
+                )
+        elif self._silent_raised:
+            if silent != before:
+                self._raise_silent_issue()
+        elif self._silent_timer is None:
+
+            @callback
+            def fire(_now: datetime) -> None:
+                # Cancelled as soon as the set empties: contacts are silent now.
+                self._silent_timer = None
+                self._silent_raised = True
+                self._raise_silent_issue()
+
+            self._silent_timer = async_call_later(
+                self._hass, CONTACT_SILENT_ISSUE_MINUTES * 60, fire
+            )
+
+    def _cancel_silent_timer(self) -> None:
+        """Stop the timer that raises the issue of silent contacts."""
+        if self._silent_timer is not None:
+            self._silent_timer()
+            self._silent_timer = None
+
+    def _raise_silent_issue(self) -> None:
+        """Raise the issue naming the contacts that are silent now."""
+        names = []
+        for entity_id in self._unreliable:
+            state = self._hass.states.get(entity_id)
+            names.append(entity_id if state is None else state.name)
+        issues.raise_window_contact_unavailable(
+            self._hass,
+            self._config.room_id,
+            self._config.name,
+            ", ".join(sorted(names)),
+        )
 
     def _open_after_delay(self) -> bool:
         """Feed an open window now, or arm the delay; return whether it was fed."""
@@ -356,19 +433,30 @@ class HoldInputs:
             @callback
             def fire(_now: datetime) -> None:
                 self._pending_open = None
+                self._window_off_at = None
                 self._window_open = True
                 self._feed(WindowChanged(open=True))
 
             self._pending_open = async_call_later(
                 self._hass, delay.total_seconds(), fire
             )
+            self._window_off_at = dt_util.utcnow() + delay
+            self._changed()
         return False
 
     def _cancel_pending_open(self) -> None:
         """Stop the delay of a window that has not been counted as open yet."""
-        if self._pending_open is not None:
-            self._pending_open()
-            self._pending_open = None
+        if self._drop_pending_open():
+            self._changed()
+
+    def _drop_pending_open(self) -> bool:
+        """Stop the delay without telling anyone; return whether one was running."""
+        if self._pending_open is None:
+            return False
+        self._pending_open()
+        self._pending_open = None
+        self._window_off_at = None
+        return True
 
     @callback
     def _on_outdoor(self, event: Event[EventStateChangedData]) -> None:

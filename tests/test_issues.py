@@ -36,6 +36,10 @@ def test_issue_ids_drop_the_colons_of_the_ieee() -> None:
         issues.issue_id_window_contact_suspect("01ABC")
         == "window_contact_suspect_01ABC"
     )
+    assert (
+        issues.issue_id_window_contact_unavailable("01ABC")
+        == "window_contact_unavailable_01ABC"
+    )
 
 
 async def test_unreachable_issue_is_raised_and_cleared(hass) -> None:
@@ -287,10 +291,34 @@ async def test_window_contact_suspect_issue_names_room_minutes_and_drop(hass) ->
     assert get(hass, "window_contact_suspect_room1") is None
 
 
+async def test_window_contact_unavailable_raise_and_clear(hass) -> None:
+    issues.raise_window_contact_unavailable(
+        hass, "room1", "Living", "Balcony door, Bath window"
+    )
+    raised = get(hass, "window_contact_unavailable_room1")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_key == "window_contact_unavailable"
+    assert raised.translation_placeholders == {
+        "room": "Living",
+        "contacts": "Balcony door, Bath window",
+    }
+    assert raised.is_fixable is False
+    assert raised.is_persistent is False
+    # Raising it again with another list updates the one issue.
+    issues.raise_window_contact_unavailable(hass, "room1", "Living", "Balcony door")
+    updated = get(hass, "window_contact_unavailable_room1")
+    assert updated is not None
+    assert updated.translation_placeholders["contacts"] == "Balcony door"
+    issues.clear_window_contact_unavailable(hass, "room1")
+    assert get(hass, "window_contact_unavailable_room1") is None
+
+
 async def test_clear_window_issues_except_keeps_only_the_named_rooms(hass) -> None:
     for room_id in ("keep", "gone"):
         issues.raise_window_open_long(hass, room_id, room_id, 5)
         issues.raise_window_contact_suspect(hass, room_id, room_id, 5, "0.3")
+        issues.raise_window_contact_unavailable(hass, room_id, room_id, "x")
     raise_unreachable(hass, IEEE)
     issues.raise_room_invalid(hass, "gone", "Gone", "x")
 
@@ -300,9 +328,12 @@ async def test_clear_window_issues_except_keeps_only_the_named_rooms(hass) -> No
     assert get(hass, "window_contact_suspect_keep") is not None
     assert get(hass, "window_open_long_gone") is None
     assert get(hass, "window_contact_suspect_gone") is None
+    assert get(hass, "window_contact_unavailable_keep") is not None
+    assert get(hass, "window_contact_unavailable_gone") is None
     # Other issues of the domain are not touched.
     assert get(hass, "trv_unreachable_00124b00aabb") is not None
     assert get(hass, "room_invalid_gone") is not None
     issues.clear_window_issues_except(hass, set())
     assert get(hass, "window_open_long_keep") is None
     assert get(hass, "window_contact_suspect_keep") is None
+    assert get(hass, "window_contact_unavailable_keep") is None

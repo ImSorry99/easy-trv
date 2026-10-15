@@ -9,6 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.issue_registry import IssueSeverity
+from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -23,6 +24,7 @@ from custom_components.easy_trv.const import (
     EVENT_FAILSAFE,
     EVENT_RECOVERED,
     EVENT_SETPOINT_ADOPTED,
+    EVENT_STATE_CHANGED,
     EVENT_WRITE_FAILED,
 )
 from custom_components.easy_trv.controller import RoomController
@@ -36,6 +38,7 @@ from custom_components.easy_trv.core.model import (
     RoomStatus,
     TrvConfig,
 )
+from custom_components.easy_trv.core.room_state import HeatingState
 from custom_components.easy_trv.profiles.loader import load_profiles_sync
 from tests.fake_gateway import FakeGateway
 
@@ -1996,11 +1999,14 @@ async def test_start_clears_stale_window_issues_of_the_room_only(
     for room_id in ("room1", "other"):
         issues.raise_window_open_long(hass, room_id, "x", 5)
         issues.raise_window_contact_suspect(hass, room_id, "x", 5, "0.3")
+        issues.raise_window_contact_unavailable(hass, room_id, "x", "w")
     await climate_window.async_start()
     assert issue(hass, "window_open_long_room1") is None
     assert issue(hass, "window_contact_suspect_room1") is None
+    assert issue(hass, "window_contact_unavailable_room1") is None
     assert issue(hass, "window_open_long_other") is not None
     assert issue(hass, "window_contact_suspect_other") is not None
+    assert issue(hass, "window_contact_unavailable_other") is not None
 
 
 async def test_window_changes_are_ignored_after_stop(
@@ -2150,3 +2156,401 @@ async def test_stop_removes_every_state_listener(hass, make_controller, config) 
     await room.async_start()
     await room.async_stop()
     assert [hass.bus.async_listeners().get(name, 0) for name in tracked] == before
+
+
+# --- Heating state, visible window delay, silent contacts ------------------
+
+SILENT_ISSUE = "window_contact_unavailable_room1"
+BALCONY = "Balcony door"
+BATH = "Bath window"
+
+
+async def start_closed(hass, controller, gateway) -> None:
+    """Start the room with both contacts closed and named."""
+    hass.states.async_set(CONTACT, "off", {"friendly_name": BALCONY})
+    hass.states.async_set("binary_sensor.w2", "off", {"friendly_name": BATH})
+    await start_with_setpoint(hass, controller, gateway)
+
+
+def silence(hass, entity_id, state="unavailable") -> None:
+    """Make a contact say nothing, keeping its name."""
+    name = BALCONY if entity_id == CONTACT else BATH
+    hass.states.async_set(entity_id, state, {"friendly_name": name})
+
+
+@pytest.mark.usefixtures("freezer")
+async def test_open_delay_notifies_on_arm_and_cancel(
+    hass, climate_delay, gateway
+) -> None:
+    await start_closed(hass, climate_delay, gateway)
+    calls = []
+    climate_delay.add_update_listener(
+        lambda: calls.append((climate_delay.heating_state, climate_delay.window_off_at))
+    )
+    assert climate_delay.heating_state is HeatingState.HEATING
+    assert climate_delay.window_off_at is None
+
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    deadline = dt_util.utcnow() + timedelta(seconds=30)
+    assert calls == [(HeatingState.WINDOW_PENDING, deadline)]
+    assert climate_delay.window_off_at == deadline
+    assert climate_delay.heating_state is HeatingState.WINDOW_PENDING
+    assert climate_delay.state_reasons == (
+        HeatingState.WINDOW_PENDING,
+        HeatingState.HEATING,
+    )
+
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert calls[1:] == [(HeatingState.HEATING, None)]
+    assert climate_delay.window_off_at is None
+    assert climate_delay.heating_state is HeatingState.HEATING
+
+
+async def test_open_delay_notifies_when_it_fires(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    await start_closed(hass, climate_delay, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await advance(hass, freezer, 25, step=5)
+    calls = []
+    climate_delay.add_update_listener(lambda: calls.append(climate_delay.window_off_at))
+    await advance(hass, freezer, 10, step=5)
+    assert climate_delay.window_open is True
+    assert climate_delay.window_off_at is None
+    assert climate_delay.heating_state is HeatingState.OFF_WINDOW
+    assert calls
+    assert set(calls) == {None}
+
+
+async def test_a_second_contact_opening_leaves_the_deadline_alone(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    await start_closed(hass, climate_delay, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    deadline = climate_delay.window_off_at
+    await advance(hass, freezer, 10, step=5)
+    hass.states.async_set("binary_sensor.w2", "on")
+    await settle(hass)
+    assert climate_delay.window_off_at == deadline
+
+
+async def test_silent_contact_issue_after_ten_minutes(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    silence(hass, CONTACT)
+    await settle(hass)
+    assert climate_window.heating_state is HeatingState.RESTRICTED
+    assert climate_window.silent_contacts == (CONTACT,)
+    assert issue(hass, SILENT_ISSUE) is None
+    await advance(hass, freezer, 9 * 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is None
+    await advance(hass, freezer, 60, step=60)
+    raised = issue(hass, SILENT_ISSUE)
+    assert raised is not None
+    assert raised.translation_key == "window_contact_unavailable"
+    assert raised.severity is IssueSeverity.WARNING
+    assert raised.is_fixable is False
+    assert raised.translation_placeholders == {"room": "Living", "contacts": BALCONY}
+    # The heating was never switched off because of it.
+    assert climate_window.window_open is False
+    assert gateway.writes == []
+
+
+async def test_a_contact_silent_at_the_start_raises_the_issue_too(
+    hass, freezer, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "unavailable")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    assert climate_window.silent_contacts == (CONTACT,)
+    assert issue(hass, SILENT_ISSUE) is None
+    await advance(hass, freezer, 10 * 60, step=60)
+    raised = issue(hass, SILENT_ISSUE)
+    assert raised is not None
+    # Without a friendly name, Home Assistant names the state after its entity.
+    assert raised.translation_placeholders["contacts"] == "w"
+
+
+async def test_a_missing_contact_is_named_by_its_entity_id(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    hass.states.async_remove(CONTACT)
+    await settle(hass)
+    await advance(hass, freezer, 10 * 60, step=60)
+    raised = issue(hass, SILENT_ISSUE)
+    assert raised is not None
+    assert raised.translation_placeholders["contacts"] == CONTACT
+
+
+async def test_silent_contact_flapping_does_not_restart_timer(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    silence(hass, CONTACT)  # t0
+    await advance(hass, freezer, 5 * 60, step=60)
+    hass.states.async_set(CONTACT, "off")  # t0 + 5 min: the timer is cancelled
+    await advance(hass, freezer, 60, step=60)
+    silence(hass, CONTACT)  # t0 + 6 min: a new silence starts a new timer
+    await advance(hass, freezer, 5 * 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is None  # t0 + 11 min
+    await advance(hass, freezer, 4 * 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is None  # t0 + 15 min
+    await advance(hass, freezer, 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is not None  # t0 + 16 min
+
+
+async def test_another_silent_contact_does_not_restart_the_timer(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    silence(hass, CONTACT)
+    await advance(hass, freezer, 5 * 60, step=60)
+    silence(hass, "binary_sensor.w2")
+    await advance(hass, freezer, 5 * 60, step=60)
+    raised = issue(hass, SILENT_ISSUE)
+    assert raised is not None
+    assert raised.translation_placeholders["contacts"] == f"{BALCONY}, {BATH}"
+
+
+async def test_silent_set_change_reraises_issue(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    silence(hass, CONTACT)
+    await advance(hass, freezer, 10 * 60, step=60)
+    raised = issue(hass, SILENT_ISSUE)
+    assert raised is not None
+    assert raised.translation_placeholders["contacts"] == BALCONY
+    calls = []
+    climate_window.add_update_listener(
+        lambda: calls.append(climate_window.silent_contacts)
+    )
+
+    silence(hass, "binary_sensor.w2", "unknown")
+    await settle(hass)
+    raised = issue(hass, SILENT_ISSUE)
+    assert raised is not None
+    assert raised.translation_placeholders["contacts"] == f"{BALCONY}, {BATH}"
+    assert climate_window.silent_contacts == (CONTACT, "binary_sensor.w2")
+    # The set changed, although the room stayed unreliable: listeners hear of it.
+    assert calls == [(CONTACT, "binary_sensor.w2")]
+
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    raised = issue(hass, SILENT_ISSUE)
+    assert raised is not None
+    assert raised.translation_placeholders["contacts"] == BATH
+    assert climate_window.heating_state is HeatingState.RESTRICTED
+
+
+async def test_a_state_change_that_keeps_the_silent_set_does_not_raise_it_again(
+    hass, freezer, climate_window, gateway, monkeypatch
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    silence(hass, CONTACT)
+    await advance(hass, freezer, 10 * 60, step=60)
+    raised = []
+    monkeypatch.setattr(
+        issues, "raise_window_contact_unavailable", lambda *args: raised.append(args)
+    )
+    silence(hass, CONTACT, "unknown")
+    hass.states.async_set("binary_sensor.w2", "on")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await settle(hass)
+    assert raised == []
+
+
+async def test_contact_reports_again_clears_issue(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    silence(hass, CONTACT)
+    await advance(hass, freezer, 10 * 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is not None
+    assert climate_window.heating_state is HeatingState.RESTRICTED
+    hass.states.async_set(CONTACT, "off", {"friendly_name": BALCONY})
+    await settle(hass)
+    assert issue(hass, SILENT_ISSUE) is None
+    assert climate_window.silent_contacts == ()
+    assert climate_window.heating_state is HeatingState.HEATING
+    # Silent again: the issue is not back at once, only after another ten minutes.
+    silence(hass, CONTACT)
+    await advance(hass, freezer, 9 * 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is None
+    await advance(hass, freezer, 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is not None
+
+
+async def test_stop_cancels_timers_and_clears_issue(
+    hass, freezer, climate_delay, gateway
+) -> None:
+    window_events = async_capture_events(hass, "easy_trv_window_hold")
+    await start_closed(hass, climate_delay, gateway)
+    silence(hass, "binary_sensor.w2")
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert climate_delay.silent_contacts == ("binary_sensor.w2",)
+    assert climate_delay.window_off_at is not None
+    calls = []
+    climate_delay.add_update_listener(lambda: calls.append(1))
+
+    await climate_delay.async_stop()
+    await advance(hass, freezer, 15 * 60, step=60)
+
+    assert issue(hass, SILENT_ISSUE) is None
+    assert climate_delay.window_open is False
+    assert window_events == []
+    assert gateway.writes == []
+    assert calls == []
+
+
+async def test_stop_removes_a_raised_silent_contact_issue(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    silence(hass, CONTACT)
+    await advance(hass, freezer, 10 * 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is not None
+    await climate_window.async_stop()
+    assert issue(hass, SILENT_ISSUE) is None
+
+
+async def test_a_silent_contact_after_stop_raises_nothing(
+    hass, freezer, climate_window, gateway
+) -> None:
+    await start_closed(hass, climate_window, gateway)
+    await climate_window.async_stop()
+    silence(hass, CONTACT)
+    await advance(hass, freezer, 15 * 60, step=60)
+    assert issue(hass, SILENT_ISSUE) is None
+
+
+async def test_state_changed_event(hass, climate, gateway) -> None:
+    state_events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await start_with_setpoint(hass, climate, gateway)
+    # Whatever the room was doing when it started is not a change.
+    assert state_events == []
+    assert climate.heating_state is HeatingState.HEATING
+
+    await climate.async_set_operation(OperatingMode.OFF)
+    await settle(hass)
+    assert [e.data for e in state_events] == [
+        {
+            "room": "Living",
+            "state": "off_manual",
+            "previous": "heating",
+            "reasons": ["off_manual"],
+        }
+    ]
+    assert climate.heating_state is HeatingState.OFF_MANUAL
+
+    # The same state again is no change.
+    await climate.async_set_operation(OperatingMode.OFF)
+    await settle(hass)
+    assert len(state_events) == 1
+
+
+async def test_state_changed_event_lists_every_reason(
+    hass, climate_window, gateway
+) -> None:
+    state_events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await start_closed(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert [e.data for e in state_events] == [
+        {
+            "room": "Living",
+            "state": "off_window",
+            "previous": "heating",
+            "reasons": ["off_window", "heating"],
+        }
+    ]
+
+
+async def test_a_change_of_the_reasons_alone_fires_no_event(
+    hass, climate_window, gateway
+) -> None:
+    state_events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await start_closed(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert len(state_events) == 1
+    await climate_window.async_set_operation(OperatingMode.FROST)
+    await settle(hass)
+    # Off for the window, frost protection as a further reason.
+    assert climate_window.state_reasons == (
+        HeatingState.OFF_WINDOW,
+        HeatingState.FROST,
+    )
+    assert len(state_events) == 1
+
+
+async def test_a_restore_before_the_start_is_not_an_evaluation(hass, climate) -> None:
+    state_events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await climate.async_restore(21.0, RoomMode.HEAT, Preset.NONE)
+    # Before the start the room knows none of its sensors: that is no state to keep.
+    assert climate.state_since is None
+    await climate.async_start()
+    await settle(hass)
+    assert state_events == []
+    assert climate.heating_state is HeatingState.HEATING
+    assert climate.state_since is not None
+
+
+async def test_a_room_restored_as_off_starts_off_without_an_event(
+    hass, climate
+) -> None:
+    state_events = async_capture_events(hass, EVENT_STATE_CHANGED)
+    await climate.async_restore(21.0, RoomMode.OFF, Preset.NONE)
+    await climate.async_start()
+    await settle(hass)
+    assert state_events == []
+    assert climate.heating_state is HeatingState.OFF_MANUAL
+
+
+async def test_state_since_moves_only_on_change(
+    hass, freezer, climate, gateway
+) -> None:
+    assert climate.state_since is None
+    await start_with_setpoint(hass, climate, gateway)
+    started = dt_util.utcnow()
+    assert climate.state_since == started
+
+    # Events that leave the state alone (every tick re-evaluates it) keep it.
+    await advance(hass, freezer, 3 * 60, step=60)
+    assert climate.state_since == started
+
+    await climate.async_set_operation(OperatingMode.OFF)
+    await settle(hass)
+    switched = dt_util.utcnow()
+    assert switched == started + timedelta(minutes=3)
+    assert climate.state_since == switched
+
+    await advance(hass, freezer, 2 * 60, step=60)
+    assert climate.state_since == switched
+
+
+async def test_the_state_before_the_start_follows_the_facts(
+    make_controller, config
+) -> None:
+    room = make_controller(cfg=replace(config, temp_sensors=()))
+    assert room.state_since is None
+    assert room.heating_state is HeatingState.HEATING
+    assert room.state_reasons == (HeatingState.HEATING,)
+
+
+async def test_deviations_name_the_thermostats_that_deviate(
+    hass, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    assert climate.deviations == {}
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    assert climate.deviations == {"climate.a": "unavailable"}
+    assert climate.heating_state is HeatingState.RESTRICTED
+    assert climate.state_reasons == (HeatingState.RESTRICTED, HeatingState.HEATING)

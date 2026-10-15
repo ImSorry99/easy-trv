@@ -39,7 +39,11 @@ from custom_components.easy_trv.adapters.zha_gateway import (
     GatewayError,
     UnsupportedAttribute,
 )
-from custom_components.easy_trv.const import OPERATION_TIMEOUT, TICK_SECONDS
+from custom_components.easy_trv.const import (
+    EVENT_STATE_CHANGED,
+    OPERATION_TIMEOUT,
+    TICK_SECONDS,
+)
 from custom_components.easy_trv.core.model import (
     INTENT_NAMES,
     ClearIssue,
@@ -77,6 +81,12 @@ from custom_components.easy_trv.core.model import (
 )
 from custom_components.easy_trv.core.observe import shown
 from custom_components.easy_trv.core.room_logic import RoomLogic
+from custom_components.easy_trv.core.room_state import (
+    HeatingState,
+    heating_state,
+    state_facts,
+    thermostat_deviations,
+)
 from custom_components.easy_trv.core.setpoint import (
     SAME,
     device_driven,
@@ -278,6 +288,11 @@ class RoomController:
         )
         self._warned_units: set[str] = set()
         self._stopped = False
+        self._started = False
+        # Evaluated by ``_notify_update``; ``None`` until the first evaluation.
+        self._heating_state: HeatingState | None = None
+        self._state_reasons: tuple[HeatingState, ...] = ()
+        self._state_since: datetime | None = None
 
     # --- Public surface --------------------------------------------------
 
@@ -349,6 +364,48 @@ class RoomController:
     def thermostats(self) -> tuple[str, ...]:
         """Return the climate entities of the room's thermostats."""
         return tuple(self._firmware)
+
+    @property
+    def heating_state(self) -> HeatingState:
+        """Return what the room is doing: the first condition that holds.
+
+        Before the room has started this is derived from what is known then; the
+        room has not evaluated itself yet (``state_since`` is ``None``).
+        """
+        if self._heating_state is None:
+            return self._derive_state(dt_util.utcnow())[0]
+        return self._heating_state
+
+    @property
+    def state_reasons(self) -> tuple[HeatingState, ...]:
+        """Return every condition that holds, in priority order, state first."""
+        if self._heating_state is None:
+            return self._derive_state(dt_util.utcnow())[1]
+        return self._state_reasons
+
+    @property
+    def state_since(self) -> datetime | None:
+        """Return when the heating state last changed (UTC).
+
+        That is the first evaluation after the start until it changes; ``None``
+        before the room has started.
+        """
+        return self._state_since
+
+    @property
+    def window_off_at(self) -> datetime | None:
+        """Return when the running open delay switches the room off, else ``None``."""
+        return self._holds.window_off_at
+
+    @property
+    def deviations(self) -> dict[str, str]:
+        """Return why each thermostat deviates; those that do not are absent."""
+        return thermostat_deviations(self._state)
+
+    @property
+    def silent_contacts(self) -> tuple[str, ...]:
+        """Return the window contacts that say nothing, sorted."""
+        return tuple(sorted(self._holds.silent_contacts))
 
     @property
     def effective_range(self) -> tuple[float, float, float] | None:
@@ -535,8 +592,10 @@ class RoomController:
             issues.clear_schedule_thermostat_off(self._hass, trv.ieee)
         issues.clear_window_open_long(self._hass, config.room_id)
         issues.clear_window_contact_suspect(self._hass, config.room_id)
+        issues.clear_window_contact_unavailable(self._hass, config.room_id)
         self._subscriptions.subscribe_all()
         window_open, outdoor = self._holds.start()
+        self._started = True
         self._dispatch(
             Start(
                 sensors=tuple(
@@ -664,8 +723,52 @@ class RoomController:
             self._execute(command)
         self._notify_update()
 
+    def _derive_state(
+        self, now: datetime
+    ) -> tuple[HeatingState, tuple[HeatingState, ...]]:
+        """Return the heating state and its reasons from what is known now."""
+        return heating_state(
+            state_facts(
+                self._state,
+                self._config,
+                now,
+                self._params.refresh,
+                window_pending=self._holds.window_off_at is not None,
+                silent_contacts=self._holds.silent_contacts,
+            )
+        )
+
+    def _evaluate_state(self) -> None:
+        """Derive the heating state; stamp and announce a change.
+
+        Nothing is evaluated before the start: until then the room knows none of
+        its sensors, which would show as emergency mode and fire a change when
+        the room starts. The first evaluation is neither a change nor an event.
+        """
+        if not self._started:
+            return
+        now = dt_util.utcnow()
+        state, reasons = self._derive_state(now)
+        previous = self._heating_state
+        self._heating_state = state
+        self._state_reasons = reasons
+        if previous is None:
+            self._state_since = now
+        elif state is not previous:
+            self._state_since = now
+            self._hass.bus.async_fire(
+                EVENT_STATE_CHANGED,
+                {
+                    "room": self._config.name,
+                    "state": state.value,
+                    "previous": previous.value,
+                    "reasons": [reason.value for reason in reasons],
+                },
+            )
+
     def _notify_update(self) -> None:
-        """Tell the update listeners the room may look different now."""
+        """Re-derive the heating state, then tell the update listeners."""
+        self._evaluate_state()
         for listener in list(self._update_listeners):
             try:
                 listener()
