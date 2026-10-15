@@ -65,6 +65,7 @@ from custom_components.easy_trv.core.model import (
     Unsupported,
     WindowChanged,
 )
+from custom_components.easy_trv.core.room_state import failsafe_recent
 from custom_components.easy_trv.core.values import is_in_range, round_tenth
 
 if TYPE_CHECKING:
@@ -1095,18 +1096,13 @@ class RoomLogic:
     def _status(self, state: RoomState, now: datetime) -> SetStatus:
         """Derive the room status and its attributes from the state."""
         healths = [trv.health for trv in state.trvs.values()]
-        failsafe_recent = any(
-            trv.failsafe_seen_at is not None
-            and now - trv.failsafe_seen_at <= self._params.refresh
-            for trv in state.trvs.values()
-        )
         if TrvHealth.ERROR in healths:
             status = RoomStatus.ERROR
         elif (
             (bool(self._cfg.temp_sensors) and state.source is not Source.EXTERNAL)
             or TrvHealth.UNAVAILABLE in healths
             or TrvHealth.UNSUPPORTED in healths
-            or failsafe_recent
+            or failsafe_recent(state, now, self._params.refresh)
         ):
             status = RoomStatus.DEGRADED
         else:
