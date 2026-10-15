@@ -42,6 +42,7 @@ from custom_components.easy_trv.const import (
     CONF_WINDOW_CHECK_MINUTES,
     CONF_WINDOW_DETECTION,
     CONF_WINDOW_OPEN_DELAY,
+    CONF_WINDOW_WARN_COLDER,
     CONF_WINDOW_WARN_MINUTES,
     PROFILE_AUTO,
     SETTING_GLOBAL,
@@ -62,6 +63,7 @@ SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
     CONF_HYSTERESIS: ("0_2", "0_4", "0_6", "0_8", "1_0"),
     CONF_ADAPTIVE_MODE: ("on", "off", "leave"),
     CONF_SETPOINT_RANGE: ("auto", "manual"),
+    CONF_WINDOW_WARN_COLDER: ("on", "off"),
 }
 # A choice that only a room has: the global outdoor cut-off threshold is the
 # value to keep ("global") or to ignore ("off") in this room.
@@ -130,6 +132,7 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
     _SECTION_WINDOWS_OUTDOOR: (
         CONF_WINDOW_OPEN_DELAY,
         CONF_WINDOW_WARN_MINUTES,
+        CONF_WINDOW_WARN_COLDER,
         CONF_WINDOW_CHECK_MINUTES,
         CONF_WINDOW_CHECK_DROP,
         CONF_OUTDOOR_SENSOR,
@@ -153,6 +156,7 @@ ROOM_SETTING_KEYS: Final = (
     CONF_SETPOINT_MAX,
     CONF_WINDOW_OPEN_DELAY,
     CONF_WINDOW_WARN_MINUTES,
+    CONF_WINDOW_WARN_COLDER,
     CONF_WINDOW_CHECK_MINUTES,
     CONF_WINDOW_CHECK_DROP,
     CONF_OUTDOOR_CUTOFF,

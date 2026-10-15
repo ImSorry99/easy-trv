@@ -225,6 +225,8 @@ class RoomConfig:
     setpoint_range: tuple[float, float, float] | None = None
     window_contacts: tuple[str, ...] = ()
     window_warn: timedelta | None = None
+    # Raise the long-open warning only while it is colder outside than inside.
+    window_warn_only_colder: bool = False
     window_check: timedelta | None = None
     window_check_drop: float = 0.3
     outdoor_cutoff: float | None = None
@@ -310,6 +312,8 @@ class RoomState:
     # The sensor ``window_open_value`` came from (the stuck check needs the same).
     window_open_sensor: str | None = None
     outdoor_hold: bool = False
+    # The latest outdoor temperature; None = unknown or no outdoor sensor.
+    outdoor: float | None = None
     window_warned: bool = False
     window_suspect: bool = False
     # Whether the stuck-contact check already ran for the current opening.

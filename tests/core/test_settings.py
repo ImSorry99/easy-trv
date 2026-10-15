@@ -210,3 +210,11 @@ def test_the_setpoint_range_is_auto_by_default():
 )
 def test_limits_saved_before_the_range_choice_count_as_manual(options, room, expected):
     assert resolve_settings(options, room).setpoint_range == expected
+
+
+def test_the_window_warning_waits_for_colder_outside_by_default():
+    assert resolve_settings({}, {}).window_warn_colder == "on"
+    options = {"window_warn_colder": "off"}
+    assert resolve_settings(options, {}).window_warn_colder == "off"
+    room = {"window_warn_colder": "on"}
+    assert resolve_settings(options, room).window_warn_colder == "on"

@@ -265,6 +265,7 @@ ALL_GLOBAL = {
     "hysteresis": "global",
     "adaptive_mode": "global",
     "setpoint_range": "global",
+    "window_warn_colder": "global",
     "outdoor_cutoff": "global",
 }
 
@@ -886,6 +887,7 @@ SETTINGS_FIELDS = [
     "setpoint_max",
     "window_open_delay_seconds",
     "window_warn_minutes",
+    "window_warn_colder",
     "window_check_minutes",
     "window_check_drop_kelvin",
     "outdoor_cutoff",
@@ -933,6 +935,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_setpoint_max": "30.0 °C",
         "global_window_open_delay_seconds": "30 s",
         "global_window_warn_minutes": "120 min",
+        "global_window_warn_colder": "Only when it is colder outside",
         "global_window_check_minutes": "30 min",
         "global_window_check_drop_kelvin": "0.3 K",
         "global_outdoor_cutoff_celsius": "Off",
@@ -1587,6 +1590,7 @@ async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
     assert list(section_fields(result, "windows_outdoor")) == [
         "window_open_delay_seconds",
         "window_warn_minutes",
+        "window_warn_colder",
         "window_check_minutes",
         "window_check_drop_kelvin",
         "outdoor_sensor",
@@ -1668,6 +1672,7 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "hysteresis",
         "adaptive_mode",
         "setpoint_range",
+        "window_warn_colder",
     }
 
     # Saving the defaults the form shows does not turn them into options.
@@ -1681,6 +1686,7 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "hysteresis",
         "adaptive_mode",
         "setpoint_range",
+        "window_warn_colder",
     }
 
 
@@ -1741,6 +1747,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
         "adaptive_mode": "off",
         "frost_temperature": 8.5,
         "setpoint_range": "auto",
+        "window_warn_colder": "on",
     }
     # Whole numbers are stored as integers, not as the selector's floats.
     assert all(
@@ -1820,6 +1827,7 @@ async def test_options_new_numbers_have_ranges_and_units(hass, entry) -> None:
     }
     outdoor = numbers.pop("outdoor_sensor")
     numbers.pop("setpoint_range")
+    numbers.pop("window_warn_colder")
     assert {
         name: (
             selector.config["min"],
@@ -1836,7 +1844,7 @@ async def test_options_new_numbers_have_ranges_and_units(hass, entry) -> None:
     assert "multiple" not in outdoor.config or outdoor.config["multiple"] is False
     # Only the range choice has a default; an empty number is not stored.
     assert defaults(result, "room_thermostat") == {"setpoint_range": "auto"}
-    assert defaults(result, "windows_outdoor") == {}
+    assert defaults(result, "windows_outdoor") == {"window_warn_colder": "on"}
 
 
 async def test_options_flow_stores_the_new_sections_flat(hass, entry) -> None:

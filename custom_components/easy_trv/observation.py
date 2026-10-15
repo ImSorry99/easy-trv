@@ -222,14 +222,19 @@ class HoldInputs:
         feed: Callable[[LogicEvent], None],
         changed: Callable[[], None],
     ) -> None:
-        """Watch the contacts of ``config`` and, with a cut-off, ``outdoor_sensor``.
+        """Watch the contacts of ``config`` and, when needed, ``outdoor_sensor``.
 
-        ``changed`` is called when the contacts become (un)reliable, which the
-        room shows as ``in_sync`` although the logic has no event for it.
+        The outdoor sensor is needed for a cut-off, and for window contacts
+        whose long-open warning waits until it is colder outside. ``changed``
+        is called when the contacts become (un)reliable, which the room shows
+        as ``in_sync`` although the logic has no event for it.
         """
         self._hass = hass
         self._config = config
-        self._outdoor = outdoor_sensor if config.outdoor_cutoff is not None else None
+        needed = config.outdoor_cutoff is not None or (
+            config.window_warn_only_colder and bool(config.window_contacts)
+        )
+        self._outdoor = outdoor_sensor if needed else None
         self._feed = feed
         self._changed = changed
         self._unsubscribers: list[CALLBACK_TYPE] = []

@@ -26,6 +26,7 @@ DEFAULT_SETPOINT_RANGE: Final = "auto"
 DEFAULT_SETPOINT_MIN: Final = 5.0
 DEFAULT_SETPOINT_MAX: Final = 30.0
 DEFAULT_WINDOW_WARN_MINUTES: Final = 120
+DEFAULT_WINDOW_WARN_COLDER: Final = "on"
 DEFAULT_WINDOW_CHECK_MINUTES: Final = 30
 DEFAULT_WINDOW_CHECK_DROP: Final = 0.3
 DEFAULT_OUTDOOR_CUTOFF_CELSIUS: Final[float | None] = None  # None = off
@@ -57,6 +58,7 @@ DEFAULTS: Final[Mapping[str, Any]] = {
     _KEY_SETPOINT_MIN: DEFAULT_SETPOINT_MIN,
     _KEY_SETPOINT_MAX: DEFAULT_SETPOINT_MAX,
     "window_warn_minutes": DEFAULT_WINDOW_WARN_MINUTES,
+    "window_warn_colder": DEFAULT_WINDOW_WARN_COLDER,
     "window_check_minutes": DEFAULT_WINDOW_CHECK_MINUTES,
     "window_check_drop_kelvin": DEFAULT_WINDOW_CHECK_DROP,
     _KEY_OUTDOOR_CUTOFF_CELSIUS: DEFAULT_OUTDOOR_CUTOFF_CELSIUS,
@@ -83,6 +85,8 @@ class RoomSettings:
     setpoint_min: float  # celsius
     setpoint_max: float  # celsius
     window_warn_minutes: int  # 0 = off
+    # on: the warning waits while it is not colder outside than inside
+    window_warn_colder: Literal["on", "off"]
     window_check_minutes: int  # 0 = off
     window_check_drop_kelvin: float
     outdoor_cutoff_celsius: float | None  # None = off

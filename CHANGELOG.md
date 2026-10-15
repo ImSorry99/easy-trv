@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Operating mode per room (`select.<room>_heating_mode`): off, frost protection or heating enabled
 - Setting **Setpoint range** (global and per room): automatic, the default, takes the minimum and maximum target temperature the thermostats show in Home Assistant; manual uses the minimum and maximum as before
+- Setting **Warn only when it is colder outside** (global and per room, default on): the open-window warning waits while the outdoor temperature is not below the room temperature; the outdoor sensor is also read for rooms with window contacts and no cut-off
 
 ### Changed
 

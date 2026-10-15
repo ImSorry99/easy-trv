@@ -88,6 +88,7 @@
             "setpoint_max": "Maximale Solltemperatur (°C)",
             "window_open_delay_seconds": "Verzögerung, bis ein Fenster als offen gilt (Sekunden, 0 = sofort)",
             "window_warn_minutes": "Warnung bei offenem Fenster (Minuten, 0 = nie)",
+            "window_warn_colder": "Warnung nur, wenn es draußen kälter ist",
             "window_check_minutes": "Fensterkontakt-Prüfung (Minuten, 0 = aus)",
             "window_check_drop_kelvin": "Erwartete Abkühlung bei der Prüfung (K)",
             "outdoor_cutoff": "Außentemperatur-Abschaltung",
@@ -109,6 +110,7 @@
             "setpoint_max": "Die höchste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_max}.",
             "window_open_delay_seconds": "Wie lange ein Fensterkontakt offen sein muss, bis das Fenster als offen gilt und die Heizung ausgeschaltet wird. Kurzes Lüften schaltet nichts aus. 0 = sofort, sonst 1 bis 600 Sekunden. Global ist derzeit {global_window_open_delay_seconds}.",
             "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Global ist derzeit {global_window_warn_minutes}.",
+            "window_warn_colder": "Die Warnung bei offenem Fenster kommt nur, wenn die Außentemperatur unter der Raumtemperatur liegt. Wird es später kälter, kommt sie dann. Braucht den Außentemperatursensor; ist die Außentemperatur unbekannt, wird gewarnt. Die Heizung geht bei offenem Fenster trotzdem aus. Global ist derzeit {global_window_warn_colder}.",
             "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um den Wert unter „Erwartete Abkühlung bei der Prüfung (K)“ abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Global ist derzeit {global_window_check_minutes}.",
             "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Global ist derzeit {global_window_check_drop_kelvin}.",
             "outdoor_cutoff": "Global folgt der Abschalttemperatur aus den Integrationsoptionen (derzeit {global_outdoor_cutoff_celsius}), solange du unten keine eigene Temperatur einträgst. Aus schaltet diesen Raum nie wegen der Außentemperatur ab.",
@@ -258,6 +260,7 @@
             "data": {
               "window_open_delay_seconds": "Verzögerung, bis ein Fenster als offen gilt (Sekunden, 0 = sofort)",
               "window_warn_minutes": "Warnung bei offenem Fenster (Minuten, 0 = nie)",
+              "window_warn_colder": "Warnung nur, wenn es draußen kälter ist",
               "window_check_minutes": "Fensterkontakt-Prüfung (Minuten, 0 = aus)",
               "window_check_drop_kelvin": "Erwartete Abkühlung bei der Prüfung (K)",
               "outdoor_sensor": "Außentemperatursensor",
@@ -266,6 +269,7 @@
             "data_description": {
               "window_open_delay_seconds": "Wie lange ein Fensterkontakt offen sein muss, bis das Fenster als offen gilt und die Heizung ausgeschaltet wird. Kurzes Lüften schaltet nichts aus. 0 = sofort, sonst 1 bis 600 Sekunden. Leer = {default_window_open_delay_seconds}.",
               "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Leer = {default_window_warn_minutes}.",
+              "window_warn_colder": "Die Warnung bei offenem Fenster kommt nur, wenn die Außentemperatur unter der Raumtemperatur liegt. Wird es später kälter, kommt sie dann. Braucht den Außentemperatursensor; ist die Außentemperatur unbekannt, wird gewarnt. Die Heizung geht bei offenem Fenster trotzdem aus.",
               "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um den Wert unter „Erwartete Abkühlung bei der Prüfung (K)“ abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Leer = {default_window_check_minutes}.",
               "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Leer = {default_window_check_drop_kelvin}.",
               "outdoor_sensor": "Der Temperatursensor, den die Außentemperatur-Abschaltung liest. Ohne ihn tut die Abschaltung nichts.",
@@ -341,6 +345,13 @@
         "global": "Global",
         "auto": "Automatisch (vom Thermostat)",
         "manual": "Manuell"
+      }
+    },
+    "window_warn_colder": {
+      "options": {
+        "global": "Global",
+        "on": "Nur wenn es draußen kälter ist",
+        "off": "Immer"
       }
     }
   }
