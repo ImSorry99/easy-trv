@@ -1240,18 +1240,23 @@ async def test_start_adopts_the_setpoint_a_thermostat_reports(
     assert writes_to(gateway, IEEE_B, SETPOINT) == [1900]
 
 
+@pytest.mark.parametrize("schedule_state", ["auto", "heat_cool"])
 async def test_start_does_not_adopt_the_setpoint_of_a_thermostat_in_auto(
-    hass, climate, gateway
+    hass, climate, gateway, schedule_state
 ) -> None:
-    # "auto" is not a mode the room owns: the climate state gives no mode, and
-    # the setpoint of the thermostat that does report heat is adopted instead.
-    hass.states.async_set("climate.a", "auto", {"temperature": 12.0})
+    # "auto" (the thermostat's schedule, shown as heat_cool by some entities) is
+    # not a mode the room owns: its setpoint is not adopted, nothing is written to
+    # it, and the setpoint of the thermostat that reports heat wins.
+    hass.states.async_set("climate.a", schedule_state, {"temperature": 12.0})
     hass.states.async_set("climate.b", "heat", {"temperature": 22.5})
     await climate.async_start()
     await settle(hass)
     assert climate.setpoint == 22.5
     assert climate.setpoint_source == "initial"
+    assert writes_to(gateway, IEEE_A, SETPOINT) == []
+    assert writes_to(gateway, IEEE_A, MODE) == []
     assert writes_to(gateway, IEEE_B, SETPOINT) == []
+    assert climate.in_sync is False
 
 
 async def test_start_reads_the_mode_and_bad_setpoints_leniently(hass, climate) -> None:
@@ -1392,6 +1397,50 @@ async def test_in_sync_is_false_while_a_write_is_pending(
     await climate.async_set_setpoint(22.0)
     await settle(hass)
     assert climate.in_sync is False
+
+
+async def test_in_sync_is_false_while_the_write_is_queued_or_being_verified(
+    hass, freezer, make_controller, config, gateway
+) -> None:
+    room = make_controller(
+        cfg=with_climate(config), params=replace(PARAMS, verify_delay=10.0)
+    )
+    await room.async_start()
+    await advance(hass, freezer, 120)
+    assert room.in_sync is True
+    await room.async_set_setpoint(22.0)
+    # Queued, nothing written yet.
+    assert room.in_sync is False
+    await settle(hass)
+    # Written, waiting for the verify read-back.
+    assert writes_to(gateway, IEEE_A, SETPOINT) == [2200]
+    assert room.in_sync is False
+    await advance(hass, freezer, 60)
+    assert writes_to(gateway, IEEE_B, SETPOINT) == [2200]
+    assert room.in_sync is True
+
+
+async def test_in_sync_is_false_once_the_attempts_are_used_up(
+    hass, freezer, climate, gateway
+) -> None:
+    await climate.async_start()
+    await settle(hass)
+    assert climate.in_sync is True
+    gateway.availability[IEEE_A] = False
+    await climate.async_set_setpoint(22.0)
+    for _ in range(40):
+        await advance(hass, freezer, 5)
+        if health(climate)["climate.a"] == "error":
+            break
+    assert health(climate)["climate.a"] == "error"
+    # The thermostat is still available in Home Assistant, but not at the setpoint.
+    assert hass.states.get("climate.a").state == "heat"
+    assert climate.in_sync is False
+    # A new, verified write brings it back.
+    gateway.availability[IEEE_A] = True
+    await climate.async_set_setpoint(22.5)
+    await settle(hass)
+    assert climate.in_sync is True
 
 
 async def test_in_sync_is_false_for_an_unavailable_thermostat(

@@ -11,6 +11,7 @@ Zigbee operations in flight.
 import asyncio
 import contextlib
 import logging
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta
@@ -122,6 +123,16 @@ _LOG_LEVELS: Final = {
 _SUPPORTED_UNITS: Final = frozenset({"°C", "C", "°F", "F"})
 # States that carry no reading, so a missing unit there is not worth a warning.
 _NO_READING_STATES: Final = frozenset({STATE_UNKNOWN, STATE_UNAVAILABLE, ""})
+
+
+# HA climate states the room understands as a thermostat mode. Both ``auto`` and
+# ``heat_cool`` mean the thermostat's own schedule, which the room leaves alone.
+_REPORTED_MODES: Final = {
+    "heat": "heat",
+    "off": "off",
+    "auto": "auto",
+    "heat_cool": "auto",
+}
 
 
 def _is_available(state: State | None) -> bool:
@@ -240,6 +251,8 @@ class RoomController:
         self._update_listeners: list[Callable[[], None]] = []
         self._queue: asyncio.Queue[tuple[str, Intent]] = asyncio.Queue()
         self._worker_task: asyncio.Task[None] | None = None
+        # (thermostat, capability) -> operations queued or running for it
+        self._busy: Counter[tuple[str, str]] = Counter()
         self._unsubscribers: list[CALLBACK_TYPE] = []
         self._cancel_debounce: CALLBACK_TYPE | None = None
         self._cancel_retries: list[CALLBACK_TYPE] = []
@@ -367,16 +380,24 @@ class RoomController:
             self._capability_of(SetHvacMode("heat")),
         }
         return self._holds.contacts_reliable and all(
-            self._trv_in_sync(trv, wanted) for trv in self._state.trvs.values()
+            self._trv_in_sync(entity_id, trv, wanted)
+            for entity_id, trv in self._state.trvs.items()
         )
 
-    @staticmethod
-    def _trv_in_sync(trv: TrvState, capabilities: set[str]) -> bool:
-        """Return whether nothing on a thermostat is waiting or device-driven."""
+    def _trv_in_sync(self, entity_id: str, trv: TrvState, wanted: set[str]) -> bool:
+        """Return whether a thermostat is verified at the room's setpoint and mode.
+
+        ``wanted`` names the setpoint and mode capabilities. Not in sync: it is
+        away or device-driven, a write of either is queued, running or awaiting
+        its retry, the attempts for either failed, or a knob turn is pending.
+        """
         return (
             trv.available
             and not device_driven(trv)
-            and not capabilities & trv.pending_retry.keys()
+            and not any(self._busy[entity_id, capability] for capability in wanted)
+            and not wanted & trv.pending_retry.keys()
+            and not wanted & trv.attempts.keys()
+            and trv.error_capability not in wanted
             and not trv.knob_pending
             and not trv.resync_pending
         )
@@ -553,12 +574,15 @@ class RoomController:
         state = self._hass.states.get(entity_id)
         if state is None:
             return None, None
-        setpoint = parse_temperature(
-            str(state.attributes.get(ATTR_TEMPERATURE)),
-            self._hass.config.units.temperature_unit,
+        target = state.attributes.get(ATTR_TEMPERATURE)
+        setpoint = (
+            None
+            if target is None
+            else parse_temperature(
+                str(target), self._hass.config.units.temperature_unit
+            )
         )
-        mode = state.state if state.state in {"heat", "off"} else None
-        return setpoint, mode
+        return setpoint, _REPORTED_MODES.get(state.state)
 
     def _trv_available(self, entity_id: str) -> bool:
         """Return whether the climate entity exists and is not ``unavailable``."""
@@ -591,6 +615,7 @@ class RoomController:
         """Carry out one command of the logic."""
         match command:
             case Execute(trv=trv, intent=intent):
+                self._busy[trv, self._capability_of(intent)] += 1
                 self._queue.put_nowait((trv, intent))
             case ScheduleDebounce(seconds=seconds):
                 self._schedule_debounce(seconds)
@@ -751,6 +776,8 @@ class RoomController:
             )
             failed = Failed(f"unexpected: {type(exc).__name__}: {exc}")
             result = OperationResult(trv, intent, self._capability_of(intent), failed)
+        # Before the result: its listeners see the operation as finished.
+        self._busy[trv, self._capability_of(intent)] -= 1
         self._dispatch(result)
 
     async def _run_operation(self, trv: str, intent: Intent) -> OperationResult:
