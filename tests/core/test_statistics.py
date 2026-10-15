@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -27,7 +28,6 @@ def after(minutes: float) -> datetime:
 
 
 def test_a_new_duration_is_empty_and_stopped() -> None:
-    assert Duration(0.0, None) == Duration(0.0, None)
     assert seconds(Duration(0.0, None), T0) == 0.0
 
 
@@ -82,6 +82,22 @@ def test_restored_ignores_negative_values() -> None:
     assert restored(Duration(0.0, None), -5.0) == Duration(0.0, None)
 
 
+def test_restored_ignores_values_that_are_not_finite() -> None:
+    assert restored(Duration(100.0, None), float("inf")) == Duration(100.0, None)
+    assert restored(Duration(100.0, None), float("nan")) == Duration(100.0, None)
+    assert restored(Duration(0.0, T0), float("-inf")) == Duration(0.0, T0)
+
+
+def test_stop_with_a_clock_before_the_start_adds_nothing() -> None:
+    running = start(Duration(600.0, None), T0)
+    assert stop(running, T0 - timedelta(seconds=5)) == Duration(600.0, None)
+
+
+def test_seconds_with_a_clock_before_the_start_does_not_go_below_the_total() -> None:
+    running = start(Duration(600.0, None), T0)
+    assert seconds(running, T0 - timedelta(seconds=5)) == 600.0
+
+
 # --- Deviation -----------------------------------------------------------
 
 
@@ -109,6 +125,20 @@ def test_deviation_is_sensor_minus_setpoint_while_heating() -> None:
 def test_deviation_is_rounded_to_a_tenth() -> None:
     assert deviation(room(20.44, 21.0)) == -0.6
     assert deviation(room(21.26, 21.0)) == 0.3
+
+
+def test_deviation_rounds_the_reading_like_the_room() -> None:
+    # Half-up on the reading, then on the difference: round() would give 0.2 / -8.5.
+    assert deviation(room(21.25, 21.0)) == 0.3
+    assert deviation(room(15.05, 23.5)) == -8.4
+
+
+def test_deviation_is_never_negative_zero() -> None:
+    for value, setpoint in ((20.96, 21.0), (21.0, 21.04)):
+        result = deviation(room(value, setpoint))
+        assert result == 0.0
+        assert result is not None
+        assert math.copysign(1, result) == 1
 
 
 def test_deviation_none_when_off() -> None:
