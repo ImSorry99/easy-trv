@@ -239,7 +239,7 @@ def test_german_translation_is_actually_german() -> None:
     }
     assert de["entity"]["climate"]["room"]["state_attributes"]["preset_mode"][
         "state"
-    ] == {"none": "Keins", "frost": "Frostschutz"}
+    ] == {"none": "Keine", "frost": "Frostschutz"}
     assert de["entity"]["sensor"]["room_status"]["state"] == {
         "ok": "OK",
         "degraded": "Eingeschränkt",
@@ -437,8 +437,8 @@ def test_window_contact_texts_name_another_area_de() -> None:
 def test_setpoint_range_error_texts() -> None:
     en, de = load(EN), load(DE)
     for data, text in (
-        (en, "Minimum must be below maximum."),
-        (de, "Das Minimum muss unter dem Maximum liegen."),
+        (en, "The minimum target temperature must be below the maximum."),
+        (de, "Die minimale Solltemperatur muss unter der maximalen liegen."),
     ):
         assert data["config_subentries"]["room"]["error"]["setpoint_range"] == text
         assert data["options"]["error"]["setpoint_range"] == text
@@ -483,3 +483,38 @@ def test_window_open_delay_texts() -> None:
                 ]
             )
         )
+
+
+def test_field_references_use_the_name_of_the_field() -> None:
+    en, de = load(EN), load(DE)
+    for data, name, below in (
+        (en, "Cooling expected by the check (K)", "the cooling below"),
+        (de, "Erwartete Abkühlung bei der Prüfung (K)", "Abkühlung unten"),
+    ):
+        room = data["config_subentries"]["room"]["step"]["settings"]
+        windows = data["options"]["step"]["init"]["sections"]["windows_outdoor"]
+        assert room["data"]["window_check_drop_kelvin"] == name
+        for texts in (room["data_description"], windows["data_description"]):
+            assert name in texts["window_check_minutes"]
+            assert below not in texts["window_check_minutes"]
+
+
+def test_the_room_cutoff_text_shows_the_global_value_and_the_own_threshold() -> None:
+    for path, own in ((EN, "unless you enter"), (DE, "solange du unten keine")):
+        text = load(path)["config_subentries"]["room"]["step"]["settings"][
+            "data_description"
+        ]["outdoor_cutoff"]
+        assert "{global_outdoor_cutoff_celsius}" in text
+        assert own in text
+        assert not text.startswith(("Global uses", "Global verwendet"))
+
+
+def test_german_setpoint_labels_and_preset() -> None:
+    de = load(DE)
+    settings = de["config_subentries"]["room"]["step"]["settings"]["data"]
+    section = de["options"]["step"]["init"]["sections"]["room_thermostat"]["data"]
+    for texts in (settings, section):
+        assert texts["setpoint_min"] == "Minimale Solltemperatur (°C)"
+        assert texts["setpoint_max"] == "Maximale Solltemperatur (°C)"
+    preset = de["entity"]["climate"]["room"]["state_attributes"]["preset_mode"]
+    assert preset["state"]["none"] == "Keine"

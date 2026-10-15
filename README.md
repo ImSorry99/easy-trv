@@ -100,8 +100,8 @@ Each room has one `climate.<room>_heating` (for example `climate.living_room_hea
 - **During an open window or the outdoor cut-off** a knob turn changes only the wish: the thermostats stay off (the room thermostat keeps showing the wish) and the new target is written when the hold ends.
 - **Schedule.** A thermostat that is switched to its weekly schedule (`auto`) is shown (`note: schedule`, listed in the status sensor), left alone and excluded from the room's writes until it is back on `heat` or `off`, when it is brought up to date. Easy TRV never writes `auto`. A window or the outdoor cut-off is the exception: it switches such a thermostat off too, and it stays off afterwards (see [Window contacts](#window-contacts)).
 - **Open-window phase of the thermostat.** A thermostat that shows exactly 12 °C while the room wants something else and the room's open-window detection is on is treated as being in its own window phase (`note: window_phase`). It is left alone until it shows another value or 30 minutes have passed.
-- **Restart.** The remembered target, mode and preset win; a thermostat that reports something else is corrected. A thermostat whose mode is not known yet is only switched off, and only when a hold is active.
-- **First start** (nothing remembered): the room takes the target of the first thermostat that reports one (`setpoint_source: initial`), and starts off only if every thermostat reports off.
+- **Restart.** The remembered target, mode and preset win; a thermostat that reports something else is corrected. A thermostat whose mode is not known yet is only switched off, and only when a hold is active. If the room thermostat entity is disabled in Home Assistant, there is nothing to restore from: the room starts as on a first start.
+- **First start** (nothing remembered): the room takes the target of the first thermostat that reports one (`setpoint_source: initial`) and writes it to the others, so the setpoints are unified. It starts off only if every thermostat reports off; otherwise the thermostats that report off are switched on.
 
 </details>
 

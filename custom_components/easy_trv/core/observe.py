@@ -18,6 +18,7 @@ from custom_components.easy_trv.core.model import (
     Intent,
     KnobSettled,
     Log,
+    Mismatch,
     Note,
     Preset,
     RoomConfig,
@@ -101,6 +102,57 @@ def is_stale_readback(
     )
     stamp = known.reported_at.get(capability)
     return newest is not None and (stamp is None or stamp <= newest)
+
+
+def is_foreign_readback(
+    known: TrvState,
+    intent: Intent,
+    capability: str,
+    outcome: Mismatch,
+    now: datetime,
+) -> bool:
+    """Return whether a read-back shows a value somebody else set, not ours.
+
+    Neither our own recent value nor the one the thermostat reported before our
+    write (it has not applied the write yet) is such a value.
+    """
+    if (
+        not isinstance(intent, SetSetpoint | SetHvacMode)
+        or outcome.observed is None
+        or outcome.actual is None
+    ):
+        return False
+    reported = (
+        known.reported_setpoint
+        if isinstance(intent, SetSetpoint)
+        else known.reported_mode
+    )
+    return not (
+        is_echo(known, capability, outcome.observed, now)
+        or is_stale_readback(known, capability, reported, outcome.observed)
+    )
+
+
+def on_readback(
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    observed: TrvObserved,
+    capability_of: _Capabilities,
+) -> _Step:
+    """Take what a write's read-back found as a report, and end that write.
+
+    The value that was there supersedes the write: it is no failure and gets no
+    retry. Used for somebody else's value and for a thermostat on its schedule.
+    """
+    trv, capability = observed.trv, observed.capability
+    known = state.trvs[trv]
+    known = replace(
+        known,
+        attempts=_dropped(known.attempts, capability),
+        pending_retry=_dropped(known.pending_retry, capability),
+    )
+    return on_observed(cfg, _store(state, trv, known), now, observed, capability_of)
 
 
 def on_observed(

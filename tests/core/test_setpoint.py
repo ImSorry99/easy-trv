@@ -303,6 +303,18 @@ def test_a_write_made_at_start_is_what_the_thermostat_is_known_to_show() -> None
     assert shown(st.trvs["climate.a"], "setpoint", 22.0) == 22.0
 
 
+def test_switching_a_heating_room_to_heat_again_writes_nothing() -> None:
+    st = started_with_setpoint(21.0)
+    after, cmds = logic().handle(SetRoomMode(RoomMode.HEAT), LATER, st)
+    assert after == st
+    assert executes(cmds) == []
+    # A held room keeps its wish; an off room is switched on as before.
+    off, _ = logic().handle(SetRoomMode(RoomMode.OFF), LATER, st)
+    on, cmds = logic().handle(SetRoomMode(RoomMode.HEAT), LATER, off)
+    assert on.mode is RoomMode.HEAT
+    assert (("climate.a", SetHvacMode("heat"))) in writes(cmds)
+
+
 def test_restored_off_is_written_to_thermostats_still_heating() -> None:
     room = logic()
     st, _ = room.handle(
@@ -520,6 +532,7 @@ def test_a_room_without_sensors_resyncs_only_mode_and_setpoint() -> None:
     room = RoomLogic(cfg, logic()._params, capability_of=capability_of)  # noqa: SLF001
     st, _ = room.handle(Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg))
     st, _ = room.handle(SetRoomSetpoint(21.0), T0, st)
+    st, _ = room.handle(SetRoomMode(RoomMode.OFF), T0, st)
     _, cmds = room.handle(SetRoomMode(RoomMode.HEAT), T0, st)
     assert executes(cmds)[:2] == [
         ("climate.a", SetHvacMode("heat")),

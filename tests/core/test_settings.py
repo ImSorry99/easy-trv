@@ -2,7 +2,6 @@ from dataclasses import fields
 
 import pytest
 
-from custom_components.easy_trv import const
 from custom_components.easy_trv.core.settings import (
     DEFAULTS,
     RoomSettings,
@@ -186,23 +185,3 @@ def test_setpoint_min_must_be_below_max():
     with pytest.raises(ValueError, match="setpoint_min"):
         resolve_settings({"setpoint_max": 4.0}, {})
     assert resolve_settings({}, {"setpoint_min": 29.5}).setpoint_min == 29.5
-
-
-def test_every_default_has_a_matching_conf_constant():
-    # CONF_* names that are not settings with a built-in default.
-    not_settings = {
-        const.CONF_TRVS,
-        const.CONF_TEMP_SENSORS,
-        const.CONF_HUMIDITY_SENSORS,
-        const.CONF_AREA,
-        const.CONF_NAME,
-        const.CONF_OUTDOOR_CUTOFF,
-        const.CONF_OUTDOOR_SENSOR,
-        const.CONF_WINDOW_CONTACTS,
-    }
-    conf_values = {
-        value
-        for name, value in vars(const).items()
-        if name.startswith("CONF_") and isinstance(value, str)
-    }
-    assert set(DEFAULTS) == conf_values - not_settings

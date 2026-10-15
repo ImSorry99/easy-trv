@@ -83,8 +83,8 @@
             "max_attempts": "Versuche",
             "min_delta_kelvin": "Mindeständerung (K)",
             "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)",
-            "setpoint_min": "Kleinste Solltemperatur",
-            "setpoint_max": "Größte Solltemperatur",
+            "setpoint_min": "Minimale Solltemperatur (°C)",
+            "setpoint_max": "Maximale Solltemperatur (°C)",
             "window_open_delay_seconds": "Verzögerung, bis ein Fenster als offen gilt (Sekunden, 0 = sofort)",
             "window_warn_minutes": "Warnung bei offenem Fenster (Minuten, 0 = nie)",
             "window_check_minutes": "Fensterkontakt-Prüfung (Minuten, 0 = aus)",
@@ -107,9 +107,9 @@
             "setpoint_max": "Die höchste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Global ist derzeit {global_setpoint_max}.",
             "window_open_delay_seconds": "Wie lange ein Fensterkontakt offen sein muss, bis das Fenster als offen gilt und die Heizung ausgeschaltet wird. Kurzes Lüften schaltet nichts aus. 0 = sofort, sonst 1 bis 600 Sekunden. Global ist derzeit {global_window_open_delay_seconds}.",
             "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Global ist derzeit {global_window_warn_minutes}.",
-            "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um die Abkühlung unten abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Global ist derzeit {global_window_check_minutes}.",
+            "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um den Wert unter „Erwartete Abkühlung bei der Prüfung (K)“ abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Global ist derzeit {global_window_check_minutes}.",
             "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Global ist derzeit {global_window_check_drop_kelvin}.",
-            "outdoor_cutoff": "Global verwendet die Abschalttemperatur aus den Integrationsoptionen. Aus schaltet diesen Raum nie wegen der Außentemperatur ab.",
+            "outdoor_cutoff": "Global folgt der Abschalttemperatur aus den Integrationsoptionen (derzeit {global_outdoor_cutoff_celsius}), solange du unten keine eigene Temperatur einträgst. Aus schaltet diesen Raum nie wegen der Außentemperatur ab.",
             "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Braucht einen Außensensor in den Integrationsoptionen. -10,0 bis 30,0 °C. Leer = Global, derzeit {global_outdoor_cutoff_celsius}."
           }
         }
@@ -123,7 +123,7 @@
         "name_exists": "Ein Raum mit diesem Namen existiert bereits.",
         "name_required": "Gib einen Namen für den Raum ein.",
         "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein.",
-        "setpoint_range": "Das Minimum muss unter dem Maximum liegen."
+        "setpoint_range": "Die minimale Solltemperatur muss unter der maximalen liegen."
       },
       "abort": {
         "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
@@ -142,7 +142,7 @@
         "state_attributes": {
           "preset_mode": {
             "state": {
-              "none": "Keins",
+              "none": "Keine",
               "frost": "Frostschutz"
             }
           }
@@ -242,8 +242,8 @@
             "name": "Raumthermostat",
             "description": "Die Grenzen der Solltemperatur, die an einem Raum eingestellt werden kann.",
             "data": {
-              "setpoint_min": "Kleinste Solltemperatur",
-              "setpoint_max": "Größte Solltemperatur"
+              "setpoint_min": "Minimale Solltemperatur (°C)",
+              "setpoint_max": "Maximale Solltemperatur (°C)"
             },
             "data_description": {
               "setpoint_min": "Die niedrigste Solltemperatur, die ein Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Leer = {default_setpoint_min}.",
@@ -264,7 +264,7 @@
             "data_description": {
               "window_open_delay_seconds": "Wie lange ein Fensterkontakt offen sein muss, bis das Fenster als offen gilt und die Heizung ausgeschaltet wird. Kurzes Lüften schaltet nichts aus. 0 = sofort, sonst 1 bis 600 Sekunden. Leer = {default_window_open_delay_seconds}.",
               "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Leer = {default_window_warn_minutes}.",
-              "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um die Abkühlung unten abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Leer = {default_window_check_minutes}.",
+              "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um den Wert unter „Erwartete Abkühlung bei der Prüfung (K)“ abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Leer = {default_window_check_minutes}.",
               "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Leer = {default_window_check_drop_kelvin}.",
               "outdoor_sensor": "Der Temperatursensor, den die Außentemperatur-Abschaltung liest. Ohne ihn tut die Abschaltung nichts.",
               "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Ein Raum kann das für sich abschalten. -10,0 bis 30,0 °C. Leer = {default_outdoor_cutoff_celsius}."
@@ -275,7 +275,7 @@
     },
     "error": {
       "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein.",
-      "setpoint_range": "Das Minimum muss unter dem Maximum liegen."
+      "setpoint_range": "Die minimale Solltemperatur muss unter der maximalen liegen."
     }
   },
   "selector": {

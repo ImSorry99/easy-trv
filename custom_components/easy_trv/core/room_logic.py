@@ -261,10 +261,14 @@ class RoomLogic:
     def _on_set_mode(
         self, event: SetRoomMode, now: datetime, state: RoomState
     ) -> _Step:
-        """Switch the room on or off; switching on resyncs source and value first."""
+        """Switch the room on or off; switching on resyncs source and value first.
+
+        Switching on a room that heats already writes nothing.
+        """
         resync: list[Intent] = []
         if (
             event.mode is RoomMode.HEAT
+            and state.mode is not RoomMode.HEAT
             and self._cfg.setpoint_range is not None
             and not setpoint.holding(state)
         ):
@@ -442,7 +446,7 @@ class RoomLogic:
                 # would be re-enabled again and again.
                 return self._on_failure(event, outcome, now, state)
             case Signal(name="schedule") if isinstance(event.intent, SetHvacMode):
-                return self._on_schedule_readback(event, now, state)
+                return self._on_schedule_readback(event, outcome, now, state)
             case Signal():
                 return self._on_signal(event, outcome, now, state)
             case _:
@@ -465,89 +469,35 @@ class RoomLogic:
         if (
             isinstance(outcome, Mismatch)
             and not guarded
-            and self._is_foreign(event, outcome, now, state)
+            and observe.is_foreign_readback(
+                state.trvs[event.trv], event.intent, event.capability, outcome, now
+            )
         ):
-            return self._on_foreign_readback(event, outcome, now, state)
+            observed = TrvObserved(
+                event.trv, event.capability, outcome.observed, outcome.actual or 0
+            )
+            return observe.on_readback(
+                self._cfg, state, now, observed, self._capability_of
+            )
         return self._on_failure(event, outcome, now, state)
 
-    def _is_foreign(
-        self,
-        event: OperationResult,
-        outcome: Mismatch,
-        now: datetime,
-        state: RoomState,
-    ) -> bool:
-        """Return whether a read-back shows a value somebody else set, not ours.
-
-        Neither our own recent value nor the one the thermostat reported before
-        our write (it has not applied the write yet) is such a value.
-        """
-        if (
-            not isinstance(event.intent, SetSetpoint | SetHvacMode)
-            or outcome.observed is None
-            or outcome.actual is None
-        ):
-            return False
-        known = state.trvs[event.trv]
-        reported = (
-            known.reported_setpoint
-            if isinstance(event.intent, SetSetpoint)
-            else known.reported_mode
-        )
-        return not (
-            observe.is_echo(known, event.capability, outcome.observed, now)
-            or observe.is_stale_readback(
-                known, event.capability, reported, outcome.observed
-            )
-        )
-
-    def _on_foreign_readback(
-        self,
-        event: OperationResult,
-        outcome: Mismatch,
-        now: datetime,
-        state: RoomState,
-    ) -> _Step:
-        """Treat a read-back that found somebody else's value as an observation.
-
-        The write is over (the value that was there supersedes it): no retry.
-        """
-        trv, capability = event.trv, event.capability
-        current = state.trvs[trv]
-        state = self._with_trv(
-            state,
-            trv,
-            replace(
-                current,
-                attempts=_without(current.attempts, capability),
-                pending_retry=_without(current.pending_retry, capability),
-            ),
-        )
-        observed = TrvObserved(
-            trv, capability, outcome.observed, outcome.actual or 0, "report"
-        )
-        return observe.on_observed(self._cfg, state, now, observed, self._capability_of)
-
     def _on_schedule_readback(
-        self, event: OperationResult, now: datetime, state: RoomState
+        self, event: OperationResult, outcome: Signal, now: datetime, state: RoomState
     ) -> _Step:
         """Handle a mode write whose read-back found the thermostat on its schedule.
 
-        The write is no failure: the thermostat is left alone from now on.
+        The write is no failure: the thermostat is left alone from now on. The
+        ``off`` of a hold is the exception, it has to arrive and is tried again.
         """
-        trv, capability = event.trv, event.capability
-        current = state.trvs[trv]
-        state = self._with_trv(
-            state,
-            trv,
-            replace(
-                current,
-                attempts=_without(current.attempts, capability),
-                pending_retry=_without(current.pending_retry, capability),
-            ),
-        )
-        observed = TrvObserved(trv, capability, None, 1, "report")
-        return observe.on_observed(self._cfg, state, now, observed, self._capability_of)
+        intent = event.intent
+        if (
+            isinstance(intent, SetHvacMode)
+            and intent.mode == "off"
+            and setpoint.holding(state)
+        ):
+            return self._on_failure(event, outcome, now, state)
+        observed = TrvObserved(event.trv, event.capability, None, 1)
+        return observe.on_readback(self._cfg, state, now, observed, self._capability_of)
 
     def _on_ok(self, event: OperationResult, now: datetime, state: RoomState) -> _Step:
         """Forget earlier trouble with the capability and record a verified value.

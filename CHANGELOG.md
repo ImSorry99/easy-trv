@@ -13,10 +13,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Window contacts switch the room off while open and restore it when closed, with a long-open warning and a hint for contacts that look stuck
 - Outdoor cut-off switches a room off above a global or per-room outdoor temperature, with a 0.5 K deadband
 - Diagnostics list the holds and the latest observations per thermostat
+- Setting `window_open_delay_seconds` (0 to 600, default 30, 0 = at once): a window contact must stay open this long before the room is switched off; closing is not delayed
+- Bus events `easy_trv_setpoint_adopted`, `easy_trv_window_hold` and `easy_trv_outdoor_hold`
+- New attributes: the room status sensor shows `window_open`, `outdoor_cutoff`, `setpoint_source`, `in_sync` and `schedule_thermostats`; the room thermostat shows `setpoint_source`, `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff` and `note`
+- Repairs issue `schedule_thermostat_off` for a thermostat on its schedule that a window or the outdoor cut-off switched off
 
 ### Changed
 
 - No external-temperature writes while a room is off or held by a window or the outdoor cut-off
+- A window or the outdoor cut-off switches every thermostat off, those on their weekly schedule included. Easy TRV never writes `auto`, so a thermostat that was on its schedule stays off after the hold until you switch it back in ZHA
+- First start without a remembered state: the room takes the target of the first thermostat that reports one and writes it to the others (setpoints are unified), and takes over their mode: it starts off only if every thermostat is off, otherwise thermostats that report off are switched on
+- A contact that becomes unavailable keeps its last state, so an open window stays open; a contact that never reported counts as closed
+- A setpoint or mode write that waited in the queue is sent with the room's target at the moment it runs
+- Setting the room to heat while it heats already writes nothing
+- `in_sync` is also false while a thermostat is known to show something other than what the room wants
+- Exhausted setpoint and mode writes are sent again at every refresh interval
 
 ## [0.2.0] - 2026-10-14
 

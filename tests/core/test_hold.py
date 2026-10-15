@@ -30,6 +30,7 @@ from custom_components.easy_trv.core.model import (
     SetRoomTemperature,
     SetSetpoint,
     SetSource,
+    Signal,
     Start,
     Tick,
     TrvAvailabilityChanged,
@@ -384,6 +385,25 @@ def test_a_heat_report_of_a_schedule_thermostat_during_the_hold_is_put_right() -
     assert executes(cmds) == [(B, SetHvacMode("off"))]
     assert st.trvs[B].left_off is True
     assert schedule_issues(cmds) == ([], [])
+
+
+def test_a_hold_off_that_reads_back_as_the_schedule_is_tried_again() -> None:
+    st = with_trv(heating(), B, reported_mode="auto")
+    st, _ = open_window(st)
+    st, cmds = room().handle(
+        result(B, SetHvacMode("off"), Signal("schedule")), OPEN_AT, st
+    )
+    assert [c.capability for c in of_type(cmds, ScheduleRetry)] == ["hvac_mode"]
+    assert st.trvs[B].left_off is True
+    assert st.trvs[B].attempts == {"hvac_mode": 1}
+    assert schedule_issues(cmds) == ([], [])
+    # Outside a hold the same read-back leaves the thermostat alone.
+    other, _ = room().handle(WindowChanged(open=False), LATER, st)
+    other = replace(other, trvs={**other.trvs, B: replace(other.trvs[B], attempts={})})
+    _, cmds = room().handle(
+        result(B, SetHvacMode("off"), Signal("schedule")), LATER, other
+    )
+    assert of_type(cmds, ScheduleRetry) == []
 
 
 def test_a_window_phase_thermostat_is_switched_off_and_resumed() -> None:

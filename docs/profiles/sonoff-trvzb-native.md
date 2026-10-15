@@ -17,7 +17,7 @@ Cluster `0xFC11`, endpoint 1, **no manufacturer code** (the built-in ZHA quirk d
 | `FROST_PROTECTION` | `SetFrostTemperature(t)` | `0x6002 frost_protection_temperature` | `int16s`, `round(t, 1) × 100`, valid 400–3500 (4–35 °C) | equals written value | all |
 | `setpoint` | `SetSetpoint(t)` | `0x0201 / 0x0012 occupied_heating_setpoint` | `int16s`, `t` rounded half-up to 0.5 °C, then × 100; valid 4–35 °C. Observed | equals written value | all |
 | `hvac_mode` | `SetHvacMode(heat)` | `0x0201 / 0x001C system_mode` | `4` | read ∈ {4}; read `1` (auto) = **schedule signal** (the device runs its own schedule) | all |
-| `hvac_mode` | `SetHvacMode(off)` | `0x0201 / 0x001C` | `0` | equals 0 | all |
+| `hvac_mode` | `SetHvacMode(off)` | `0x0201 / 0x001C` | `0` | `one_of [0]`; read `1` (auto) is the same **schedule signal** as for heat (the `signals` entry belongs to the capability, not to the value). A room with a hold treats it as a failed `off` and tries again; elsewhere the thermostat is left alone | all |
 
 Read-back of `0x600D` always includes `0x600E` in the same read so the fail-safe is seen on every refresh.
 

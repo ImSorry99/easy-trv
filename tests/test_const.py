@@ -2,6 +2,7 @@ from pathlib import Path
 
 from custom_components.easy_trv import const
 from custom_components.easy_trv.core import model
+from custom_components.easy_trv.core.settings import DEFAULTS
 
 
 def test_defaults_match_requirements() -> None:
@@ -49,3 +50,23 @@ def test_new_setting_constants() -> None:
     assert const.DEFAULT_OUTDOOR_CUTOFF_CELSIUS is None
     assert const.CONF_WINDOW_OPEN_DELAY == "window_open_delay_seconds"
     assert const.DEFAULT_WINDOW_OPEN_DELAY == 30
+
+
+def test_every_default_has_a_matching_conf_constant():
+    # CONF_* names that are not settings with a built-in default.
+    not_settings = {
+        const.CONF_TRVS,
+        const.CONF_TEMP_SENSORS,
+        const.CONF_HUMIDITY_SENSORS,
+        const.CONF_AREA,
+        const.CONF_NAME,
+        const.CONF_OUTDOOR_CUTOFF,
+        const.CONF_OUTDOOR_SENSOR,
+        const.CONF_WINDOW_CONTACTS,
+    }
+    conf_values = {
+        value
+        for name, value in vars(const).items()
+        if name.startswith("CONF_") and isinstance(value, str)
+    }
+    assert set(DEFAULTS) == conf_values - not_settings

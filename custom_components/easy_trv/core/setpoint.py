@@ -96,7 +96,9 @@ def on_set_mode(  # noqa: PLR0913
 
     ``off`` is written to every thermostat. ``heat`` writes the mode, then the
     ``resync`` intents (source and value, which the room logic knows), then the
-    setpoint, thermostat by thermostat. During a hold only the state changes.
+    setpoint, thermostat by thermostat. During a hold only the state changes, and
+    ``heat`` for a room that heats already writes nothing (it only drops the knob
+    turns still waiting for their debounce).
     """
     if cfg.setpoint_range is None:
         return state, []
@@ -104,8 +106,9 @@ def on_set_mode(  # noqa: PLR0913
     if mode is RoomMode.OFF:
         # A setpoint turned just before must not wake the room when it settles.
         state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
+    heating = state.mode is RoomMode.HEAT
     state = replace(state, mode=mode)
-    if holding(state):
+    if holding(state) or (heating and mode is RoomMode.HEAT):
         return state, []
     if mode is RoomMode.HEAT:
         return resume(cfg, state, now, capability_of, resync)

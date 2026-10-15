@@ -470,7 +470,7 @@ class TrvObserved:
     capability: str
     value: float | str | None
     raw: int
-    kind: str
+    kind: str = "report"
 
 
 @dataclass(frozen=True)

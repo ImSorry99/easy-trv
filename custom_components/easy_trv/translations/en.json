@@ -107,9 +107,9 @@
             "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Global is currently {global_setpoint_max}.",
             "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Global is currently {global_window_open_delay_seconds}.",
             "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Global is currently {global_window_warn_minutes}.",
-            "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the cooling below, otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
+            "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the amount set in \"Cooling expected by the check (K)\", otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
             "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Global is currently {global_window_check_drop_kelvin}.",
-            "outdoor_cutoff": "Global uses the outdoor cut-off temperature of the integration options. Off never switches this room off because of the outdoor temperature.",
+            "outdoor_cutoff": "Global follows the outdoor cut-off temperature of the integration options (currently {global_outdoor_cutoff_celsius}), unless you enter a temperature of your own below. Off never switches this room off because of the outdoor temperature.",
             "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. Needs an outdoor sensor in the integration options. -10.0 to 30.0 °C. Empty = Global, currently {global_outdoor_cutoff_celsius}."
           }
         }
@@ -123,7 +123,7 @@
         "name_exists": "A room with this name already exists.",
         "name_required": "Enter a name for the room.",
         "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes.",
-        "setpoint_range": "Minimum must be below maximum."
+        "setpoint_range": "The minimum target temperature must be below the maximum."
       },
       "abort": {
         "reconfigure_successful": "Re-configuration was successful",
@@ -264,7 +264,7 @@
             "data_description": {
               "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Empty = {default_window_open_delay_seconds}.",
               "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Empty = {default_window_warn_minutes}.",
-              "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the cooling below, otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Empty = {default_window_check_minutes}.",
+              "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the amount set in \"Cooling expected by the check (K)\", otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Empty = {default_window_check_minutes}.",
               "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Empty = {default_window_check_drop_kelvin}.",
               "outdoor_sensor": "The temperature sensor the outdoor cut-off reads. Without it the cut-off does nothing.",
               "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. A room can turn this off for itself. -10.0 to 30.0 °C. Empty = {default_outdoor_cutoff_celsius}."
@@ -275,7 +275,7 @@
     },
     "error": {
       "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes.",
-      "setpoint_range": "Minimum must be below maximum."
+      "setpoint_range": "The minimum target temperature must be below the maximum."
     }
   },
   "selector": {
