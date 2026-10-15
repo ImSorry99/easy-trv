@@ -9,6 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.issue_registry import IssueSeverity
+from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_capture_events,
@@ -16,6 +17,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.easy_trv import issues
+from custom_components.easy_trv.adapters.zha_gateway import ZhaUnavailable
 from custom_components.easy_trv.const import (
     DOMAIN,
     EVENT_FAILSAFE,
@@ -24,9 +26,10 @@ from custom_components.easy_trv.const import (
 )
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.core.model import (
-    ClearIssue,
-    RaiseIssue,
+    Note,
+    Preset,
     RoomConfig,
+    RoomMode,
     RoomParams,
     RoomStatus,
     TrvConfig,
@@ -41,6 +44,9 @@ HYSTERESIS = 0x6011
 FROST = 0x6002
 SOURCE = 0x600E
 VALUE = 0x600D
+SETPOINT = 0x0012
+MODE = 0x001C
+RANGE = (4.0, 35.0, 0.5)
 CELSIUS = {"unit_of_measurement": "°C"}
 PARAMS = replace(RoomParams.defaults(), verify_delay=0.0)
 # Enough loop iterations for the worker to run a queue of fake-gateway
@@ -155,10 +161,19 @@ async def make_controller(hass, gateway, profile, config):
     """Build controllers for the room and stop them again after the test."""
     created: list[RoomController] = []
 
-    def make(*, cfg=None, params=PARAMS, prof=None, labels=LABELS) -> RoomController:
+    def make(
+        *, cfg=None, params=PARAMS, prof=None, labels=LABELS, outdoor_sensor=None
+    ) -> RoomController:
         refs = {ref.entity_id: ref for ref in gateway.devices.values()}
         controller = RoomController(
-            hass, cfg or config, params, prof or profile, gateway, refs, labels=labels
+            hass,
+            cfg or config,
+            params,
+            prof or profile,
+            gateway,
+            refs,
+            labels=labels,
+            outdoor_sensor=outdoor_sensor,
         )
         created.append(controller)
         return controller
@@ -486,16 +501,6 @@ async def test_start_clears_stale_thermostat_issues(hass, controller, gateway) -
     # A thermostat of another room keeps its issues.
     assert issue(hass, "trv_unreachable_0099") is not None
     assert issue(hass, "trv_firmware_0099") is not None
-
-
-async def test_room_issues_are_ignored_until_they_are_mapped(hass, controller) -> None:
-    await controller.async_start()
-    await settle(hass)
-    placeholders = {"room": "Living", "minutes": "130"}
-    for kind in ("window_open_long", "window_contact_suspect"):
-        controller._execute(RaiseIssue(kind, "room1", placeholders))  # noqa: SLF001
-        controller._execute(ClearIssue(kind, "room1"))  # noqa: SLF001
-    assert controller.status is not RoomStatus.ERROR
 
 
 OPERATION_LOGGER = "custom_components.easy_trv.controller"
@@ -1032,3 +1037,700 @@ async def test_snapshot_is_json_able(hass, controller, gateway) -> None:
     assert trv["pending_retry"] == {
         "external_temperature": {"intent": "set_room_temperature", "celsius": 21.3}
     }
+
+
+# --- Room thermostat: commands, observations, holds -----------------------
+
+OUTDOOR = "sensor.outdoor"
+CONTACT = "binary_sensor.w"
+
+
+def with_climate(cfg: RoomConfig, **changes) -> RoomConfig:
+    """Return the room with a setpoint range, so it has a room thermostat."""
+    return replace(cfg, setpoint_range=RANGE, **changes)
+
+
+@pytest.fixture
+def climate(make_controller, config) -> RoomController:
+    return make_controller(cfg=with_climate(config))
+
+
+async def start_with_setpoint(hass, controller, gateway, celsius=21.0) -> None:
+    """Start the room with a setpoint and forget the writes of the start."""
+    await controller.async_start()
+    await settle(hass)
+    await controller.async_set_setpoint(celsius)
+    await settle(hass)
+    gateway.writes.clear()
+
+
+# Subscriptions
+
+
+async def test_start_subscribes_once_per_thermostat_to_the_observed_capabilities(
+    climate, gateway
+) -> None:
+    await climate.async_start()
+    assert [(s[0], s[1], s[2], tuple(sorted(s[3]))) for s in gateway.subscriptions] == [
+        (IEEE_A, 1, 0x0201, (SETPOINT, MODE)),
+        (IEEE_B, 1, 0x0201, (SETPOINT, MODE)),
+    ]
+
+
+async def test_subscriptions_are_removed_on_unload(climate, gateway) -> None:
+    await climate.async_start()
+    assert len(gateway.subscriptions) == 2
+    await climate.async_stop()
+    assert gateway.subscriptions == []
+    await climate.async_stop()
+
+
+async def test_a_thermostat_unknown_to_zha_is_subscribed_when_it_comes_back(
+    hass, climate, gateway, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=OPERATION_LOGGER)
+    gateway.subscribe_unavailable.add(IEEE_A)
+    hass.states.async_set("climate.a", "unavailable")
+    await climate.async_start()
+    await settle(hass)
+    assert [s[0] for s in gateway.subscriptions] == [IEEE_B]
+    assert any(
+        "climate.a" in r.getMessage() and "subscri" in r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.DEBUG
+    )
+
+    gateway.subscribe_unavailable.clear()
+    hass.states.async_set("climate.a", "heat")
+    await settle(hass)
+    assert sorted(s[0] for s in gateway.subscriptions) == [IEEE_A, IEEE_B]
+
+    # Coming back again replaces the subscription (ZHA may have reloaded).
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    hass.states.async_set("climate.a", "heat")
+    await settle(hass)
+    assert sorted(s[0] for s in gateway.subscriptions) == [IEEE_A, IEEE_B]
+
+
+async def test_a_subscription_that_fails_again_on_return_is_tried_later(
+    hass, climate, gateway
+) -> None:
+    await climate.async_start()
+    gateway.subscribe_unavailable.add(IEEE_A)
+    hass.states.async_set("climate.a", "unavailable")
+    await settle(hass)
+    hass.states.async_set("climate.a", "heat")
+    await settle(hass)
+    assert [s[0] for s in gateway.subscriptions] == [IEEE_B]
+
+
+async def test_a_room_without_observed_capabilities_subscribes_to_nothing(
+    make_controller, config, gateway, profile
+) -> None:
+    capabilities = {
+        name: spec for name, spec in profile.capabilities.items() if not spec.observe
+    }
+    bare = replace(profile, capabilities=capabilities)
+    await make_controller(cfg=config, prof=bare).async_start()
+    assert gateway.subscriptions == []
+
+
+def test_the_fake_gateway_raises_zha_unavailable_for_an_unknown_ieee(gateway) -> None:
+    with pytest.raises(ZhaUnavailable):
+        gateway.subscribe("00:99", 1, 0x0201, [SETPOINT], lambda *_: None)
+
+
+# Observations
+
+
+async def test_report_from_a_thermostat_is_decoded_and_adopted(
+    hass, freezer, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    gateway.inject(IEEE_A, SETPOINT, 2200)
+    await advance(hass, freezer, 1, step=1)
+    assert gateway.writes == []
+    await advance(hass, freezer, 5)
+    assert writes_to(gateway, IEEE_B, SETPOINT) == [2200]
+    assert writes_to(gateway, IEEE_A, SETPOINT) == []
+    assert climate.setpoint == 22.0
+    assert climate.setpoint_source == "device:climate.a"
+
+
+async def test_a_knob_turned_twice_within_the_debounce_is_adopted_once(
+    hass, freezer, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    gateway.inject(IEEE_A, SETPOINT, 2200)
+    await advance(hass, freezer, 2, step=1)
+    gateway.inject(IEEE_A, SETPOINT, 2250)
+    await advance(hass, freezer, 2, step=1)
+    assert gateway.writes == []
+    await advance(hass, freezer, 5)
+    assert writes_to(gateway, IEEE_B, SETPOINT) == [2250]
+
+
+async def test_stop_cancels_the_knob_timer(hass, freezer, climate, gateway) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    gateway.inject(IEEE_A, SETPOINT, 2200)
+    await climate.async_stop()
+    await advance(hass, freezer, 10)
+    assert gateway.writes == []
+    assert climate.setpoint == 21.0
+
+
+async def test_a_report_of_the_schedule_mode_is_a_note(hass, climate, gateway) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    assert climate.in_sync is True
+    assert climate.notes == {}
+    gateway.inject(IEEE_A, MODE, 1)
+    await settle(hass)
+    assert climate.notes == {"climate.a": Note.SCHEDULE}
+    assert climate.in_sync is False
+    gateway.inject(IEEE_A, MODE, 4)
+    await settle(hass)
+    assert climate.notes == {}
+
+
+async def test_a_foreign_value_read_back_after_a_write_is_adopted(
+    hass, freezer, climate, gateway
+) -> None:
+    await climate.async_start()
+    await settle(hass)
+    gateway.read_override[(IEEE_A, SETPOINT)] = 2300
+    await climate.async_set_setpoint(21.0)
+    await settle(hass)
+    await advance(hass, freezer, 5)
+    assert climate.setpoint == 23.0
+    assert climate.setpoint_source == "device:climate.a"
+    assert writes_to(gateway, IEEE_B, SETPOINT) == [2100, 2300]
+
+
+async def test_an_observation_is_ignored_after_stop(hass, climate, gateway) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    callbacks = [s[4] for s in gateway.subscriptions]
+    await climate.async_stop()
+    for callback in callbacks:
+        callback(IEEE_A, SETPOINT, "report", 2200)
+    assert climate.setpoint == 21.0
+
+
+async def test_an_unknown_attribute_in_a_delivery_is_ignored(
+    hass, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    callback = gateway.subscriptions[0][4]
+    callback(IEEE_A, 0x7777, "report", 1)
+    assert climate.setpoint == 21.0
+
+
+# Start
+
+
+async def test_start_adopts_the_setpoint_a_thermostat_reports(
+    hass, climate, gateway
+) -> None:
+    hass.states.async_set("climate.a", "heat", {"temperature": 19.0})
+    hass.states.async_set("climate.b", "heat", {"temperature": 22.0})
+    await climate.async_start()
+    await settle(hass)
+    assert climate.setpoint == 19.0
+    assert climate.setpoint_source == "initial"
+    assert writes_to(gateway, IEEE_B, SETPOINT) == [1900]
+
+
+async def test_start_does_not_adopt_the_setpoint_of_a_thermostat_in_auto(
+    hass, climate, gateway
+) -> None:
+    # "auto" is not a mode the room owns: the climate state gives no mode, and
+    # the setpoint of the thermostat that does report heat is adopted instead.
+    hass.states.async_set("climate.a", "auto", {"temperature": 12.0})
+    hass.states.async_set("climate.b", "heat", {"temperature": 22.5})
+    await climate.async_start()
+    await settle(hass)
+    assert climate.setpoint == 22.5
+    assert climate.setpoint_source == "initial"
+    assert writes_to(gateway, IEEE_B, SETPOINT) == []
+
+
+async def test_start_reads_the_mode_and_bad_setpoints_leniently(hass, climate) -> None:
+    hass.states.async_set("climate.a", "off", {"temperature": "n/a"})
+    hass.states.async_set("climate.b", "off")
+    await climate.async_start()
+    await settle(hass)
+    assert climate.mode is RoomMode.OFF
+    assert climate.setpoint is None
+
+
+async def test_start_reads_a_setpoint_in_the_unit_system_of_home_assistant(
+    hass, climate
+) -> None:
+    hass.config.units = US_CUSTOMARY_SYSTEM
+    hass.states.async_set("climate.a", "heat", {"temperature": 68.0})
+    await climate.async_start()
+    await settle(hass)
+    assert climate.setpoint == 20.0
+
+
+async def test_start_without_a_climate_state_reports_nothing(hass, climate) -> None:
+    hass.states.async_remove("climate.a")
+    hass.states.async_remove("climate.b")
+    await climate.async_start()
+    await settle(hass)
+    assert climate.setpoint is None
+
+
+async def test_a_restore_before_start_wins_over_the_devices(
+    hass, climate, gateway
+) -> None:
+    hass.states.async_set("climate.a", "heat", {"temperature": 19.0})
+    hass.states.async_set("climate.b", "heat", {"temperature": 19.0})
+    await climate.async_restore(20.5, RoomMode.HEAT, Preset.NONE, 18.0)
+    await climate.async_start()
+    await settle(hass)
+    assert climate.setpoint == 20.5
+    assert climate.setpoint_source == "restore"
+    assert writes_to(gateway, IEEE_A, SETPOINT) == [2050]
+    assert writes_to(gateway, IEEE_B, SETPOINT) == [2050]
+
+
+# Room commands
+
+
+async def test_set_setpoint_writes_through_the_pipeline(hass, climate, gateway) -> None:
+    await climate.async_start()
+    await settle(hass)
+    gateway.writes.clear()
+    await climate.async_set_setpoint(21.3)
+    await settle(hass)
+    assert climate.setpoint == 21.5
+    assert climate.setpoint_source == "ha"
+    assert writes_to(gateway, IEEE_A, SETPOINT) == [2150]
+    assert writes_to(gateway, IEEE_B, SETPOINT) == [2150]
+    # Written, read back and accepted: nothing is retried or complained about.
+    assert health(climate) == {"climate.a": "ok", "climate.b": "ok"}
+
+
+async def test_set_mode_off_and_back_to_heat(hass, climate, gateway) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    await climate.async_set_mode(RoomMode.OFF)
+    await settle(hass)
+    assert climate.mode is RoomMode.OFF
+    assert writes_to(gateway, IEEE_A, MODE) == [0]
+    assert writes_to(gateway, IEEE_B, MODE) == [0]
+    await climate.async_set_mode(RoomMode.HEAT)
+    await settle(hass)
+    assert climate.mode is RoomMode.HEAT
+    assert writes_to(gateway, IEEE_A, MODE) == [0, 4]
+    assert writes_to(gateway, IEEE_A, SETPOINT)[-1] == 2100
+
+
+async def test_set_preset_frost_and_back(hass, climate, gateway) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    await climate.async_set_preset(Preset.FROST)
+    await settle(hass)
+    assert climate.preset is Preset.FROST
+    assert climate.setpoint == 7.0
+    assert climate.setpoint_source == "frost"
+    assert writes_to(gateway, IEEE_A, SETPOINT) == [700]
+    await climate.async_set_preset(Preset.NONE)
+    await settle(hass)
+    assert climate.preset is Preset.NONE
+    assert climate.setpoint == 21.0
+    assert writes_to(gateway, IEEE_B, SETPOINT) == [700, 2100]
+
+
+# Properties
+
+
+async def test_a_room_without_climate_capabilities_has_no_range(controller) -> None:
+    assert controller.effective_range is None
+
+
+async def test_effective_range_is_the_range_of_the_room(climate) -> None:
+    assert climate.effective_range == RANGE
+
+
+async def test_current_temperature_is_the_value_last_written(
+    hass, freezer, climate, gateway
+) -> None:
+    assert climate.current_temperature is None
+    await climate.async_start()
+    await settle(hass)
+    assert writes_to(gateway, IEEE_A, VALUE) == [2130]
+    assert climate.current_temperature == 21.3
+    # A new reading is not what the thermostats know until it is written.
+    hass.states.async_set("sensor.t1", "22.4", CELSIUS)
+    await settle(hass)
+    assert climate.current_temperature == 21.3
+    await advance(hass, freezer, 10)
+    assert climate.current_temperature == 22.4
+
+
+async def test_current_temperature_falls_back_to_the_active_sensor(
+    hass, climate, gateway
+) -> None:
+    # A room that starts switched off writes no value to the thermostats.
+    await climate.async_restore(20.0, RoomMode.OFF, Preset.NONE)
+    await climate.async_start()
+    await settle(hass)
+    assert writes_to(gateway, IEEE_A, VALUE) == []
+    assert climate.current_temperature == 21.3
+    hass.states.async_set("sensor.t1", "unavailable")
+    hass.states.async_set("sensor.t2", "unavailable")
+    await settle(hass)
+    assert climate.current_temperature is None
+
+
+async def test_in_sync_is_false_while_a_write_is_pending(
+    hass, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    assert climate.in_sync is True
+    gateway.read_override[(IEEE_A, SETPOINT)] = 0
+    await climate.async_set_setpoint(22.0)
+    await settle(hass)
+    assert climate.in_sync is False
+
+
+async def test_in_sync_is_false_for_an_unavailable_thermostat(
+    hass, climate, gateway
+) -> None:
+    await start_with_setpoint(hass, climate, gateway)
+    hass.states.async_set("climate.b", "unavailable")
+    await settle(hass)
+    assert climate.in_sync is False
+
+
+# Update listeners
+
+
+async def test_update_listeners_run_after_every_handled_event(hass, climate) -> None:
+    calls = []
+    remove = climate.add_update_listener(lambda: calls.append(climate.setpoint))
+    await climate.async_start()
+    await settle(hass)
+    assert calls
+    calls.clear()
+    await climate.async_set_setpoint(22.0)
+    assert calls == [22.0]
+    remove()
+    remove()
+    await climate.async_set_setpoint(23.0)
+    assert calls == [22.0]
+
+
+async def test_a_failing_update_listener_does_not_break_the_others(
+    hass, climate, caplog
+) -> None:
+    calls = []
+
+    def broken() -> None:
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    climate.add_update_listener(broken)
+    climate.add_update_listener(lambda: calls.append(1))
+    await climate.async_start()
+    await settle(hass)
+    assert calls
+    assert "update listener" in caplog.text
+
+
+# Window contacts
+
+
+async def test_window_contact_opens_and_closes_the_hold(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert climate_window.window_open is True
+    assert writes_to(gateway, IEEE_A, MODE) == [0]
+    assert writes_to(gateway, IEEE_B, MODE) == [0]
+    # Home Assistant states keep the room's own wishes during the hold.
+    assert climate_window.mode is RoomMode.HEAT
+    assert climate_window.setpoint == 21.0
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert climate_window.window_open is False
+    assert writes_to(gateway, IEEE_A, MODE) == [0, 4]
+    assert writes_to(gateway, IEEE_B, MODE) == [0, 4]
+    assert writes_to(gateway, IEEE_A, SETPOINT)[-1] == 2100
+
+
+@pytest.fixture
+def climate_window(make_controller, config) -> RoomController:
+    return make_controller(
+        cfg=with_climate(
+            config,
+            window_contacts=(CONTACT, "binary_sensor.w2"),
+            window_warn=timedelta(minutes=30),
+            window_check=timedelta(minutes=10),
+        )
+    )
+
+
+async def test_any_open_contact_keeps_the_window_open(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    hass.states.async_set("binary_sensor.w2", "on")
+    await settle(hass)
+    assert climate_window.window_open is True
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert climate_window.window_open is True
+    assert writes_to(gateway, IEEE_A, MODE) == [0]
+    hass.states.async_set("binary_sensor.w2", "off")
+    await settle(hass)
+    assert climate_window.window_open is False
+
+
+async def test_a_contact_that_is_open_at_start_opens_the_hold_after_the_start(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "on")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await climate_window.async_start()
+    await settle(hass)
+    assert climate_window.window_open is True
+    assert writes_to(gateway, IEEE_A, MODE) == [0]
+
+
+async def test_unavailable_contacts_count_as_closed_and_break_the_sync(
+    hass, climate_window, gateway, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="custom_components.easy_trv.observation")
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    assert climate_window.in_sync is True
+    hass.states.async_set(CONTACT, "unavailable")
+    await settle(hass)
+    assert climate_window.window_open is False
+    assert climate_window.in_sync is False
+    assert any(
+        CONTACT in r.getMessage() and r.levelno == logging.DEBUG for r in caplog.records
+    )
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert climate_window.in_sync is True
+    # An unknown or missing contact is the same.
+    hass.states.async_set(CONTACT, "unknown")
+    await settle(hass)
+    assert climate_window.in_sync is False
+    hass.states.async_remove(CONTACT)
+    await settle(hass)
+    assert climate_window.in_sync is False
+    assert gateway.writes == []
+
+
+async def test_an_open_contact_that_turns_unavailable_ends_the_hold(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert climate_window.window_open is True
+    hass.states.async_set(CONTACT, "unavailable")
+    await settle(hass)
+    assert climate_window.window_open is False
+
+
+async def test_a_contact_attribute_change_is_not_a_window_event(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "on")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on", {"battery": 80})
+    await settle(hass)
+    assert gateway.writes == []
+
+
+async def test_window_open_long_issue(hass, freezer, climate_window, gateway) -> None:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    await advance(hass, freezer, 25 * 60, step=60)
+    assert issue(hass, "window_open_long_room1") is None
+    await advance(hass, freezer, 10 * 60, step=60)
+    raised = issue(hass, "window_open_long_room1")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.ERROR
+    assert raised.translation_key == "window_open_long"
+    assert raised.translation_placeholders["room"] == "Living"
+    assert int(raised.translation_placeholders["minutes"]) >= 30
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert issue(hass, "window_open_long_room1") is None
+
+
+async def test_window_contact_suspect_issue_and_its_clearing(
+    hass, freezer, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    await advance(hass, freezer, 12 * 60, step=60)
+    raised = issue(hass, "window_contact_suspect_room1")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_key == "window_contact_suspect"
+    assert raised.translation_placeholders["room"] == "Living"
+    assert raised.translation_placeholders["drop"] == "0.3"
+    assert issue(hass, "window_open_long_room1") is None
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert issue(hass, "window_contact_suspect_room1") is None
+
+
+async def test_start_clears_stale_window_issues_of_the_room_only(
+    hass, climate_window
+) -> None:
+    for room_id in ("room1", "other"):
+        issues.raise_window_open_long(hass, room_id, "x", 5)
+        issues.raise_window_contact_suspect(hass, room_id, "x", 5, "0.3")
+    await climate_window.async_start()
+    assert issue(hass, "window_open_long_room1") is None
+    assert issue(hass, "window_contact_suspect_room1") is None
+    assert issue(hass, "window_open_long_other") is not None
+    assert issue(hass, "window_contact_suspect_other") is not None
+
+
+async def test_window_changes_are_ignored_after_stop(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    await climate_window.async_stop()
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    assert gateway.writes == []
+    assert climate_window.window_open is False
+
+
+# Outdoor cut-off
+
+
+@pytest.fixture
+def climate_outdoor(make_controller, config) -> RoomController:
+    return make_controller(
+        cfg=with_climate(config, outdoor_cutoff=18.0), outdoor_sensor=OUTDOOR
+    )
+
+
+async def test_outdoor_sensor_drives_the_outdoor_hold(
+    hass, climate_outdoor, gateway
+) -> None:
+    hass.states.async_set(OUTDOOR, "15.0", CELSIUS)
+    await start_with_setpoint(hass, climate_outdoor, gateway)
+    assert climate_outdoor.outdoor_hold is False
+    hass.states.async_set(OUTDOOR, "18.0", CELSIUS)
+    await settle(hass)
+    assert climate_outdoor.outdoor_hold is True
+    assert writes_to(gateway, IEEE_A, MODE) == [0]
+    assert writes_to(gateway, IEEE_B, MODE) == [0]
+    # Inside the deadband the hold stays.
+    hass.states.async_set(OUTDOOR, "17.6", CELSIUS)
+    await settle(hass)
+    assert climate_outdoor.outdoor_hold is True
+    hass.states.async_set(OUTDOOR, "17.0", CELSIUS)
+    await settle(hass)
+    assert climate_outdoor.outdoor_hold is False
+    assert writes_to(gateway, IEEE_A, MODE) == [0, 4]
+
+
+async def test_an_outdoor_temperature_at_start_is_taken_over(
+    hass, climate_outdoor
+) -> None:
+    hass.states.async_set(OUTDOOR, "25", CELSIUS)
+    await climate_outdoor.async_start()
+    await settle(hass)
+    assert climate_outdoor.outdoor_hold is True
+
+
+async def test_an_unusable_outdoor_sensor_ends_the_hold(
+    hass, climate_outdoor, gateway, caplog
+) -> None:
+    hass.states.async_set(OUTDOOR, "25", CELSIUS)
+    await start_with_setpoint(hass, climate_outdoor, gateway)
+    assert climate_outdoor.outdoor_hold is True
+    for bad in ("unavailable", "unknown", "abc", "nan"):
+        hass.states.async_set(OUTDOOR, "25", CELSIUS)
+        await settle(hass)
+        assert climate_outdoor.outdoor_hold is True
+        hass.states.async_set(OUTDOOR, bad)
+        await settle(hass)
+        assert climate_outdoor.outdoor_hold is False, bad
+    assert "outdoor sensor unavailable" in caplog.text
+
+
+async def test_a_missing_outdoor_sensor_is_unknown(hass, climate_outdoor) -> None:
+    await climate_outdoor.async_start()
+    await settle(hass)
+    assert climate_outdoor.outdoor_hold is False
+
+
+async def test_outdoor_fahrenheit_is_converted(hass, climate_outdoor) -> None:
+    hass.states.async_set(OUTDOOR, "77", {"unit_of_measurement": "°F"})
+    await climate_outdoor.async_start()
+    await settle(hass)
+    assert climate_outdoor.outdoor_hold is True
+
+
+async def test_the_outdoor_sensor_is_not_tracked_without_a_cutoff(
+    hass, make_controller, config
+) -> None:
+    room = make_controller(cfg=with_climate(config), outdoor_sensor=OUTDOOR)
+    hass.states.async_set(OUTDOOR, "30", CELSIUS)
+    await room.async_start()
+    await settle(hass)
+    assert room.outdoor_hold is False
+
+
+async def test_no_outdoor_tracking_without_a_sensor(
+    hass, make_controller, config
+) -> None:
+    room = make_controller(cfg=with_climate(config, outdoor_cutoff=18.0))
+    await room.async_start()
+    await settle(hass)
+    assert room.outdoor_hold is False
+
+
+async def test_outdoor_changes_are_ignored_after_stop(
+    hass, climate_outdoor, gateway
+) -> None:
+    hass.states.async_set(OUTDOOR, "15", CELSIUS)
+    await start_with_setpoint(hass, climate_outdoor, gateway)
+    await climate_outdoor.async_stop()
+    hass.states.async_set(OUTDOOR, "30", CELSIUS)
+    await settle(hass)
+    assert climate_outdoor.outdoor_hold is False
+    assert gateway.writes == []
+
+
+async def test_stop_removes_every_state_listener(hass, make_controller, config) -> None:
+    tracked = ("state_changed", "state_reported")
+    before = [hass.bus.async_listeners().get(name, 0) for name in tracked]
+    room = make_controller(
+        cfg=with_climate(config, window_contacts=(CONTACT,), outdoor_cutoff=18.0),
+        outdoor_sensor=OUTDOOR,
+    )
+    await room.async_start()
+    await room.async_stop()
+    assert [hass.bus.async_listeners().get(name, 0) for name in tracked] == before

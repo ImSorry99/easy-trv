@@ -151,6 +151,14 @@
     "settings_migrated": {
       "title": "Thermostat-Einstellungen durch das Update geändert",
       "description": "Diese Räume hatten bei der Hysterese „Unverändert lassen“ gewählt: {rooms}.\n\nSie folgen jetzt dem globalen Wert ({hysteresis}). Solange der adaptive Modus an ist, regelt das Thermostat die Hysterese selbst und es wird keine geschrieben, bei Thermostaten mit Firmware 1.4.4 oder neuer. Prüfe die globale Einstellung in den Optionen von Easy TRV oder lege eine Hysterese im Raum selbst fest.\n\nDu kannst diesen Hinweis ausblenden."
+    },
+    "window_open_long": {
+      "title": "Fenster in {room} seit {minutes} Minuten offen",
+      "description": "Das Fenster in {room} ist seit {minutes} Minuten offen, die Thermostate bleiben aus.\n\nSchließe das Fenster oder prüfe den Fensterkontakt, falls es schon zu ist. Die Heizung läuft von selbst wieder an, sobald der Kontakt „geschlossen“ meldet; dieses Problem verschwindet dann."
+    },
+    "window_contact_suspect": {
+      "title": "Fensterkontakt in {room} meldet offen, aber der Raum kühlt nicht ab",
+      "description": "Der Fensterkontakt in {room} meldet seit {minutes} Minuten offen, die Raumtemperatur ist seit dem Öffnen aber nicht um mindestens {drop} K gefallen.\n\nPrüfe, ob der Kontakt klemmt oder seine Batterie leer ist. Easy TRV hält die Thermostate aus, solange der Kontakt offen meldet; dieses Problem verschwindet, sobald er „geschlossen“ meldet."
     }
   },
   "options": {

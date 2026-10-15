@@ -12,13 +12,14 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Mapping
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final, assert_never
 
 from homeassistant.const import (
+    ATTR_TEMPERATURE,
     ATTR_UNIT_OF_MEASUREMENT,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
@@ -51,7 +52,9 @@ from custom_components.easy_trv.core.model import (
     Ok,
     OperationResult,
     RaiseIssue,
+    RestoreRoom,
     RetryDue,
+    RoomMode,
     RoomState,
     RoomStatus,
     ScheduleDebounce,
@@ -59,6 +62,11 @@ from custom_components.easy_trv.core.model import (
     ScheduleRetry,
     SensorChanged,
     SensorReading,
+    SetHvacMode,
+    SetRoomMode,
+    SetRoomPreset,
+    SetRoomSetpoint,
+    SetSetpoint,
     SetStatus,
     Signal,
     Start,
@@ -67,8 +75,14 @@ from custom_components.easy_trv.core.model import (
     Unsupported,
 )
 from custom_components.easy_trv.core.room_logic import RoomLogic
+from custom_components.easy_trv.core.setpoint import device_driven
 from custom_components.easy_trv.core.values import parse_temperature
 from custom_components.easy_trv.labels import thermostat_name
+from custom_components.easy_trv.observation import (
+    HoldInputs,
+    KnobTimers,
+    ThermostatSubscriptions,
+)
 from custom_components.easy_trv.profiles.engine import CapabilityUnsupported
 
 if TYPE_CHECKING:
@@ -87,9 +101,12 @@ if TYPE_CHECKING:
     from custom_components.easy_trv.core.model import Event as LogicEvent
     from custom_components.easy_trv.core.model import (
         Intent,
+        Note,
         Outcome,
+        Preset,
         RoomConfig,
         RoomParams,
+        TrvState,
     )
     from custom_components.easy_trv.core.values import Version
     from custom_components.easy_trv.profiles.engine import Operation, Profile
@@ -197,11 +214,14 @@ class RoomController:
         device_refs: Mapping[str, DeviceRef],
         *,
         labels: Mapping[str, str] = MappingProxyType({}),
+        outdoor_sensor: str | None = None,
     ) -> None:
         """Wire the room logic to Home Assistant, the profile and the gateway.
 
         ``labels`` maps an intent name to the plain-language name of the setting
         for Repairs texts; a setting without a label is shown by its key.
+        ``outdoor_sensor`` is the global outdoor temperature sensor, which only
+        matters for a room with an outdoor cut-off.
         """
         self._hass = hass
         self._config = config
@@ -217,11 +237,23 @@ class RoomController:
         self._status = RoomStatus.OK
         self._attributes: dict[str, Any] = {}
         self._listeners: list[Callable[[], None]] = []
+        self._update_listeners: list[Callable[[], None]] = []
         self._queue: asyncio.Queue[tuple[str, Intent]] = asyncio.Queue()
         self._worker_task: asyncio.Task[None] | None = None
         self._unsubscribers: list[CALLBACK_TYPE] = []
         self._cancel_debounce: CALLBACK_TYPE | None = None
         self._cancel_retries: list[CALLBACK_TYPE] = []
+        self._subscriptions = ThermostatSubscriptions(
+            gateway,
+            profile,
+            {trv.entity_id: trv.ieee for trv in config.trvs},
+            self._dispatch,
+            config.name,
+        )
+        self._knobs = KnobTimers(hass, self._dispatch)
+        self._holds = HoldInputs(
+            hass, config, outdoor_sensor, self._dispatch, self._notify_update
+        )
         self._warned_units: set[str] = set()
         self._stopped = False
 
@@ -251,6 +283,125 @@ class RoomController:
                 self._listeners.remove(cb)
 
         return remove
+
+    def add_update_listener(self, cb: Callable[[], None]) -> Callable[[], None]:
+        """Call ``cb`` after every handled event; return a remover.
+
+        Unlike ``add_listener`` this fires whether or not the status changed, so
+        an entity can show the room's setpoint, mode and holds.
+        """
+        self._update_listeners.append(cb)
+
+        def remove() -> None:
+            if cb in self._update_listeners:
+                self._update_listeners.remove(cb)
+
+        return remove
+
+    @property
+    def setpoint(self) -> float | None:
+        """Return the room's target temperature, ``None`` while it has none."""
+        return self._state.setpoint
+
+    @property
+    def mode(self) -> RoomMode:
+        """Return whether the room heats or is switched off."""
+        return self._state.mode
+
+    @property
+    def preset(self) -> Preset:
+        """Return the room's preset."""
+        return self._state.preset
+
+    @property
+    def effective_range(self) -> tuple[float, float, float] | None:
+        """Return ``(min, max, step)`` of the setpoint, ``None`` without a climate.
+
+        The configuration carries the narrowest range of settings and devices.
+        """
+        return self._config.setpoint_range
+
+    @property
+    def setpoint_source(self) -> str | None:
+        """Return where the setpoint came from (``ha``, ``device:<trv>``, ...)."""
+        return self._state.setpoint_source
+
+    @property
+    def window_open(self) -> bool:
+        """Return whether a window hold is active."""
+        return self._state.window_open
+
+    @property
+    def outdoor_hold(self) -> bool:
+        """Return whether the outdoor cut-off hold is active."""
+        return self._state.outdoor_hold
+
+    @property
+    def notes(self) -> dict[str, Note]:
+        """Return why a thermostat's own value is shown but not adopted."""
+        return {
+            trv: state.note
+            for trv, state in self._state.trvs.items()
+            if state.note is not None
+        }
+
+    @property
+    def current_temperature(self) -> float | None:
+        """Return the value last sent to the thermostats, else the sensor's."""
+        state = self._state
+        if state.last_written is not None:
+            return state.last_written
+        reading = state.readings.get(state.active_sensor or "")
+        return None if reading is None else reading.value
+
+    @property
+    def in_sync(self) -> bool:
+        """Return whether every thermostat is verified at the room's values.
+
+        False while a thermostat is away, on its schedule or window phase, still
+        waiting for a setpoint or mode write, or while a knob turn is pending,
+        and while a window contact says neither open nor closed.
+        """
+        wanted = {
+            self._capability_of(SetSetpoint(0.0)),
+            self._capability_of(SetHvacMode("heat")),
+        }
+        return self._holds.contacts_reliable and all(
+            self._trv_in_sync(trv, wanted) for trv in self._state.trvs.values()
+        )
+
+    @staticmethod
+    def _trv_in_sync(trv: TrvState, capabilities: set[str]) -> bool:
+        """Return whether nothing on a thermostat is waiting or device-driven."""
+        return (
+            trv.available
+            and not device_driven(trv)
+            and not capabilities & trv.pending_retry.keys()
+            and not trv.knob_pending
+            and not trv.resync_pending
+        )
+
+    async def async_set_setpoint(self, celsius: float) -> None:
+        """Set the room's target temperature and write it to the thermostats."""
+        self._dispatch(SetRoomSetpoint(celsius))
+
+    async def async_set_mode(self, mode: RoomMode) -> None:
+        """Switch the room on (``heat``) or off."""
+        self._dispatch(SetRoomMode(mode))
+
+    async def async_set_preset(self, preset: Preset) -> None:
+        """Select the preset of the room."""
+        self._dispatch(SetRoomPreset(preset))
+
+    async def async_restore(
+        self,
+        setpoint: float | None,
+        mode: RoomMode | None,
+        preset: Preset | None,
+        frost_return: float | None = None,
+    ) -> None:
+        """Take the state remembered across a restart; call it before the start."""
+        self._dispatch(RestoreRoom(setpoint, mode, preset, frost_return))
 
     def snapshot(self) -> dict[str, Any]:
         """Return configuration, tunables and state as JSON-able data."""
@@ -301,6 +452,9 @@ class RoomController:
         for trv in config.trvs:
             issues.clear_unreachable(self._hass, trv.ieee)
             issues.clear_firmware(self._hass, trv.ieee)
+        issues.clear_window_open_long(self._hass, config.room_id)
+        issues.clear_window_contact_suspect(self._hass, config.room_id)
+        self._subscriptions.subscribe_all()
         self._dispatch(
             Start(
                 sensors=tuple(
@@ -310,8 +464,13 @@ class RoomController:
                     entity_id: self._trv_available(entity_id)
                     for entity_id in self._firmware
                 },
+                reported={
+                    entity_id: self._reported(entity_id) for entity_id in self._firmware
+                },
             )
         )
+        for event in self._holds.start():
+            self._dispatch(event)
 
     async def async_stop(self) -> None:
         """Cancel listeners, timers and the worker; later callbacks are ignored."""
@@ -319,6 +478,9 @@ class RoomController:
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
+        self._subscriptions.stop()
+        self._knobs.stop()
+        self._holds.stop()
         if self._cancel_debounce is not None:
             self._cancel_debounce()
             self._cancel_debounce = None
@@ -342,6 +504,9 @@ class RoomController:
         if entity_id in self._trv_ids:
             available = _is_available(event.data["new_state"])
             if available != _is_available(event.data["old_state"]):
+                if available:
+                    # Never subscribed, or ZHA reloaded and dropped our listeners.
+                    self._subscriptions.subscribe(entity_id)
                 self._dispatch(TrvAvailabilityChanged(entity_id, available))
         elif entity_id in self._config.temp_sensors:
             self._dispatch(SensorChanged(self._reading(entity_id)))
@@ -383,6 +548,18 @@ class RoomController:
             entity_id, parse_temperature(state.state, unit), state.last_reported
         )
 
+    def _reported(self, entity_id: str) -> tuple[float | None, str | None]:
+        """Read what a thermostat's climate entity shows: setpoint and mode."""
+        state = self._hass.states.get(entity_id)
+        if state is None:
+            return None, None
+        setpoint = parse_temperature(
+            str(state.attributes.get(ATTR_TEMPERATURE)),
+            self._hass.config.units.temperature_unit,
+        )
+        mode = state.state if state.state in {"heat", "off"} else None
+        return setpoint, mode
+
     def _trv_available(self, entity_id: str) -> bool:
         """Return whether the climate entity exists and is not ``unavailable``."""
         return _is_available(self._hass.states.get(entity_id))
@@ -400,6 +577,15 @@ class RoomController:
         self._state, commands = self._logic.handle(event, dt_util.utcnow(), self._state)
         for command in commands:
             self._execute(command)
+        self._notify_update()
+
+    def _notify_update(self) -> None:
+        """Tell the update listeners the room may look different now."""
+        for listener in list(self._update_listeners):
+            try:
+                listener()
+            except Exception:
+                _LOGGER.exception("%s: update listener failed", self._config.name)
 
     def _execute(self, command: Command) -> None:
         """Carry out one command of the logic."""
@@ -410,16 +596,10 @@ class RoomController:
                 self._schedule_debounce(seconds)
             case ScheduleRetry(trv=trv, capability=capability, seconds=seconds):
                 self._schedule_retry(trv, capability, seconds)
-            case ScheduleKnobSettle():
-                # The controller arms the knob timer once it routes observations.
-                return
+            case ScheduleKnobSettle(trv=trv, capability=capability, seconds=seconds):
+                self._knobs.arm(trv, capability, seconds)
             case SetStatus(status=status, attributes=attributes):
                 self._set_status(status, attributes)
-            case RaiseIssue(kind="window_open_long" | "window_contact_suspect"):
-                # The room's own issues (``trv`` is the room id) are mapped later.
-                return
-            case ClearIssue(kind="window_open_long" | "window_contact_suspect"):
-                return
             case RaiseIssue():
                 self._raise_issue(command)
             case ClearIssue():
@@ -467,12 +647,24 @@ class RoomController:
                 listener()
 
     def _raise_issue(self, command: RaiseIssue) -> None:
-        """Create the repairs issue of a thermostat."""
-        ref = self._device_refs[command.trv]
+        """Create the repairs issue of a thermostat or of the room."""
         found = command.placeholders
-        thermostat = thermostat_name(self._hass, ref.entity_id)
         match command.kind:
+            case "window_open_long":
+                issues.raise_window_open_long(
+                    self._hass, command.trv, self._config.name, found["minutes"]
+                )
+            case "window_contact_suspect":
+                issues.raise_window_contact_suspect(
+                    self._hass,
+                    command.trv,
+                    self._config.name,
+                    found["minutes"],
+                    found["drop"],
+                )
             case "unreachable":
+                ref = self._device_refs[command.trv]
+                thermostat = thermostat_name(self._hass, ref.entity_id)
                 issues.raise_unreachable(
                     self._hass,
                     ref.ieee,
@@ -483,6 +675,8 @@ class RoomController:
                     error=found["error"],
                 )
             case "firmware":
+                ref = self._device_refs[command.trv]
+                thermostat = thermostat_name(self._hass, ref.entity_id)
                 issues.raise_firmware(
                     self._hass,
                     ref.ieee,
@@ -492,9 +686,6 @@ class RoomController:
                     required=found["required"],
                     current=found["installed"],
                 )
-            case "window_open_long" | "window_contact_suspect":  # pragma: no cover
-                msg = f"room issue {command.kind} reached the thermostat issues"
-                raise AssertionError(msg)
             case _:
                 assert_never(command.kind)
 
@@ -510,16 +701,18 @@ class RoomController:
         return self._labels.get(intent, capability)
 
     def _clear_issue(self, command: ClearIssue) -> None:
-        """Delete the repairs issue of a thermostat."""
-        ieee = self._device_refs[command.trv].ieee
+        """Delete the repairs issue of a thermostat or of the room."""
         match command.kind:
+            case "window_open_long":
+                issues.clear_window_open_long(self._hass, command.trv)
+            case "window_contact_suspect":
+                issues.clear_window_contact_suspect(self._hass, command.trv)
             case "unreachable":
-                issues.clear_unreachable(self._hass, ieee)
+                issues.clear_unreachable(
+                    self._hass, self._device_refs[command.trv].ieee
+                )
             case "firmware":
-                issues.clear_firmware(self._hass, ieee)
-            case "window_open_long" | "window_contact_suspect":  # pragma: no cover
-                msg = f"room issue {command.kind} reached the thermostat issues"
-                raise AssertionError(msg)
+                issues.clear_firmware(self._hass, self._device_refs[command.trv].ieee)
             case _:
                 assert_never(command.kind)
 
@@ -582,7 +775,9 @@ class RoomController:
             outcome = Failed(str(exc))
             self._log_not_sent(trv, capability, outcome)
             return OperationResult(trv, intent, capability, outcome)
-        outcome = await self._write_and_verify(trv, op)
+        outcome = self._with_observed(
+            op.capability, await self._write_and_verify(trv, op)
+        )
         _LOGGER.debug(
             "%s: %s %s attr 0x%04X raw=%s -> %s",
             self._config.name,
@@ -593,6 +788,18 @@ class RoomController:
             _outcome_text(outcome),
         )
         return OperationResult(trv, intent, op.capability, outcome)
+
+    def _with_observed(self, capability: str, outcome: Outcome) -> Outcome:
+        """Decode the value a mismatch read back, for the capabilities observed."""
+        if (
+            isinstance(outcome, Mismatch)
+            and outcome.actual is not None
+            and capability in self._profile.observed()
+        ):
+            return replace(
+                outcome, observed=self._profile.decode(capability, outcome.actual)
+            )
+        return outcome
 
     def _log_not_sent(self, trv: str, capability: str, outcome: Outcome) -> None:
         """Log an intent that could not be turned into an operation."""

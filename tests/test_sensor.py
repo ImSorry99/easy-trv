@@ -221,6 +221,8 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
         "profile_invalid",
         "room_invalid",
         "settings_migrated",
+        "window_open_long",
+        "window_contact_suspect",
     }
     icon = icons["entity"]["sensor"]["room_status"]
     assert icon["default"] == "mdi:radiator"

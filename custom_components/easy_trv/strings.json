@@ -151,6 +151,14 @@
     "settings_migrated": {
       "title": "Thermostat settings changed by the update",
       "description": "These rooms had \"Leave unchanged\" for the hysteresis: {rooms}.\n\nThey now follow the global hysteresis ({hysteresis}). While the adaptive mode is on, the thermostat manages the hysteresis itself and none is written, on thermostats with firmware 1.4.4 or newer. Check the global setting in the Easy TRV options, or set a hysteresis in the room itself.\n\nYou can dismiss this notice."
+    },
+    "window_open_long": {
+      "title": "Window open in {room} for {minutes} minutes",
+      "description": "The window in {room} has been open for {minutes} minutes and its thermostats stay off.\n\nClose the window, or check the window contact if it is already closed. The heating returns by itself when the contact reports closed; this issue disappears then."
+    },
+    "window_contact_suspect": {
+      "title": "The window contact in {room} reports open, but the room is not cooling",
+      "description": "The window contact in {room} has reported open for {minutes} minutes, yet the room temperature has not fallen by at least {drop} K since it opened.\n\nCheck whether the contact is stuck or its battery is flat. Easy TRV keeps the thermostats off while the contact reports open; this issue disappears when it reports closed."
     }
   },
   "options": {

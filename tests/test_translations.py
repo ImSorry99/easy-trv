@@ -174,6 +174,8 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "profile_invalid",
         "room_invalid",
         "settings_migrated",
+        "window_open_long",
+        "window_contact_suspect",
     }
 
 
@@ -241,6 +243,43 @@ def test_thermostat_issues_name_the_setting_and_the_thermostat(path: Path) -> No
         }
         assert used <= allowed, f"{key}: {used - allowed}"
         assert {"setting", "thermostat"} <= used
+
+
+@pytest.mark.parametrize("path", [STRINGS, EN, DE])
+def test_window_issues_name_the_room_and_the_numbers(path: Path) -> None:
+    issues = load(path)["issues"]
+    expected = {
+        "window_open_long": ({"room", "minutes"}, {"room", "minutes"}),
+        "window_contact_suspect": ({"room", "minutes", "drop"}, {"room"}),
+    }
+    for key, (allowed, required) in expected.items():
+        assert set(issues[key]) == {"title", "description"}
+        used = {
+            name.strip("{}")
+            for text in issues[key].values()
+            for name in PLACEHOLDER.findall(text)
+        }
+        assert used <= allowed, f"{key}: {used - allowed}"
+        assert required <= used, f"{key}: missing {required - used}"
+    # The suspect issue also says by how much the room should have cooled.
+    suspect = " ".join(issues["window_contact_suspect"].values())
+    assert "{drop}" in suspect
+
+
+def test_window_issue_titles() -> None:
+    en, de = load(EN)["issues"], load(DE)["issues"]
+    assert en["window_open_long"]["title"] == (
+        "Window open in {room} for {minutes} minutes"
+    )
+    assert en["window_contact_suspect"]["title"] == (
+        "The window contact in {room} reports open, but the room is not cooling"
+    )
+    assert de["window_open_long"]["title"] == (
+        "Fenster in {room} seit {minutes} Minuten offen"
+    )
+    assert de["window_contact_suspect"]["title"] == (
+        "Fensterkontakt in {room} meldet offen, aber der Raum kühlt nicht ab"
+    )
 
 
 def test_capability_labels_en() -> None:

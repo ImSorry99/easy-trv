@@ -22,6 +22,7 @@ from custom_components.easy_trv.adapters.zha_gateway import (
 from custom_components.easy_trv.const import (
     CONF_AREA,
     CONF_HYSTERESIS,
+    CONF_OUTDOOR_SENSOR,
     CONF_PROFILE,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
@@ -211,7 +212,14 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
     )
     params = RoomParams.from_settings(settings)
     controller = RoomController(
-        hass, config, params, profile, gateway, device_refs, labels=labels
+        hass,
+        config,
+        params,
+        profile,
+        gateway,
+        device_refs,
+        labels=labels,
+        outdoor_sensor=entry.options.get(CONF_OUTDOOR_SENSOR) or None,
     )
     return controller, profile, settings
 
@@ -307,6 +315,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
             f"profile {profile.id})"
         )
     issues.clear_room_issues_except(hass, invalid)
+    # A room's own controller clears its window issues when it starts; those of
+    # rooms that are gone (or cannot be set up any more) must not stay behind.
+    issues.clear_window_issues_except(hass, set(rooms))
     issues.clear_thermostat_issues_except(
         hass, {ieee for controller in rooms.values() for ieee in controller.ieees}
     )

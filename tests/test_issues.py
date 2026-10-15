@@ -27,6 +27,11 @@ def test_issue_ids_drop_the_colons_of_the_ieee() -> None:
     assert issues.issue_id_unreachable(IEEE) == "trv_unreachable_00124b00aabb"
     assert issues.issue_id_firmware(IEEE) == "trv_firmware_00124b00aabb"
     assert issues.issue_id_room_invalid("01ABC") == "room_invalid_01ABC"
+    assert issues.issue_id_window_open_long("01ABC") == "window_open_long_01ABC"
+    assert (
+        issues.issue_id_window_contact_suspect("01ABC")
+        == "window_contact_suspect_01ABC"
+    )
 
 
 async def test_unreachable_issue_is_raised_and_cleared(hass) -> None:
@@ -217,3 +222,54 @@ async def test_settings_migrated_issue_is_a_dismissible_warning(hass) -> None:
     }
     assert raised.is_fixable is False
     assert raised.is_persistent is True
+
+
+async def test_window_open_long_issue_names_the_room_and_the_minutes(hass) -> None:
+    issues.raise_window_open_long(hass, "room1", "Living", 130)
+    raised = get(hass, "window_open_long_room1")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.ERROR
+    assert raised.translation_key == "window_open_long"
+    assert raised.translation_placeholders == {"room": "Living", "minutes": "130"}
+    assert raised.is_fixable is False
+    assert raised.is_persistent is False
+    issues.clear_window_open_long(hass, "room1")
+    assert get(hass, "window_open_long_room1") is None
+
+
+async def test_window_contact_suspect_issue_names_room_minutes_and_drop(hass) -> None:
+    issues.raise_window_contact_suspect(hass, "room1", "Living", "30", "0.3")
+    raised = get(hass, "window_contact_suspect_room1")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_key == "window_contact_suspect"
+    assert raised.translation_placeholders == {
+        "room": "Living",
+        "minutes": "30",
+        "drop": "0.3",
+    }
+    assert raised.is_fixable is False
+    assert raised.is_persistent is False
+    issues.clear_window_contact_suspect(hass, "room1")
+    assert get(hass, "window_contact_suspect_room1") is None
+
+
+async def test_clear_window_issues_except_keeps_only_the_named_rooms(hass) -> None:
+    for room_id in ("keep", "gone"):
+        issues.raise_window_open_long(hass, room_id, room_id, 5)
+        issues.raise_window_contact_suspect(hass, room_id, room_id, 5, "0.3")
+    raise_unreachable(hass, IEEE)
+    issues.raise_room_invalid(hass, "gone", "Gone", "x")
+
+    issues.clear_window_issues_except(hass, {"keep"})
+
+    assert get(hass, "window_open_long_keep") is not None
+    assert get(hass, "window_contact_suspect_keep") is not None
+    assert get(hass, "window_open_long_gone") is None
+    assert get(hass, "window_contact_suspect_gone") is None
+    # Other issues of the domain are not touched.
+    assert get(hass, "trv_unreachable_00124b00aabb") is not None
+    assert get(hass, "room_invalid_gone") is not None
+    issues.clear_window_issues_except(hass, set())
+    assert get(hass, "window_open_long_keep") is None
+    assert get(hass, "window_contact_suspect_keep") is None

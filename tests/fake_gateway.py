@@ -7,6 +7,7 @@ from custom_components.easy_trv.adapters.zha_gateway import (
     GatewayError,
     NotZhaEntity,
     UnsupportedAttribute,
+    ZhaUnavailable,
 )
 
 if TYPE_CHECKING:
@@ -30,7 +31,10 @@ class FakeGateway:
     ``(ieee, attribute)``) makes every write to that attribute raise
     :class:`UnsupportedAttribute`, like a device that lacks it. Like the real
     adapter, every method raises :class:`GatewayError` for an IEEE that no
-    registered device owns.
+    registered device owns, except :meth:`subscribe`, which raises
+    :class:`ZhaUnavailable` for it (like the adapter). ``subscribe_unavailable``
+    (a set of IEEEs) makes ``subscribe`` raise it for a known device too, like
+    a ZHA that has not loaded the device yet.
     """
 
     def __init__(self) -> None:
@@ -43,6 +47,7 @@ class FakeGateway:
         self.fail_read: dict[tuple[str, int], str] = {}
         self.read_override: dict[tuple[str, int], int] = {}
         self.unsupported_write: set[tuple[str, int]] = set()
+        self.subscribe_unavailable: set[str] = set()
         self.subscriptions: list[
             tuple[str, int, int, tuple[int, ...], ObservationCallback]
         ] = []
@@ -130,7 +135,11 @@ class FakeGateway:
         callback: ObservationCallback,
     ) -> Callable[[], None]:
         """Record a subscription; return an idempotent unsubscribe."""
-        self._require_known(ieee)
+        if ieee in self.subscribe_unavailable or all(
+            ref.ieee != ieee for ref in self.devices.values()
+        ):
+            msg = f"device {ieee} is not known to ZHA"
+            raise ZhaUnavailable(msg)
         record = (ieee, endpoint, cluster, tuple(attributes), callback)
         self.subscriptions.append(record)
 

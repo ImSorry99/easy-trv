@@ -12,7 +12,12 @@ from homeassistant.helpers import issue_registry as ir
 
 from custom_components.easy_trv import issues
 from custom_components.easy_trv.adapters.zha_gateway import ZhaUnavailable
-from custom_components.easy_trv.const import DOMAIN, SUBENTRY_ROOM
+from custom_components.easy_trv.const import (
+    CONF_OUTDOOR_CUTOFF_CELSIUS,
+    CONF_OUTDOOR_SENSOR,
+    DOMAIN,
+    SUBENTRY_ROOM,
+)
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.profiles.loader import (
     BUILTIN_DIR,
@@ -41,6 +46,10 @@ def zha_issue(hass):
 
 def room_issue(hass, subentry_id: str):
     return ir.async_get(hass).async_get_issue(DOMAIN, f"room_invalid_{subentry_id}")
+
+
+def window_issue(hass, kind: str, room_id: str):
+    return ir.async_get(hass).async_get_issue(DOMAIN, f"{kind}_{room_id}")
 
 
 def subentry_of(entry, title: str):
@@ -309,6 +318,43 @@ async def test_setup_removes_room_issues_of_deleted_rooms(hass, entry) -> None:
     await start(hass, entry)
 
     assert room_issue(hass, "deleted_subentry") is None
+
+
+async def test_setup_removes_window_issues_of_deleted_rooms(hass, entry) -> None:
+    for room_id in ("deleted_subentry", "stale"):
+        issues.raise_window_open_long(hass, room_id, "Old room", 5)
+        issues.raise_window_contact_suspect(hass, room_id, "Old room", 5, "0.3")
+    living = subentry_of(entry, "Living")
+    issues.raise_window_open_long(hass, living.subentry_id, "Living", 5)
+
+    await start(hass, entry)
+
+    for room_id in ("deleted_subentry", "stale"):
+        assert window_issue(hass, "window_open_long", room_id) is None
+        assert window_issue(hass, "window_contact_suspect", room_id) is None
+    # The room that exists was cleared by its own controller when it started.
+    assert window_issue(hass, "window_open_long", living.subentry_id) is None
+
+
+async def test_the_global_outdoor_sensor_reaches_the_room_controllers(hass) -> None:
+    entry = make_entry(
+        hass,
+        [room_data()],
+        {
+            **FAST_OPTIONS,
+            CONF_OUTDOOR_SENSOR: "sensor.outdoor",
+            CONF_OUTDOOR_CUTOFF_CELSIUS: 18.0,
+        },
+    )
+    hass.states.async_set("sensor.outdoor", "25", CELSIUS)
+
+    await start(hass, entry)
+
+    [controller] = entry.runtime_data.rooms.values()
+    assert controller.outdoor_hold is True
+    hass.states.async_set("sensor.outdoor", "10", CELSIUS)
+    await settle(hass)
+    assert controller.outdoor_hold is False
 
 
 async def test_user_profile_covers_a_foreign_thermostat(
