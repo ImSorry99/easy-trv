@@ -18,12 +18,14 @@ from custom_components.easy_trv.core.model import (
     Intent,
     Log,
     Mismatch,
+    Note,
     Ok,
     OperationResult,
     Outcome,
     RaiseIssue,
     RetryDue,
     RoomConfig,
+    RoomMode,
     RoomParams,
     RoomState,
     RoomStatus,
@@ -1301,6 +1303,7 @@ def test_nothing_is_sent_again_for_a_capability_the_room_does_not_manage(
         health=TrvHealth.ERROR,
         last_error="busy",
         error_capability=capability,
+        given_up=frozenset({capability}),
     )
     _, cmds = room.handle(Tick(), T0 + timedelta(minutes=20), st)
     assert [
@@ -1533,6 +1536,216 @@ def test_running_chain_is_not_doubled() -> None:
     st, cmds = logic().handle(Tick(), T0 + 2 * REFRESH, st)
     assert climate_writes(cmds) == [FROST]
     assert st.trvs["climate.a"].attempts["hysteresis"] == 1
+
+
+# --- The notice stays until every value arrived ----------------------------
+
+
+def test_a_capability_that_gives_up_is_remembered_with_its_error() -> None:
+    st = exhaust(started()[0], "climate.a", HYSTERESIS, error="busy")
+    st = exhaust(st, "climate.a", FROST, error="timeout")
+    trv = st.trvs["climate.a"]
+    assert trv.given_up == frozenset({"hysteresis", "frost_temperature"})
+    assert trv.errors == {"hysteresis": "busy", "frost_temperature": "timeout"}
+
+    # Sent again with a fresh set of attempts, it is still given up on.
+    st, _ = logic().handle(Tick(), T0 + REFRESH, st)
+    trv = st.trvs["climate.a"]
+    assert trv.attempts == {}
+    assert trv.given_up == frozenset({"hysteresis", "frost_temperature"})
+
+    st, _ = logic().handle(result("climate.a", HYSTERESIS, Ok()), T0 + REFRESH, st)
+    trv = st.trvs["climate.a"]
+    assert trv.given_up == frozenset({"frost_temperature"})
+    assert trv.errors == {"frost_temperature": "timeout"}
+
+
+def test_a_capability_without_firmware_support_is_no_longer_given_up() -> None:
+    st = exhaust(started()[0], "climate.a", TEMP, HYSTERESIS, error="busy")
+    st, _ = logic().handle(result("climate.a", HYSTERESIS, UNSUPPORTED), T0, st)
+    trv = st.trvs["climate.a"]
+    assert trv.given_up == frozenset({"room_temperature"})
+    assert trv.errors == {"room_temperature": "busy"}
+
+
+def test_notice_stays_after_a_batch_until_all_arrive() -> None:
+    st = exhaust(started()[0], "climate.a", HYSTERESIS, FROST)
+    assert st.trvs["climate.a"].error_capability == "hysteresis"
+    at = T0 + REFRESH
+    st, cmds = logic().handle(Tick(), at, st)
+    assert climate_writes(cmds) == [HYSTERESIS, FROST]
+    assert st.trvs["climate.a"].attempts == {}
+
+    # The one that raised the notice arrives first: the other has not.
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), at, st)
+    assert of_type(cmds, ClearIssue) == []
+    assert of_type(cmds, FireEvent) == []
+    assert [c.placeholders["attribute"] for c in of_type(cmds, RaiseIssue)] == [
+        "frost_temperature"
+    ]
+    trv = st.trvs["climate.a"]
+    assert (trv.health, trv.error_capability) == (TrvHealth.ERROR, "frost_temperature")
+    assert cmds[-1].status == RoomStatus.ERROR
+
+    # The other one fails its chain again: the notice stands, nothing new.
+    later: list[Command] = []
+    for _ in range(3):
+        st, cmds = logic().handle(result("climate.a", FROST, Failed("busy")), at, st)
+        later += cmds
+    assert st.trvs["climate.a"].attempts["frost_temperature"] == 3
+    assert not any(isinstance(c, (RaiseIssue, ClearIssue, FireEvent)) for c in later)
+
+    # Now it arrives too: the problem is gone, said once.
+    st, cmds = logic().handle(result("climate.a", FROST, Ok()), at, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert of_type(cmds, RaiseIssue) == []
+    trv = st.trvs["climate.a"]
+    assert (trv.health, trv.error_capability, trv.last_error) == (
+        TrvHealth.OK,
+        None,
+        None,
+    )
+    assert (trv.given_up, trv.errors) == (frozenset(), {})
+    assert cmds[-1].status == RoomStatus.OK
+
+
+def test_moved_notice_cites_the_capabilitys_own_error() -> None:
+    st = started()[0]
+    st = exhaust(st, "climate.a", TEMP, error="no route")
+    st = exhaust(st, "climate.a", FROST, error="timeout")
+    st = exhaust(st, "climate.a", HYSTERESIS, error="busy")
+    assert st.trvs["climate.a"].last_error == "busy"
+
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), T0, st)
+    [issue] = of_type(cmds, RaiseIssue)
+    assert issue.placeholders["attribute"] == "frost_temperature"
+    assert issue.placeholders["error"] == "timeout"
+    assert issue.placeholders["attempts"] == "3"
+    assert st.trvs["climate.a"].last_error == "timeout"
+    [warning] = [c for c in of_type(cmds, Log) if c.level == "warning"]
+    assert "timeout" in warning.message
+
+    st, cmds = logic().handle(result("climate.a", FROST, Ok()), T0, st)
+    [issue] = of_type(cmds, RaiseIssue)
+    assert issue.placeholders["attribute"] == "hysteresis"
+    assert issue.placeholders["error"] == "busy"
+
+
+def test_given_up_value_the_room_no_longer_writes_does_not_keep_the_notice() -> None:
+    st = exhaust(started_with_setpoint(), "climate.a", MODE)
+    st = exhaust(st, "climate.a", TEMP)
+    assert st.trvs["climate.a"].error_capability == "hvac_mode"
+    # The thermostat goes on its own schedule: the mode is not written to it.
+    st = with_trv(st, "climate.a", note=Note.SCHEDULE)
+    _, cmds = logic().handle(Tick(), T0 + REFRESH, st)
+    assert climate_writes(cmds) == []
+
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), T0 + REFRESH, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    trv = st.trvs["climate.a"]
+    assert (trv.health, trv.error_capability, trv.last_error) == (
+        TrvHealth.OK,
+        None,
+        None,
+    )
+    assert cmds[-1].status == RoomStatus.OK
+
+
+@pytest.mark.parametrize(
+    ("given_up", "changes"),
+    [
+        (TEMP, {"source": Source.INTERNAL}),  # the value is not written then
+        (SETPOINT, {"mode": RoomMode.OFF}),  # nor the setpoint of a room that is off
+    ],
+)
+def test_a_given_up_value_that_is_not_written_in_this_state_keeps_no_notice(
+    given_up: Intent, changes: dict[str, object]
+) -> None:
+    st = exhaust(started_with_setpoint(), "climate.a", given_up, HYSTERESIS)
+    assert st.trvs["climate.a"].error_capability == capability_of(given_up)
+    st = replace(st, **changes)
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), T0, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert st.trvs["climate.a"].health == TrvHealth.OK
+
+
+def test_a_given_up_value_counts_again_once_the_room_writes_it_again() -> None:
+    st = exhaust(started_with_setpoint(), "climate.a", MODE)
+    st = exhaust(st, "climate.a", TEMP)
+    st = with_trv(st, "climate.a", note=Note.SCHEDULE)
+    st, cmds = logic().handle(Tick(), T0 + REFRESH, st)
+    assert climate_writes(cmds) == []
+
+    # The thermostat leaves its schedule: the mode is sent, and it counts.
+    st = with_trv(st, "climate.a", note=None)
+    at = T0 + 2 * REFRESH
+    st, cmds = logic().handle(Tick(), at, st)
+    assert climate_writes(cmds) == [MODE]
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), at, st)
+    assert of_type(cmds, ClearIssue) == []
+    assert of_type(cmds, FireEvent) == []
+    assert st.trvs["climate.a"].error_capability == "hvac_mode"
+    st, cmds = logic().handle(result("climate.a", MODE, Ok()), at, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+
+
+def test_resync_does_not_move_the_notice_early() -> None:
+    st = exhaust(started()[0], "climate.a", HYSTERESIS, TEMP)
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    back = T0 + timedelta(minutes=30)
+    st, cmds = logic().handle(
+        TrvAvailabilityChanged("climate.a", available=True), back, st
+    )
+    assert HYSTERESIS in climate_writes(cmds)
+    assert ("climate.a", TEMP) in executes(cmds)
+
+    # The setting is written first and verifies while the value's result is
+    # still on its way: there is no reason yet to say the value still fails.
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), back, st)
+    assert [c for c in of_type(cmds, Log) if c.level == "warning"] == []
+    assert of_type(cmds, ClearIssue) == []
+    assert of_type(cmds, FireEvent) == []
+
+    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), back, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert st.trvs["climate.a"].health == TrvHealth.OK
+
+
+def test_a_given_up_capability_is_marked_sent_again_until_its_result_is_in() -> None:
+    st = exhaust(started()[0], "climate.a", HYSTERESIS, TEMP)
+    assert st.trvs["climate.a"].resent == frozenset()
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=True), T0, st)
+    assert st.trvs["climate.a"].resent == frozenset({"hysteresis", "room_temperature"})
+    # Any result ends the wait, a failure as well as a signal.
+    st, _ = logic().handle(result("climate.a", HYSTERESIS, Failed("busy")), T0, st)
+    assert st.trvs["climate.a"].resent == frozenset({"room_temperature"})
+    st, _ = logic().handle(result("climate.a", TEMP, Signal("failsafe")), T0, st)
+    assert st.trvs["climate.a"].resent == frozenset()
+    # A write of something that is not given up on is not marked.
+    st, _ = logic().handle(Tick(), T0 + REFRESH, st)
+    assert "source" not in st.trvs["climate.a"].resent
+
+
+def test_a_value_that_fails_again_after_a_resync_is_still_warned_about() -> None:
+    st = exhaust(started()[0], "climate.a", HYSTERESIS, TEMP)
+    st, _ = logic().handle(TrvAvailabilityChanged("climate.a", available=False), T0, st)
+    back = T0 + timedelta(minutes=30)
+    st, _ = logic().handle(
+        TrvAvailabilityChanged("climate.a", available=True), back, st
+    )
+    st, _ = logic().handle(result("climate.a", TEMP, Failed("busy")), back, st)
+    # The value's result is in and it failed: now the notice may name it.
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), back, st)
+    assert [c.level for c in of_type(cmds, Log)] == ["warning"]
+    assert [c.placeholders["attribute"] for c in of_type(cmds, RaiseIssue)] == [
+        "room_temperature"
+    ]
 
 
 # --- Failed and mismatched results ---------------------------------------

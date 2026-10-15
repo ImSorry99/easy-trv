@@ -144,6 +144,7 @@ def on_readback(
 
     The value that was there supersedes the write: it is no failure and gets no
     retry. Used for somebody else's value and for a thermostat on its schedule.
+    A write the room gave up on is given up no more: the value found replaces it.
     """
     trv, capability = observed.trv, observed.capability
     known = state.trvs[trv]
@@ -151,6 +152,8 @@ def on_readback(
         known,
         attempts=_dropped(known.attempts, capability),
         pending_retry=_dropped(known.pending_retry, capability),
+        given_up=known.given_up - {capability},
+        errors=_dropped(known.errors, capability),
     )
     return on_observed(cfg, _store(state, trv, known), now, observed, capability_of)
 

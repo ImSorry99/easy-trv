@@ -578,6 +578,34 @@ def test_mismatch_with_a_foreign_mode_is_an_adoption_too() -> None:
     assert st.trvs[A].knob_pending == {"hvac_mode": "off"}
 
 
+def test_a_foreign_value_ends_the_give_up_of_a_write() -> None:
+    st = started_with_setpoint(21.0)
+    for _ in range(3):
+        st, _ = logic().handle(result(A, SetSetpoint(21.0), Failed("busy")), AFTER, st)
+    assert st.trvs[A].given_up == frozenset({"setpoint"})
+    assert st.trvs[A].errors == {"setpoint": "busy"}
+    mismatch = Mismatch(frozenset({2100}), 2250, observed=22.5)
+    st, _ = logic().handle(result(A, SetSetpoint(21.0), mismatch), AFTER, st)
+    assert st.trvs[A].attempts == {}
+    assert st.trvs[A].given_up == frozenset()
+    assert st.trvs[A].errors == {}
+
+
+def test_a_schedule_signal_ends_the_give_up_of_the_mode_write() -> None:
+    st = started_with_setpoint(21.0)
+    for _ in range(3):
+        st, _ = logic().handle(
+            result(A, SetHvacMode("heat"), Failed("busy")), AFTER, st
+        )
+    assert st.trvs[A].given_up == frozenset({"hvac_mode"})
+    st, _ = logic().handle(
+        result(A, SetHvacMode("heat"), Signal("schedule")), AFTER, st
+    )
+    assert st.trvs[A].note is Note.SCHEDULE
+    assert st.trvs[A].given_up == frozenset()
+    assert st.trvs[A].errors == {}
+
+
 def test_mismatch_with_our_own_value_is_retried() -> None:
     st = started_with_setpoint(21.0)
     st, _ = logic().handle(SetRoomSetpoint(22.0), T0 + timedelta(seconds=10), st)

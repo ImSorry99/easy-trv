@@ -257,6 +257,15 @@ class TrvState:
     pending_retry: Mapping[str, Intent] = field(default_factory=dict)
     last_error: str | None = None
     error_capability: str | None = None
+    # Capabilities whose attempts were used up and that have not arrived since,
+    # each with the last error text of its own. Only a verified write, a
+    # read-back that showed another value, or a missing function ends it. The
+    # Repairs notice stays as long as the room still writes one of them.
+    given_up: frozenset[str] = frozenset()
+    errors: Mapping[str, str] = field(default_factory=dict)
+    # The part of ``given_up`` that is being written again and whose result is
+    # still outstanding: it is not known yet whether it fails once more.
+    resent: frozenset[str] = frozenset()
     last_error_retry: datetime | None = None
     failsafe_seen_at: datetime | None = None
     unsupported: frozenset[str] = frozenset()

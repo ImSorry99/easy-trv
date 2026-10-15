@@ -1110,6 +1110,25 @@ async def test_snapshot_is_json_able(hass, controller, gateway) -> None:
     assert trv["pending_retry"] == {
         "external_temperature": {"intent": "set_room_temperature", "celsius": 21.3}
     }
+    assert (trv["given_up"], trv["errors"], trv["resent"]) == ([], {}, [])
+
+
+async def test_snapshot_names_what_the_thermostat_gave_up_on(
+    hass, freezer, climate, gateway
+) -> None:
+    await climate.async_start()
+    await settle(hass)
+    gateway.availability[IEEE_A] = False
+    await climate.async_set_setpoint(22.0)
+    for _ in range(40):
+        await advance(hass, freezer, 5)
+        if health(climate)["climate.a"] == "error":
+            break
+    snapshot = json.loads(json.dumps(climate.snapshot()))
+    trv = snapshot["state"]["trvs"]["climate.a"]
+    assert "setpoint" in trv["given_up"]
+    assert trv["errors"]["setpoint"]
+    assert set(trv["errors"]) == set(trv["given_up"])
 
 
 # --- Room thermostat: commands, observations, holds -----------------------

@@ -786,6 +786,7 @@ def test_a_room_without_a_climate_does_not_resend_setpoint_or_mode() -> None:
         "climate.a",
         health=TrvHealth.ERROR,
         error_capability="setpoint",
+        given_up=frozenset({"setpoint"}),
         last_error="busy",
         last_error_retry=T0,
     )
