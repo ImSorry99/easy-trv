@@ -41,7 +41,7 @@ Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is der
 
 - **B1** Write → wait (default 10 s) → read back → compare. Up to 3 attempts (configurable), backoff 5 / 15 / 45 s.
 - **B2** After the last failed attempt: Repairs issue for that thermostat, bus event, room status *error*, one log warning. Cleared automatically on the next verified write.
-- **B3** A failing thermostat never blocks the others. Thermostats that HA reports as unavailable are skipped without an issue.
+- **B3** A failing thermostat does not block other rooms. In its own room it can occupy the write queue for a few minutes per refresh interval (B4). Thermostats that HA reports as unavailable are skipped without an issue.
 - **B4** Writes per room are serialized. Zigbee is never flooded.
 
 ## Visibility
