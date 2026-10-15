@@ -111,6 +111,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "max_attempts",
         "min_delta_kelvin",
         "sensor_timeout_minutes",
+        "setpoint_range",
         "setpoint_min",
         "setpoint_max",
         "window_open_delay_seconds",
@@ -152,7 +153,11 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "adaptive_mode",
         "frost_temperature",
     }
-    assert set(options["room_thermostat"]["data"]) == {"setpoint_min", "setpoint_max"}
+    assert set(options["room_thermostat"]["data"]) == {
+        "setpoint_range",
+        "setpoint_min",
+        "setpoint_max",
+    }
     assert set(options["windows_outdoor"]["data"]) == {
         "window_open_delay_seconds",
         "window_warn_minutes",

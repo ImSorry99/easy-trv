@@ -824,7 +824,9 @@ async def test_user_profile_without_adaptive_and_frost_is_no_firmware_problem(
 
 async def test_disjoint_setpoint_range_invalidates_the_room(hass) -> None:
     entry = make_entry(
-        hass, [room_data(setpoint_min=36.0, setpoint_max=40.0)], FAST_OPTIONS
+        hass,
+        [room_data(setpoint_range="manual", setpoint_min=36.0, setpoint_max=40.0)],
+        FAST_OPTIONS,
     )
 
     await start(hass, entry)

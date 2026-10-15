@@ -7,6 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components.climate.const import ATTR_MAX_TEMP, ATTR_MIN_TEMP
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import area_registry as ar
@@ -27,6 +28,8 @@ from custom_components.easy_trv.const import (
     CONF_TEMP_SENSORS,
     CONF_TRVS,
     CONF_WINDOW_CONTACTS,
+    DEFAULT_SETPOINT_MAX,
+    DEFAULT_SETPOINT_MIN,
     PLATFORMS,
     PROFILE_AUTO,
     SETTING_GLOBAL,
@@ -42,7 +45,7 @@ from custom_components.easy_trv.labels import (
 from custom_components.easy_trv.profiles.loader import LoadResult, async_load_profiles
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from homeassistant.config_entries import ConfigSubentry
     from homeassistant.core import HomeAssistant
@@ -80,13 +83,18 @@ _DEFAULT_STEP = 0.5
 
 
 def effective_range(
-    profile: Profile, settings: RoomSettings
+    profile: Profile,
+    settings: RoomSettings,
+    thermostat_limits: tuple[float, float] | None = None,
 ) -> tuple[float, float, float] | None:
     """Return ``(min, max, step)`` of the room setpoint, ``None`` without a climate.
 
-    The room's limits are cut to the limits the profile declares for the
-    thermostats; the narrowest wins. A profile that cannot write the setpoint or
-    the mode gives the room no climate entity.
+    The room's limits are ``thermostat_limits`` (what the thermostats show) when
+    the range is ``auto``, else the room's ``setpoint_min`` and
+    ``setpoint_max``. They are cut to the limits the profile declares for the
+    thermostats; the narrowest wins. Without any limit the built-in default
+    range applies. A profile that cannot write the setpoint or the mode gives
+    the room no climate entity.
 
     Raises:
         ValueError: If the two ranges do not overlap.
@@ -101,12 +109,52 @@ def effective_range(
     # A capability without a declared range leaves the room's limits alone.
     low, high = spec.value_range or (-math.inf, math.inf)
     step = _DEFAULT_STEP if spec.step is None else spec.step
-    low = max(settings.setpoint_min, low)
-    high = min(settings.setpoint_max, high)
+    if settings.setpoint_range == "manual":
+        room_low, room_high = settings.setpoint_min, settings.setpoint_max
+    else:
+        room_low, room_high = thermostat_limits or (-math.inf, math.inf)
+    low = max(room_low, low)
+    high = min(room_high, high)
+    if not math.isfinite(low):
+        low = DEFAULT_SETPOINT_MIN
+    if not math.isfinite(high):
+        high = DEFAULT_SETPOINT_MAX
     if low >= high:
         msg = "setpoint range is empty"
         raise ValueError(msg)
     return low, high, step
+
+
+def thermostat_limits(
+    hass: HomeAssistant, trvs: Sequence[str]
+) -> tuple[float, float] | None:
+    """Return the narrowest ``min_temp``..``max_temp`` the thermostats show.
+
+    Thermostats whose state shows no numeric limits are left out; ``None`` if
+    none shows both.
+    """
+    lows: list[float] = []
+    highs: list[float] = []
+    for entity_id in trvs:
+        state = hass.states.get(entity_id)
+        if state is None:
+            continue
+        low = _limit(state.attributes.get(ATTR_MIN_TEMP))
+        high = _limit(state.attributes.get(ATTR_MAX_TEMP))
+        if low is None or high is None:
+            continue
+        lows.append(low)
+        highs.append(high)
+    if not lows:
+        return None
+    return max(lows), min(highs)
+
+
+def _limit(value: object) -> float | None:
+    """Return a temperature limit as a float, ``None`` if it is not a number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
 
 
 def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shapes it
@@ -116,12 +164,15 @@ def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shape
     device_refs: Mapping[str, DeviceRef],
     settings: RoomSettings,
     profile: Profile,
+    *,
+    thermostat_limits: tuple[float, float] | None = None,
 ) -> RoomConfig:
     """Build the :class:`RoomConfig` of a ``room`` subentry.
 
     ``device_refs`` must hold every thermostat listed in ``data``. The
     thermostat settings come from ``settings``, the resolved settings of the
-    room; ``profile`` limits the setpoint range.
+    room; ``profile`` and, for an ``auto`` range, ``thermostat_limits`` limit
+    the setpoint range.
 
     Raises:
         ValueError: If the setpoint ranges of the room and the profile are disjoint.
@@ -143,7 +194,7 @@ def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shape
         hysteresis=settings.hysteresis,
         adaptive_mode=settings.adaptive_mode,
         frost_temperature=settings.frost_temperature,
-        setpoint_range=effective_range(profile, settings),
+        setpoint_range=effective_range(profile, settings, thermostat_limits),
         window_contacts=tuple(data.get(CONF_WINDOW_CONTACTS, ())),
         window_warn=(
             timedelta(minutes=settings.window_warn_minutes)
@@ -259,6 +310,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
         device_refs,
         settings,
         profile,
+        thermostat_limits=thermostat_limits(hass, subentry.data[CONF_TRVS]),
     )
     params = RoomParams.from_settings(settings)
     controller = RoomController(

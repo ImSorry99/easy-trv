@@ -108,6 +108,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "adaptive_mode": "on",
         "frost_temperature": 5.0,
         "profile": "auto",
+        "setpoint_range": "auto",
         "setpoint_min": 5.0,
         "setpoint_max": 30.0,
         "window_warn_minutes": 120,

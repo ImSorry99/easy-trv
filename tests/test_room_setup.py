@@ -41,7 +41,8 @@ def test_room_config_from_subentry_maps_the_stored_data() -> None:
         hysteresis=0.6,
         adaptive_mode="on",
         frost_temperature=5.0,
-        setpoint_range=(5.0, 30.0, 0.5),
+        # Auto range and no limits shown by the thermostats: the profile's.
+        setpoint_range=(4.0, 35.0, 0.5),
         window_contacts=(),
         window_warn=timedelta(minutes=120),
         window_check=timedelta(minutes=30),
@@ -160,29 +161,71 @@ def _user_profile(tmp_path, *, setpoint_range: str = "[4, 35]"):
     return load_profiles_sync(tmp_path).profiles["user_narrow"]
 
 
-def _range(profile, **settings):
+def _range(profile, limits=None, **settings):
     gateway = FakeGateway()
     refs = {"climate.a": gateway.add_device("climate.a", IEEE_A)}
     data = room_data(trvs=["climate.a"], **settings)
     return room_config_from_subentry(
-        "sub1", "Living", data, refs, resolve_settings({}, data), profile
+        "sub1",
+        "Living",
+        data,
+        refs,
+        resolve_settings({}, data),
+        profile,
+        thermostat_limits=limits,
     ).setpoint_range
 
 
 def test_effective_range_is_the_narrowest(tmp_path) -> None:
+    manual = {"setpoint_range": "manual"}
     # The room's 5..30 lies inside the device's 4..35.
-    assert _range(NATIVE) == (5.0, 30.0, 0.5)
+    assert _range(NATIVE, **manual) == (5.0, 30.0, 0.5)
     # The device's 4..30 is narrower than the room's 4..35.
     narrow = _user_profile(tmp_path, setpoint_range="[4, 30]")
-    assert _range(narrow, setpoint_min=4.0, setpoint_max=35.0) == (4.0, 30.0, 0.5)
+    assert _range(narrow, setpoint_min=4.0, setpoint_max=35.0, **manual) == (
+        4.0,
+        30.0,
+        0.5,
+    )
     # A room limit beyond the device's is cut back to the device's.
-    assert _range(NATIVE, setpoint_min=3.0, setpoint_max=40.0) == (4.0, 35.0, 0.5)
+    assert _range(NATIVE, setpoint_min=3.0, setpoint_max=40.0, **manual) == (
+        4.0,
+        35.0,
+        0.5,
+    )
+    # Manual ignores what the thermostats show.
+    assert _range(NATIVE, (7.0, 28.0), **manual) == (5.0, 30.0, 0.5)
+
+
+def test_auto_range_takes_the_limits_the_thermostats_show() -> None:
+    assert _range(NATIVE, (7.0, 28.0)) == (7.0, 28.0, 0.5)
+    # Limits beyond the profile's are cut back to the profile's.
+    assert _range(NATIVE, (2.0, 40.0)) == (4.0, 35.0, 0.5)
+    # The numbers of the room do not count in auto.
+    assert _range(NATIVE, (7.0, 28.0), setpoint_min=10.0) == (7.0, 28.0, 0.5)
+
+
+def test_auto_range_without_limits_is_the_profile_range() -> None:
+    assert _range(NATIVE) == (4.0, 35.0, 0.5)
+
+
+def test_auto_range_without_limits_or_profile_range_is_the_default(tmp_path) -> None:
+    (tmp_path / "open.yaml").write_text(
+        BUILTIN_TEXT.replace("id: sonoff_trvzb_native", "id: user_open", 1).replace(
+            "range: [4, 35], step: 0.5", "step: 1.0", 1
+        )
+    )
+    profile = load_profiles_sync(tmp_path).profiles["user_open"]
+
+    assert _range(profile) == (5.0, 30.0, 1.0)
 
 
 def test_an_empty_effective_range_is_refused(tmp_path) -> None:
     narrow = _user_profile(tmp_path, setpoint_range="[4, 8]")
     with pytest.raises(ValueError, match="setpoint range is empty"):
-        _range(narrow, setpoint_min=10.0, setpoint_max=20.0)
+        _range(narrow, setpoint_min=10.0, setpoint_max=20.0, setpoint_range="manual")
+    with pytest.raises(ValueError, match="setpoint range is empty"):
+        _range(narrow, (10.0, 20.0))
 
 
 def test_profile_without_a_declared_range_keeps_its_step(tmp_path) -> None:
@@ -194,7 +237,7 @@ def test_profile_without_a_declared_range_keeps_its_step(tmp_path) -> None:
     profile = load_profiles_sync(tmp_path).profiles["user_open"]
 
     # The room's limits apply; the step the profile declares is kept.
-    assert _range(profile) == (5.0, 30.0, 1.0)
+    assert _range(profile, setpoint_range="manual") == (5.0, 30.0, 1.0)
 
 
 @pytest.mark.parametrize("intent", ["set_setpoint", "set_hvac_mode"])
