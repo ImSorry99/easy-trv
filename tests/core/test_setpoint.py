@@ -746,6 +746,12 @@ def test_an_exhausted_setpoint_write_is_sent_again_with_the_current_setpoint() -
     _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=19), st)
     assert writes(cmds) == []
     st, _ = logic().handle(SetRoomSetpoint(23.0), T0 + timedelta(minutes=20), st)
+    # The new setpoint fails as well; its result is in before the next round.
+    st, _ = logic().handle(
+        result("climate.a", SetSetpoint(23.0), Failed("busy")),
+        T0 + timedelta(minutes=20),
+        st,
+    )
     again = T0 + timedelta(minutes=21)
     st, cmds = logic().handle(Tick(), again, st)
     assert (("climate.a", SetSetpoint(23.0))) in writes(cmds)

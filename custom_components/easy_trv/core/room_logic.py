@@ -172,9 +172,11 @@ class RoomLogic:
                 state, commands = self._on_hold_event(event, now, state)
             case _:
                 assert_never(event)
+        state, settled = self._settle(before, state)
         commands = [
             *self._drop_unsupported(state, commands),
             *self._left_off(before, state),
+            *settled,
         ]
         state = self._supersede_pending(state, commands)
         state = self._mark_resent(state, commands)
@@ -543,28 +545,10 @@ class RoomLogic:
             commands.append(ClearIssue("firmware", trv))
         still_failing = False
         if self._reported(current):
-            owed = self._owed(state, updated)
-            owner = current.error_capability
-            if owner is not None and owner != capability and owner in owed:
-                still_failing = True
-                note = f"{trv}: {capability} verified, still failing on {owner}"
-                commands.append(Log("debug", note))
-            elif owed:
-                still_failing = True
-                next_capability = owed[0]
-                updated = replace(
-                    updated,
-                    error_capability=next_capability,
-                    last_error=updated.errors.get(next_capability, updated.last_error),
-                )
-                commands += self._still_failing(trv, updated, next_capability)
-            else:
-                updated = replace(updated, last_error=None, error_capability=None)
-                commands += [
-                    ClearIssue("unreachable", trv),
-                    FireEvent(EVENT_RECOVERED, self._event_data(trv)),
-                    Log("info", f"{self._cfg.name}: {trv} accepts writes again"),
-                ]
+            updated, notice, still_failing = self._follow_notice(
+                state, trv, updated, capability
+            )
+            commands += notice
         keeps_error = still_failing and updated.health is TrvHealth.ERROR
         if (
             updated.health in (TrvHealth.ERROR, TrvHealth.UNSUPPORTED)
@@ -576,6 +560,83 @@ class RoomLogic:
             state = replace(
                 state, last_value_write=now, last_written=event.intent.celsius
             )
+        return state, commands
+
+    def _follow_notice(
+        self, state: RoomState, trv: str, updated: TrvState, verified: str | None
+    ) -> tuple[TrvState, list[Command], bool]:
+        """Decide what the issue of a thermostat does now that ``updated`` holds.
+
+        It stays with the capability that owns it as long as the room still owes
+        that one, moves on to the first it still owes (by name) when that one
+        arrived, was forgotten or is not written any more, and ends, said once,
+        when none is left. ``verified`` is the capability whose write just
+        arrived, if that is what happened. Returns the thermostat, the commands
+        and whether the issue goes on.
+        """
+        owed = self._owed(state, updated)
+        owner = updated.error_capability
+        if owner is not None and owner != verified and owner in owed:
+            note: list[Command] = []
+            if verified is not None:
+                text = f"{trv}: {verified} verified, still failing on {owner}"
+                note.append(Log("debug", text))
+            return updated, note, True
+        if owed:
+            next_capability = owed[0]
+            updated = replace(
+                updated,
+                error_capability=next_capability,
+                last_error=updated.errors.get(next_capability, updated.last_error),
+            )
+            return updated, self._still_failing(trv, updated, next_capability), True
+        updated = replace(updated, last_error=None, error_capability=None)
+        return (
+            updated,
+            [
+                ClearIssue("unreachable", trv),
+                FireEvent(EVENT_RECOVERED, self._event_data(trv)),
+                Log("info", f"{self._cfg.name}: {trv} accepts writes again"),
+            ],
+            False,
+        )
+
+    def _settle(self, before: RoomState, state: RoomState) -> _Step:
+        """Forget what the room does not owe a thermostat any more, after any event.
+
+        A value that was given up on and that the room no longer writes (it went
+        off, the thermostat is on its schedule, the read-back showed another
+        value, the firmware lacks it) is forgotten with its attempts, so a later
+        write starts a fresh chain. The issue of a thermostat that had one before
+        the event follows: it moves on or, with nothing left, ends, once. An
+        issue raised by the event itself is left alone.
+        """
+        commands: list[Command] = []
+        for trv, known in before.trvs.items():
+            if not self._reported(known):
+                continue
+            current = state.trvs[trv]
+            updated = current
+            stale = current.given_up - set(self._owed(state, current))
+            if stale:
+                updated = replace(
+                    updated,
+                    attempts={
+                        k: v for k, v in updated.attempts.items() if k not in stale
+                    },
+                    given_up=updated.given_up - stale,
+                    errors={k: v for k, v in updated.errors.items() if k not in stale},
+                )
+            if self._reported(updated):
+                updated, notice, going = self._follow_notice(state, trv, updated, None)
+                commands += notice
+                if not going and updated.health in (
+                    TrvHealth.ERROR,
+                    TrvHealth.UNSUPPORTED,
+                ):
+                    updated = replace(updated, health=self._baseline(updated))
+            if updated != current:
+                state = self._with_trv(state, trv, updated)
         return state, commands
 
     def _on_failure(
@@ -701,6 +762,7 @@ class RoomLogic:
                 if in_profile
                 else current.not_in_profile | {capability}
             ),
+            attempts=_without(current.attempts, capability),
             pending_retry=_without(current.pending_retry, capability),
             given_up=current.given_up - {capability},
             errors=_without(current.errors, capability),
@@ -947,6 +1009,8 @@ class RoomLogic:
                 # A chain of retries is still running: let it finish first.
                 or capability in trv_state.pending_retry
                 or 0 < attempts < self._params.max_attempts
+                # The last send has no result yet: do not queue it twice.
+                or capability in trv_state.resent
                 or (setpoint.suspended(state) and isinstance(intent, SetSource))
             ):
                 continue

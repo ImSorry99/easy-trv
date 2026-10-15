@@ -838,6 +838,10 @@ def test_an_exhausted_mode_write_follows_the_room_after_the_hold() -> None:
     st, _ = open_window(heating())
     st = exhausted(st, A, SetHvacMode("off"))
     st, _ = room().handle(WindowChanged(open=False), OPEN_AT, st)
+    # The write that closes the hold fails as well; its result is in.
+    st, _ = room().handle(
+        result(A, SetHvacMode("heat"), Failed("timeout")), OPEN_AT, st
+    )
     _, cmds = room().handle(Tick(), OPEN_AT + timedelta(minutes=21), st)
     assert writes_of(cmds) == [(A, SetHvacMode("heat"))]
 

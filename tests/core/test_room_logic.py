@@ -37,6 +37,7 @@ from custom_components.easy_trv.core.model import (
     SetFrostTemperature,
     SetHvacMode,
     SetHysteresis,
+    SetRoomMode,
     SetRoomSetpoint,
     SetRoomTemperature,
     SetSetpoint,
@@ -737,7 +738,15 @@ def test_status_ok_with_external_source_reports_attributes() -> None:
 def test_status_error_wins_and_reports_first_error_text() -> None:
     st, _ = started()
     st = with_trv(st, "climate.a", health=TrvHealth.UNAVAILABLE)
-    st = with_trv(st, "climate.b", health=TrvHealth.ERROR, last_error="boom")
+    st = with_trv(
+        st,
+        "climate.b",
+        health=TrvHealth.ERROR,
+        last_error="boom",
+        error_capability="room_temperature",
+        given_up=frozenset({"room_temperature"}),
+        errors={"room_temperature": "boom"},
+    )
     _, cmds = logic().handle(Tick(), T0, st)
     status = cmds[-1]
     assert isinstance(status, SetStatus)
@@ -1161,6 +1170,8 @@ def test_a_failed_capability_is_sent_again_before_the_value_at_the_refresh_inter
     # The refresh interval is the floor, not every tick.
     _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=21), st)
     assert executes(cmds) == []
+    # Once its result is in (it failed again), it is sent again in the next round.
+    st = exhaust(st, "climate.a", intent, at=T0 + timedelta(minutes=20))
     _, cmds = logic().handle(Tick(), T0 + timedelta(minutes=40), st)
     assert ("climate.a", intent) in executes(cmds)
 
@@ -1669,28 +1680,137 @@ def test_a_given_up_value_that_is_not_written_in_this_state_keeps_no_notice(
     st, cmds = logic().handle(result("climate.a", HYSTERESIS, Ok()), T0, st)
     assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
     assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
-    assert st.trvs["climate.a"].health == TrvHealth.OK
+    trv = st.trvs["climate.a"]
+    assert trv.health == TrvHealth.OK
+    # What the room does not write is forgotten with its used-up attempts.
+    assert (trv.given_up, trv.errors, trv.attempts) == (frozenset(), {}, {})
 
 
-def test_a_given_up_value_counts_again_once_the_room_writes_it_again() -> None:
+def test_a_value_the_room_does_not_owe_is_forgotten_while_the_notice_stands() -> None:
     st = exhaust(started_with_setpoint(), "climate.a", MODE)
     st = exhaust(st, "climate.a", TEMP)
+    assert st.trvs["climate.a"].error_capability == "hvac_mode"
     st = with_trv(st, "climate.a", note=Note.SCHEDULE)
     st, cmds = logic().handle(Tick(), T0 + REFRESH, st)
     assert climate_writes(cmds) == []
-
-    # The thermostat leaves its schedule: the mode is sent, and it counts.
-    st = with_trv(st, "climate.a", note=None)
-    at = T0 + 2 * REFRESH
-    st, cmds = logic().handle(Tick(), at, st)
-    assert climate_writes(cmds) == [MODE]
-    st, cmds = logic().handle(result("climate.a", TEMP, Ok()), at, st)
+    trv = st.trvs["climate.a"]
+    # The mode is no longer the room's business: forgotten, the notice follows
+    # the value, which is still owed.
+    assert trv.given_up == frozenset({"room_temperature"})
+    assert trv.errors == {"room_temperature": "busy"}
+    assert "hvac_mode" not in trv.attempts
+    assert trv.error_capability == "room_temperature"
+    assert [c.placeholders["attribute"] for c in of_type(cmds, RaiseIssue)] == [
+        "room_temperature"
+    ]
     assert of_type(cmds, ClearIssue) == []
-    assert of_type(cmds, FireEvent) == []
-    assert st.trvs["climate.a"].error_capability == "hvac_mode"
-    st, cmds = logic().handle(result("climate.a", MODE, Ok()), at, st)
+
+    # The thermostat leaves its schedule and the room writes the mode again: it
+    # starts a fresh chain, with the backoff.
+    st = with_trv(st, "climate.a", note=None)
+    st, cmds = logic().handle(result("climate.a", MODE, Failed("busy")), T0, st)
+    assert of_type(cmds, ScheduleRetry) == [
+        ScheduleRetry("climate.a", "hvac_mode", 5.0)
+    ]
+    assert st.trvs["climate.a"].attempts["hvac_mode"] == 1
+
+
+def test_notice_clears_when_the_last_given_up_value_is_dropped_by_a_read_back() -> None:
+    cfg = replace(CFG, temp_sensors=())
+    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    st, _ = room.handle(Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg))
+    st, _ = room.handle(SetRoomSetpoint(21.0), T0, st)
+    for _ in range(3):
+        st, _ = room.handle(result("climate.a", SETPOINT, Failed("busy")), T0, st)
+    assert st.trvs["climate.a"].health == TrvHealth.ERROR
+    assert st.source == Source.NONE
+
+    # Somebody else's value is found instead of ours: the write is over.
+    foreign = Mismatch(frozenset({2100}), 2250, observed=22.5)
+    st, cmds = room.handle(result("climate.a", SETPOINT, foreign), T0, st)
     assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
     assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert [c.level for c in of_type(cmds, Log)] == ["info"]
+    trv = st.trvs["climate.a"]
+    assert (trv.health, trv.last_error, trv.error_capability) == (
+        TrvHealth.OK,
+        None,
+        None,
+    )
+    assert (trv.given_up, trv.errors, trv.attempts) == (frozenset(), {}, {})
+    assert cmds[-1].status == RoomStatus.OK
+
+    # Said once, and nothing is sent again.
+    st, cmds = room.handle(Tick(), T0 + REFRESH, st)
+    assert climate_writes(cmds) == []
+    assert not any(isinstance(c, (ClearIssue, FireEvent, RaiseIssue)) for c in cmds)
+
+
+def test_notice_clears_when_the_last_given_up_value_turns_out_unsupported() -> None:
+    st = exhaust(started()[0], "climate.a", HYSTERESIS)
+    st, cmds = logic().handle(result("climate.a", HYSTERESIS, UNSUPPORTED), T0, st)
+    assert ClearIssue("unreachable", "climate.a") in of_type(cmds, ClearIssue)
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    trv = st.trvs["climate.a"]
+    assert (trv.last_error, trv.error_capability) == (None, None)
+    assert (trv.given_up, trv.errors, trv.attempts) == (frozenset(), {}, {})
+    # The missing function is a firmware matter, not an error.
+    assert trv.health == TrvHealth.UNSUPPORTED
+
+
+def test_notice_clears_when_nothing_is_owed_any_more() -> None:
+    st = exhaust(started_with_setpoint(), "climate.a", MODE)
+    assert st.trvs["climate.a"].health == TrvHealth.ERROR
+    # The thermostat goes on its own schedule; nothing else happens.
+    st = with_trv(st, "climate.a", note=Note.SCHEDULE)
+    at = T0 + timedelta(minutes=1)
+    st, cmds = logic().handle(Tick(), at, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    assert [c.level for c in of_type(cmds, Log)] == ["info"]
+    trv = st.trvs["climate.a"]
+    assert (trv.health, trv.last_error, trv.error_capability) == (
+        TrvHealth.OK,
+        None,
+        None,
+    )
+    assert (trv.given_up, trv.errors, trv.attempts) == (frozenset(), {}, {})
+    assert cmds[-1].status == RoomStatus.OK
+
+    st, cmds = logic().handle(Tick(), at + timedelta(minutes=1), st)
+    assert not any(isinstance(c, (ClearIssue, FireEvent, RaiseIssue)) for c in cmds)
+
+
+def test_a_value_written_again_after_a_clear_gets_a_fresh_chain() -> None:
+    st = exhaust(started_with_setpoint(), "climate.a", SETPOINT)
+    assert st.trvs["climate.a"].attempts == {"setpoint": 3}
+    # The room goes off: nothing is owed, the notice ends.
+    st, cmds = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert "setpoint" not in st.trvs["climate.a"].attempts
+    assert st.trvs["climate.a"].given_up == frozenset()
+
+    st, _ = logic().handle(SetRoomMode(RoomMode.HEAT), T0, st)
+    st, cmds = logic().handle(result("climate.a", SETPOINT, Failed("busy")), T0, st)
+    # One failed attempt is retried with the backoff, not given up at once.
+    assert of_type(cmds, ScheduleRetry) == [ScheduleRetry("climate.a", "setpoint", 5.0)]
+    assert not any(isinstance(c, (RaiseIssue, FireEvent)) for c in cmds)
+    assert st.trvs["climate.a"].attempts == {"setpoint": 1}
+
+
+def test_a_value_still_in_flight_is_not_queued_again() -> None:
+    st = exhaust(started()[0], "climate.a", TEMP, HYSTERESIS)
+    st, cmds = logic().handle(Tick(), T0 + REFRESH, st)
+    assert climate_writes(cmds) == [HYSTERESIS]
+    assert "hysteresis" in st.trvs["climate.a"].resent
+    # The result of that write is still outstanding (the room's queue is long):
+    # the next round does not queue the same write behind it.
+    st, cmds = logic().handle(Tick(), T0 + 2 * REFRESH, st)
+    assert climate_writes(cmds) == []
+    # Its result is in: it fails again and is sent again in the round after.
+    st = exhaust(st, "climate.a", HYSTERESIS, at=T0 + 2 * REFRESH)
+    _, cmds = logic().handle(Tick(), T0 + 3 * REFRESH, st)
+    assert climate_writes(cmds) == [HYSTERESIS]
 
 
 def test_resync_does_not_move_the_notice_early() -> None:
