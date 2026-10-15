@@ -74,6 +74,27 @@ def is_echo(
     )
 
 
+def is_stale_readback(
+    known: TrvState,
+    capability: str,
+    reported: float | str | None,
+    observed: float | str,
+) -> bool:
+    """Return whether a read-back shows what the thermostat reported before our write.
+
+    That is the value it had until our write: it has not taken the write yet,
+    which is a failure to retry, not a value somebody else set. A report that
+    came after the write (a knob turn) is no such value.
+    """
+    if reported is None or not _equal(reported, observed):
+        return False
+    newest = max(
+        (at for _, at in known.written_recently.get(capability, ())), default=None
+    )
+    stamp = known.reported_at.get(capability)
+    return newest is not None and (stamp is None or stamp <= newest)
+
+
 def on_observed(
     cfg: RoomConfig,
     state: RoomState,

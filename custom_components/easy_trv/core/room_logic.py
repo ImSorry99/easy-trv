@@ -477,7 +477,11 @@ class RoomLogic:
         now: datetime,
         state: RoomState,
     ) -> bool:
-        """Return whether a read-back shows a value somebody else set, not ours."""
+        """Return whether a read-back shows a value somebody else set, not ours.
+
+        Neither our own recent value nor the one the thermostat reported before
+        our write (it has not applied the write yet) is such a value.
+        """
         if (
             not isinstance(event.intent, SetSetpoint | SetHvacMode)
             or outcome.observed is None
@@ -485,7 +489,17 @@ class RoomLogic:
         ):
             return False
         known = state.trvs[event.trv]
-        return not observe.is_echo(known, event.capability, outcome.observed, now)
+        reported = (
+            known.reported_setpoint
+            if isinstance(event.intent, SetSetpoint)
+            else known.reported_mode
+        )
+        return not (
+            observe.is_echo(known, event.capability, outcome.observed, now)
+            or observe.is_stale_readback(
+                known, event.capability, reported, outcome.observed
+            )
+        )
 
     def _on_foreign_readback(
         self,

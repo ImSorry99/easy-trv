@@ -11,6 +11,7 @@ from custom_components.easy_trv.core.model import (
     FireEvent,
     KnobSettled,
     Log,
+    Mismatch,
     Note,
     OutdoorChanged,
     RaiseIssue,
@@ -21,6 +22,7 @@ from custom_components.easy_trv.core.model import (
     RoomParams,
     RoomState,
     ScheduleKnobSettle,
+    ScheduleRetry,
     SensorChanged,
     SetHvacMode,
     SetRoomMode,
@@ -744,6 +746,77 @@ def test_an_exhausted_off_write_of_a_schedule_thermostat_is_sent_again() -> None
 
 def writes_of(cmds: list[Command]) -> list[tuple[str, object]]:
     return room_writes(cmds)
+
+
+# --- A write the thermostat has not applied yet is no knob turn -------------------
+
+CLOSED_AT = OPEN_AT + timedelta(minutes=9)
+
+
+def adoptions(cmds: list[Command]) -> list[FireEvent]:
+    return [
+        c for c in of_type(cmds, FireEvent) if c.name == "easy_trv_setpoint_adopted"
+    ]
+
+
+def test_a_heat_that_reads_back_as_the_old_off_is_retried_not_adopted() -> None:
+    st, _ = open_window(heating())
+    st, _ = room().handle(mode_report(A, "off"), OPEN_AT + timedelta(seconds=2), st)
+    st, _ = room().handle(WindowChanged(open=False), CLOSED_AT, st)
+    stale = Mismatch(frozenset({4}), 0, observed="off")
+    st, cmds = room().handle(
+        result(A, SetHvacMode("heat"), stale), CLOSED_AT + timedelta(seconds=10), st
+    )
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert adoptions(cmds) == []
+    assert [c.capability for c in of_type(cmds, ScheduleRetry)] == ["hvac_mode"]
+    assert st.trvs[A].attempts == {"hvac_mode": 1}
+    assert st.trvs[A].knob_pending == {}
+    assert st.mode is RoomMode.HEAT
+
+
+def test_a_setpoint_changed_in_ha_during_the_hold_is_retried_not_adopted() -> None:
+    st = heating()
+    st, _ = room().handle(setpoint_report(A, 21.0), T0 + timedelta(minutes=1), st)
+    st, _ = open_window(st)
+    st, _ = room().handle(SetRoomSetpoint(23.0), OPEN_AT, st)
+    st, _ = room().handle(WindowChanged(open=False), CLOSED_AT, st)
+    stale = Mismatch(frozenset({2300}), 2100, observed=21.0)
+    st, cmds = room().handle(
+        result(A, SetSetpoint(23.0), stale), CLOSED_AT + timedelta(seconds=10), st
+    )
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert adoptions(cmds) == []
+    assert [c.capability for c in of_type(cmds, ScheduleRetry)] == ["setpoint"]
+    assert st.setpoint == 23.0
+
+
+def test_a_third_value_read_back_is_still_a_knob_turn() -> None:
+    st = heating()
+    st, _ = room().handle(setpoint_report(A, 21.0), T0 + timedelta(minutes=1), st)
+    st, _ = open_window(st)
+    st, _ = room().handle(SetRoomSetpoint(23.0), OPEN_AT, st)
+    st, _ = room().handle(WindowChanged(open=False), CLOSED_AT, st)
+    other = Mismatch(frozenset({2300}), 2500, observed=25.0)
+    st, cmds = room().handle(
+        result(A, SetSetpoint(23.0), other), CLOSED_AT + timedelta(seconds=10), st
+    )
+    assert of_type(cmds, ScheduleRetry) == []
+    assert of_type(cmds, ScheduleKnobSettle) == [ScheduleKnobSettle(A, "setpoint", 3.0)]
+    assert st.trvs[A].knob_pending == {"setpoint": 25.0}
+
+
+def test_a_value_reported_after_our_write_is_not_taken_for_a_stale_read_back() -> None:
+    st = heating()
+    st, _ = room().handle(SetRoomSetpoint(23.0), OPEN_AT, st)
+    # The knob went to 21 after our write: the report is newer than the write.
+    st, _ = room().handle(setpoint_report(A, 21.0), OPEN_AT + timedelta(seconds=5), st)
+    seen = Mismatch(frozenset({2300}), 2100, observed=21.0)
+    st, cmds = room().handle(
+        result(A, SetSetpoint(23.0), seen), OPEN_AT + timedelta(seconds=10), st
+    )
+    assert of_type(cmds, ScheduleRetry) == []
+    assert st.trvs[A].knob_pending == {"setpoint": 21.0}
 
 
 # --- A knob turn during a hold changes the wish, not the mode ---------------------

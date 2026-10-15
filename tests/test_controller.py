@@ -22,6 +22,7 @@ from custom_components.easy_trv.const import (
     DOMAIN,
     EVENT_FAILSAFE,
     EVENT_RECOVERED,
+    EVENT_SETPOINT_ADOPTED,
     EVENT_WRITE_FAILED,
 )
 from custom_components.easy_trv.controller import RoomController
@@ -1559,6 +1560,31 @@ async def test_start_clears_a_stale_schedule_thermostat_issue(
     )
     await climate_window.async_start()
     assert issue(hass, "schedule_thermostat_off_0022") is None
+
+
+async def test_a_stale_read_back_after_the_hold_is_retried_not_adopted(
+    hass, freezer, climate_window, gateway
+) -> None:
+    adopted = async_capture_events(hass, EVENT_SETPOINT_ADOPTED)
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    gateway.inject(IEEE_A, MODE, 0)
+    freezer.tick(timedelta(minutes=9))
+    # The thermostat still reads off when the heat is verified.
+    gateway.read_override[(IEEE_A, MODE)] = 0
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    assert writes_to(gateway, IEEE_A, MODE) == [0, 4]
+    assert climate_window.mode is RoomMode.HEAT
+    assert adopted == []
+    del gateway.read_override[(IEEE_A, MODE)]
+    await advance(hass, freezer, 6, step=1)
+    assert writes_to(gateway, IEEE_A, MODE) == [0, 4, 4]
+    assert climate_window.mode is RoomMode.HEAT
+    assert adopted == []
 
 
 @pytest.fixture
