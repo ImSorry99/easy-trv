@@ -6,9 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
 ### Changed
 
 - Frost protection is selected in the room thermostat's mode list again (HA mode `auto`, shown as Frost protection); the separate operating mode select is removed. Automations using `select.select_option` on `select.<room>_heating_mode` switch to `climate.set_hvac_mode` with `auto`/`heat`/`off`
+
+### Fixed
+
+- `climate.set_temperature` with an `hvac_mode` applies that mode too; an unsupported mode is rejected
 
 ## [0.4.0] - 2026-10-15
 
@@ -81,7 +87,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/ImSorry99/easy-trv/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ImSorry99/easy-trv/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ImSorry99/easy-trv/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ImSorry99/easy-trv/compare/v0.1.0...v0.2.0
