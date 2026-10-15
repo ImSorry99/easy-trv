@@ -7,7 +7,7 @@ Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is der
 - **P1 Native first.** Use what the thermostat can do by itself: its regulation, its inputs, later its schedules and timers. Home Assistant only feeds values and checks that they arrived. Fewer writes, more asynchrony, more robustness, less load on HA.
 - **P2 Profiles, not hard-coded devices.** A thermostat is driven through a *profile*. A profile states which device and minimum firmware it fits, what the device can do natively, and how Easy TRV talks to it. Phase 1 ships exactly one profile: *Sonoff TRVZB native*. If a native path turns out not to work well, a second profile may drive the same device differently. The native profile is always the first choice.
 - **P2a Profiles are data, shipped and tested.** Built-in profiles are declarative files, tested on real hardware with a stated firmware. Users do not click a device together; they take a shipped profile. Anyone can copy a shipped profile into their HA config folder, adapt it, and select it. Shipped profiles are never edited in place.
-- **P3 Lean.** Minimal entities: one diagnostic status sensor and one thin pass-through `climate` entity per room. No regulating climate entity, no entity per setting.
+- **P3 Lean.** Minimal entities: one diagnostic heating-state sensor per room (state with reasons and a plain-text hint) and one thin pass-through `climate` entity per room. No regulating climate entity, no entity per setting.
 - **P4 Verified, not assumed.** Every write is read back. A write that does not arrive becomes visible.
 - **P5 Reuse.** Prefer HA and ZHA built-ins (availability, areas, Repairs, selectors, device registry) over own mechanisms.
 
@@ -46,7 +46,7 @@ Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is der
 
 ## Visibility
 
-- **V1** One status sensor per room: `ok` / `degraded` / `error`, with few attributes (active sensor, source, per-thermostat health, last error).
+- **V1** One diagnostic heating-state sensor per room (state with reasons and a plain-text hint), with few attributes (active sensor, source, per-thermostat health, last error).
 - **V2** Diagnostics download with the full state. Events `easy_trv_write_failed`, `easy_trv_recovered`, `easy_trv_failsafe_detected`.
 - **V3** UI in English and German.
 
