@@ -77,7 +77,12 @@ from custom_components.easy_trv.core.model import (
 )
 from custom_components.easy_trv.core.observe import shown
 from custom_components.easy_trv.core.room_logic import RoomLogic
-from custom_components.easy_trv.core.setpoint import SAME, device_driven, suspended
+from custom_components.easy_trv.core.setpoint import (
+    SAME,
+    device_driven,
+    holding,
+    suspended,
+)
 from custom_components.easy_trv.core.setpoint import current as current_target
 from custom_components.easy_trv.core.values import parse_temperature
 from custom_components.easy_trv.labels import thermostat_name
@@ -829,7 +834,7 @@ class RoomController:
         it may have waited in the queue while a knob turn or a hold changed that.
         """
         try:
-            result = await self._run_operation(trv, self._current(intent))
+            result = await self._run_operation(trv, self._current(trv, intent))
         except Exception as exc:
             # Anything not mapped to an outcome yet: log it and report a
             # failure so the logic's retry and issue machinery still runs.
@@ -848,11 +853,20 @@ class RoomController:
         self._busy[trv, self._capability_of(intent)] -= 1
         self._dispatch(result)
 
-    def _current(self, intent: Intent) -> Intent:
-        """Return what a queued setpoint or mode write should send now."""
-        if self._config.setpoint_range is None:
+    def _current(self, trv: str, intent: Intent) -> Intent:
+        """Return what a queued setpoint or mode write should send now.
+
+        A thermostat the room leaves alone outside a hold (schedule, window
+        phase, or left off by a hold) gets the write as it was issued: the
+        room's target is not meant for it.
+        """
+        state = self._state
+        known = state.trvs[trv]
+        if self._config.setpoint_range is None or (
+            (device_driven(known) or known.left_off) and not holding(state)
+        ):
             return intent
-        return current_target(self._state, intent) or intent
+        return current_target(state, intent) or intent
 
     async def _run_operation(self, trv: str, intent: Intent) -> OperationResult:
         """Plan, write and read back one intent; every failure is an outcome."""

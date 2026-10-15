@@ -440,7 +440,7 @@ def _observe_mode(
         foreign_at=_foreign(known, capability, now, echo=echo),
     )
     if mode not in OWN_MODES:
-        return _on_schedule_report(cfg, state, now, trv, known)
+        return _on_schedule_report(cfg, state, now, trv, known, capability_of)
     if known.note is Note.SCHEDULE:
         known = replace(known, note=None, note_since=None)
     if known.left_off and mode == "off":
@@ -461,19 +461,35 @@ def _observe_mode(
     return _pend(state, trv, known, capability, mode)
 
 
-def _on_schedule_report(
-    cfg: RoomConfig, state: RoomState, now: datetime, trv: str, known: TrvState
+def _on_schedule_report(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    trv: str,
+    known: TrvState,
+    capability_of: _Capabilities,
 ) -> _Step:
-    """Mark a thermostat that reports its schedule and leave it alone."""
+    """Mark a thermostat that reports its schedule and leave it alone.
+
+    During a hold every thermostat is meant to be off: this one is switched off
+    again and, having been on its schedule, stays off after the hold.
+    """
     commands: list[Command] = []
-    # Back on its schedule: it is no longer one the hold left off.
-    known = replace(known, left_off=False)
+    held = holding(state)
+    if not held:
+        # Back on its schedule: it is no longer one the hold left off.
+        known = replace(known, left_off=False)
     if known.note is not Note.SCHEDULE:
         known = replace(known, note=Note.SCHEDULE, note_since=now)
-        note = f"{cfg.name}: {trv} runs its own schedule, leaving it alone"
+        action = "switching it off again" if held else "leaving it alone"
+        note = f"{cfg.name}: {trv} runs its own schedule, {action}"
         commands.append(Log("info", note))
     known = replace(known, knob_pending={})
-    return _store(state, trv, known), commands
+    state = _store(state, trv, known)
+    if not held:
+        return state, commands
+    state, written = resync_trv(cfg, state, now, trv, capability_of)
+    return state, [*commands, *written]
 
 
 def _foreign(

@@ -1261,6 +1261,26 @@ async def test_a_queued_mode_write_follows_a_hold_that_ended_meanwhile(
     assert room.in_sync is True
 
 
+async def test_a_queued_off_for_a_schedule_thermostat_is_not_turned_into_heat(
+    hass, climate_window, gateway
+) -> None:
+    hass.states.async_set(CONTACT, "off")
+    hass.states.async_set("binary_sensor.w2", "off")
+    await start_with_setpoint(hass, climate_window, gateway)
+    gateway.inject(IEEE_B, MODE, 1)
+    await settle(hass)
+    gateway.gate = asyncio.Event()
+    hass.states.async_set(CONTACT, "on")
+    await settle(hass)
+    hass.states.async_set(CONTACT, "off")
+    await settle(hass)
+    gateway.gate.set()
+    await settle(hass)
+    # The window closed before the queue drained: B still gets its off.
+    assert writes_to(gateway, IEEE_B, MODE) == [0]
+    assert writes_to(gateway, IEEE_A, MODE)[-1] == 4
+
+
 async def test_in_sync_is_false_when_a_thermostat_is_known_to_show_another_value(
     hass, freezer, climate, gateway
 ) -> None:

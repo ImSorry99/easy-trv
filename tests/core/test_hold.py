@@ -406,6 +406,52 @@ def test_a_hold_off_that_reads_back_as_the_schedule_is_tried_again() -> None:
     assert of_type(cmds, ScheduleRetry) == []
 
 
+def auto_report(trv: str) -> TrvObserved:
+    return TrvObserved(trv, "hvac_mode", None, 1, "report")
+
+
+def test_a_schedule_thermostat_reporting_auto_in_a_hold_is_switched_off() -> None:
+    st = with_trv(heating(), B, reported_mode="auto")
+    st, _ = open_window(st)
+    st, _ = room().handle(mode_report(B, "off"), OPEN_AT + timedelta(seconds=5), st)
+    again = OPEN_AT + timedelta(minutes=2)
+    st, cmds = room().handle(auto_report(B), again, st)
+    assert room_writes(cmds) == [(B, SetHvacMode("off"))]
+    assert st.trvs[B].left_off is True
+    assert st.trvs[B].written_recently["hvac_mode"][-1] == ("off", again)
+    assert schedule_issues(cmds) == ([], [])
+    # After the hold it stays off.
+    st, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert [w for w in room_writes(cmds) if w[0] == B] == []
+    assert st.trvs[B].left_off is True
+
+
+def test_a_thermostat_switched_to_its_schedule_during_the_hold_is_switched_off() -> (
+    None
+):
+    st, _ = open_window(heating())
+    st, _ = room().handle(mode_report(A, "off"), OPEN_AT + timedelta(seconds=5), st)
+    assert st.trvs[A].left_off is False
+    st, cmds = room().handle(auto_report(A), OPEN_AT + timedelta(minutes=2), st)
+    assert room_writes(cmds) == [(A, SetHvacMode("off"))]
+    assert st.trvs[A].left_off is True
+    raised, cleared = schedule_issues(cmds)
+    assert raised == [RaiseIssue("schedule_thermostat_off", A, {"room": "Living"})]
+    assert cleared == []
+    st, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert [w for w in room_writes(cmds) if w[0] == A] == []
+    assert (B, SetHvacMode("heat")) in room_writes(cmds)
+
+
+def test_a_schedule_read_back_of_a_heat_write_during_the_hold_is_switched_off() -> None:
+    st, _ = open_window(heating())
+    st, cmds = room().handle(
+        result(A, SetHvacMode("heat"), Signal("schedule")), OPEN_AT, st
+    )
+    assert room_writes(cmds) == [(A, SetHvacMode("off"))]
+    assert st.trvs[A].left_off is True
+
+
 def test_a_window_phase_thermostat_is_switched_off_and_resumed() -> None:
     st = heating()
     st, _ = room().handle(setpoint_report(A, 12.0), T0 + timedelta(minutes=1), st)
