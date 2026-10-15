@@ -803,3 +803,46 @@ def test_leaving_the_window_phase_with_an_echo_value_still_writes_the_room_value
     assert st.trvs[A].note is None
     assert executes(cmds) == [(A, SetSetpoint(23.0))]
     assert of_type(cmds, ScheduleKnobSettle) == []
+
+
+# --- fix round 3 ---------------------------------------------------------
+
+
+def test_switching_the_room_off_drops_a_pending_setpoint_knob() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 22.0), AFTER, st)
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), AFTER + timedelta(seconds=1), st)
+    assert st.trvs[A].knob_pending == {}
+    st, cmds = settle(st)
+    assert st.mode is RoomMode.OFF
+    assert st.setpoint == 21.0
+    assert executes(cmds) == []
+    assert adopted_events(cmds) == []
+
+
+def test_switching_the_room_on_keeps_a_pending_setpoint_knob() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0 + timedelta(seconds=1), st)
+    st, _ = logic().handle(reported(A, 22.0), AFTER, st)
+    st, _ = logic().handle(SetRoomMode(RoomMode.HEAT), AFTER + timedelta(seconds=1), st)
+    assert st.trvs[A].knob_pending == {"setpoint": 22.0}
+
+
+def test_a_restore_drops_a_pending_knob_mode() -> None:
+    st = with_trv(started_with_setpoint(21.0), A, reported_mode="heat")
+    st, _ = logic().handle(reported_mode(A, "off"), AFTER, st)
+    assert st.trvs[A].knob_pending == {"hvac_mode": "off"}
+    restored, _ = logic().handle(
+        RestoreRoom(20.0, RoomMode.HEAT, Preset.NONE), AFTER, st
+    )
+    assert restored.trvs[A].knob_pending == {}
+
+
+def test_leaving_the_window_phase_on_an_echo_waits_for_a_pending_resync() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 12.0), T0 + timedelta(seconds=20), st)
+    st, _ = logic().handle(SetRoomSetpoint(23.0), T0 + timedelta(seconds=30), st)
+    st = with_trv(st, A, resync_pending={"setpoint": 23.0})
+    st, cmds = logic().handle(reported(A, 21.0), T0 + timedelta(seconds=60), st)
+    assert st.trvs[A].note is None
+    assert executes(cmds) == []

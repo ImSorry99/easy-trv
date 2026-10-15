@@ -101,6 +101,9 @@ def on_set_mode(  # noqa: PLR0913
     if cfg.setpoint_range is None:
         return state, []
     state = _forget_knobs(state, capability_of(SetHvacMode("heat")))
+    if mode is RoomMode.OFF:
+        # A setpoint turned just before must not wake the room when it settles.
+        state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
     state = replace(state, mode=mode)
     if holding(state):
         return state, []
