@@ -39,6 +39,16 @@ CONF_MIN_DELTA: Final = "min_delta_kelvin"
 CONF_SENSOR_TIMEOUT: Final = "sensor_timeout_minutes"
 CONF_ADAPTIVE_MODE: Final = "adaptive_mode"
 CONF_FROST_TEMPERATURE: Final = "frost_temperature"
+CONF_SETPOINT_MIN: Final = "setpoint_min"
+CONF_SETPOINT_MAX: Final = "setpoint_max"
+CONF_WINDOW_WARN_MINUTES: Final = "window_warn_minutes"
+CONF_WINDOW_CHECK_MINUTES: Final = "window_check_minutes"
+CONF_WINDOW_CHECK_DROP: Final = "window_check_drop_kelvin"
+CONF_OUTDOOR_CUTOFF: Final = "outdoor_cutoff"  # room-only: global / off
+CONF_OUTDOOR_CUTOFF_CELSIUS: Final = "outdoor_cutoff_celsius"
+# Entry-level and room entity configuration (not settings with a default)
+CONF_OUTDOOR_SENSOR: Final = "outdoor_sensor"
+CONF_WINDOW_CONTACTS: Final = "window_contacts"
 
 # Defaults
 DEFAULT_REFRESH_MINUTES: Final = _settings.DEFAULT_REFRESH_MINUTES
@@ -50,6 +60,12 @@ DEFAULT_WINDOW_DETECTION: Final = _settings.DEFAULT_WINDOW_DETECTION
 DEFAULT_HYSTERESIS: Final = _settings.DEFAULT_HYSTERESIS
 DEFAULT_ADAPTIVE_MODE: Final = _settings.DEFAULT_ADAPTIVE_MODE
 DEFAULT_FROST_TEMPERATURE: Final = _settings.DEFAULT_FROST_TEMPERATURE
+DEFAULT_SETPOINT_MIN: Final = _settings.DEFAULT_SETPOINT_MIN
+DEFAULT_SETPOINT_MAX: Final = _settings.DEFAULT_SETPOINT_MAX
+DEFAULT_WINDOW_WARN_MINUTES: Final = _settings.DEFAULT_WINDOW_WARN_MINUTES
+DEFAULT_WINDOW_CHECK_MINUTES: Final = _settings.DEFAULT_WINDOW_CHECK_MINUTES
+DEFAULT_WINDOW_CHECK_DROP: Final = _settings.DEFAULT_WINDOW_CHECK_DROP
+DEFAULT_OUTDOOR_CUTOFF_CELSIUS: Final = _settings.DEFAULT_OUTDOOR_CUTOFF_CELSIUS
 
 # Timing
 DEBOUNCE_SECONDS: Final = 5.0

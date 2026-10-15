@@ -22,8 +22,21 @@ DEFAULT_HYSTERESIS: Final = "0_4"
 DEFAULT_ADAPTIVE_MODE: Final = "on"
 DEFAULT_FROST_TEMPERATURE: Final = 5.0
 DEFAULT_PROFILE: Final = "auto"
+DEFAULT_SETPOINT_MIN: Final = 5.0
+DEFAULT_SETPOINT_MAX: Final = 30.0
+DEFAULT_WINDOW_WARN_MINUTES: Final = 120
+DEFAULT_WINDOW_CHECK_MINUTES: Final = 30
+DEFAULT_WINDOW_CHECK_DROP: Final = 0.3
+DEFAULT_OUTDOOR_CUTOFF_CELSIUS: Final[float | None] = None  # None = off
 
 _KEY_HYSTERESIS: Final = "hysteresis"
+_KEY_SETPOINT_MIN: Final = "setpoint_min"
+_KEY_SETPOINT_MAX: Final = "setpoint_max"
+_KEY_OUTDOOR_CUTOFF: Final = "outdoor_cutoff"  # room-only switch: global / off
+_KEY_OUTDOOR_CUTOFF_CELSIUS: Final = "outdoor_cutoff_celsius"
+_OFF: Final = "off"
+# Settings whose default is None but that are numbers when set.
+_FLOAT_KEYS: Final = frozenset({_KEY_OUTDOOR_CUTOFF_CELSIUS})
 
 # Built-in default of every setting. The keys are the ``CONF_*`` values.
 DEFAULTS: Final[Mapping[str, Any]] = {
@@ -37,6 +50,12 @@ DEFAULTS: Final[Mapping[str, Any]] = {
     "adaptive_mode": DEFAULT_ADAPTIVE_MODE,
     "frost_temperature": DEFAULT_FROST_TEMPERATURE,
     "profile": DEFAULT_PROFILE,
+    _KEY_SETPOINT_MIN: DEFAULT_SETPOINT_MIN,
+    _KEY_SETPOINT_MAX: DEFAULT_SETPOINT_MAX,
+    "window_warn_minutes": DEFAULT_WINDOW_WARN_MINUTES,
+    "window_check_minutes": DEFAULT_WINDOW_CHECK_MINUTES,
+    "window_check_drop_kelvin": DEFAULT_WINDOW_CHECK_DROP,
+    _KEY_OUTDOOR_CUTOFF_CELSIUS: DEFAULT_OUTDOOR_CUTOFF_CELSIUS,
 }
 
 
@@ -54,6 +73,12 @@ class RoomSettings:
     adaptive_mode: Literal["on", "off", "leave"]
     frost_temperature: float  # celsius
     profile: str  # "auto" or a profile id
+    setpoint_min: float  # celsius
+    setpoint_max: float  # celsius
+    window_warn_minutes: int  # 0 = off
+    window_check_minutes: int  # 0 = off
+    window_check_drop_kelvin: float
+    outdoor_cutoff_celsius: float | None  # None = off
 
 
 def hysteresis_kelvin(stored: str | float) -> float:
@@ -79,9 +104,15 @@ def _is_set(key: str, value: object) -> bool:
 
 
 def overrides(room: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the settings a room sets itself, i.e. the keys that are not global."""
+    """Return the settings a room sets itself, i.e. the keys that are not global.
+
+    ``outdoor_cutoff`` is a room-only switch, not a setting with a default. It is
+    kept when it is ``off``.
+    """
     return {
-        key: room[key] for key in DEFAULTS if key in room and _is_set(key, room[key])
+        key: room[key]
+        for key in (*DEFAULTS, _KEY_OUTDOOR_CUTOFF)
+        if key in room and _is_set(key, room[key])
     }
 
 
@@ -90,6 +121,8 @@ def _coerce(key: str, value: Any) -> Any:
     if key == _KEY_HYSTERESIS:
         return hysteresis_kelvin(value)
     default = DEFAULTS[key]
+    if key in _FLOAT_KEYS:
+        return None if value is None else float(value)
     if isinstance(default, int):
         return round(value)
     if isinstance(default, float):
@@ -102,7 +135,13 @@ def resolve_settings(
 ) -> RoomSettings:
     """Resolve every setting: room value, else global value, else default.
 
-    Keys in ``room`` and ``options`` that are not settings are ignored.
+    The outdoor cut-off threshold is also ``None`` (off) when the room's
+    ``outdoor_cutoff`` switch is ``off``, which wins over any number. Keys in
+    ``room`` and ``options`` that are not settings are ignored.
+
+    Raises:
+        ValueError: ``setpoint_min`` is not below ``setpoint_max``.
+
     """
     room_values = overrides(room)
     global_values = overrides(options)
@@ -110,4 +149,9 @@ def resolve_settings(
         key: _coerce(key, room_values.get(key, global_values.get(key, default)))
         for key, default in DEFAULTS.items()
     }
+    if room_values.get(_KEY_OUTDOOR_CUTOFF) == _OFF:
+        resolved[_KEY_OUTDOOR_CUTOFF_CELSIUS] = None
+    if resolved[_KEY_SETPOINT_MIN] >= resolved[_KEY_SETPOINT_MAX]:
+        msg = "setpoint_min must be below setpoint_max"
+        raise ValueError(msg)
     return RoomSettings(**resolved)

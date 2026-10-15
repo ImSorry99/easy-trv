@@ -1,4 +1,11 @@
+from dataclasses import fields
+
+import pytest
+
+from custom_components.easy_trv import const
 from custom_components.easy_trv.core.settings import (
+    DEFAULTS,
+    RoomSettings,
     hysteresis_kelvin,
     overrides,
     resolve_settings,
@@ -78,3 +85,103 @@ def test_numbers_are_coerced():
     assert s.frost_temperature == 8.0
     assert isinstance(s.frost_temperature, float)
     assert s.max_attempts == 4
+
+
+def test_new_defaults():
+    s = resolve_settings({}, {})
+    assert (s.setpoint_min, s.setpoint_max) == (5.0, 30.0)
+    assert (s.window_warn_minutes, s.window_check_minutes) == (120, 30)
+    assert s.window_check_drop_kelvin == 0.3
+    assert s.outdoor_cutoff_celsius is None
+
+
+def test_outdoor_cutoff_global_room_number_and_room_off():
+    assert (
+        resolve_settings({"outdoor_cutoff_celsius": 16.0}, {}).outdoor_cutoff_celsius
+        == 16.0
+    )
+    assert (
+        resolve_settings(
+            {"outdoor_cutoff_celsius": 16.0}, {"outdoor_cutoff_celsius": 18.0}
+        ).outdoor_cutoff_celsius
+        == 18.0
+    )
+    assert (
+        resolve_settings(
+            {"outdoor_cutoff_celsius": 16.0}, {"outdoor_cutoff": "off"}
+        ).outdoor_cutoff_celsius
+        is None
+    )
+
+
+def test_room_off_wins_over_a_room_number():
+    room = {"outdoor_cutoff": "off", "outdoor_cutoff_celsius": 18.0}
+    assert resolve_settings({}, room).outdoor_cutoff_celsius is None
+
+
+def test_outdoor_cutoff_global_choice_and_blank_number_follow_global():
+    options = {"outdoor_cutoff_celsius": 16.0}
+    room = {"outdoor_cutoff": "global", "outdoor_cutoff_celsius": None}
+    assert resolve_settings(options, room).outdoor_cutoff_celsius == 16.0
+
+
+def test_outdoor_cutoff_is_a_room_only_key():
+    # The switch is read from the room, never from the global options.
+    off = resolve_settings({"outdoor_cutoff": "off"}, {})
+    assert off.outdoor_cutoff_celsius is None
+    options = {"outdoor_cutoff": "off", "outdoor_cutoff_celsius": 16.0}
+    assert resolve_settings(options, {}).outdoor_cutoff_celsius == 16.0
+    assert "outdoor_cutoff" not in DEFAULTS
+    assert "outdoor_cutoff" not in {f.name for f in fields(RoomSettings)}
+
+
+def test_overrides_keeps_outdoor_cutoff_off_and_drops_global():
+    assert overrides({"outdoor_cutoff": "off"}) == {"outdoor_cutoff": "off"}
+    assert overrides({"outdoor_cutoff": "global"}) == {}
+    assert overrides({"outdoor_cutoff": None}) == {}
+
+
+def test_new_numbers_are_coerced():
+    s = resolve_settings(
+        {"setpoint_min": 6, "window_warn_minutes": 60.0, "outdoor_cutoff_celsius": 16},
+        {"window_check_drop_kelvin": 1, "window_check_minutes": 10.4},
+    )
+    assert s.setpoint_min == 6.0
+    assert isinstance(s.setpoint_min, float)
+    assert s.window_warn_minutes == 60
+    assert isinstance(s.window_warn_minutes, int)
+    assert s.window_check_drop_kelvin == 1.0
+    assert isinstance(s.window_check_drop_kelvin, float)
+    assert s.window_check_minutes == 10
+    assert s.outdoor_cutoff_celsius == 16.0
+    assert isinstance(s.outdoor_cutoff_celsius, float)
+
+
+def test_setpoint_min_must_be_below_max():
+    with pytest.raises(ValueError, match="setpoint_min"):
+        resolve_settings({"setpoint_max": 18.0}, {"setpoint_min": 18.0})
+    with pytest.raises(ValueError, match="setpoint_min"):
+        resolve_settings({}, {"setpoint_min": 31.0})
+    with pytest.raises(ValueError, match="setpoint_min"):
+        resolve_settings({"setpoint_max": 4.0}, {})
+    assert resolve_settings({}, {"setpoint_min": 29.5}).setpoint_min == 29.5
+
+
+def test_every_default_has_a_matching_conf_constant():
+    # CONF_* names that are not settings with a built-in default.
+    not_settings = {
+        const.CONF_TRVS,
+        const.CONF_TEMP_SENSORS,
+        const.CONF_HUMIDITY_SENSORS,
+        const.CONF_AREA,
+        const.CONF_NAME,
+        const.CONF_OUTDOOR_CUTOFF,
+        const.CONF_OUTDOOR_SENSOR,
+        const.CONF_WINDOW_CONTACTS,
+    }
+    conf_values = {
+        value
+        for name, value in vars(const).items()
+        if name.startswith("CONF_") and isinstance(value, str)
+    }
+    assert set(DEFAULTS) == conf_values - not_settings

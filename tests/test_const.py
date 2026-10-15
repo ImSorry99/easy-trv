@@ -29,3 +29,21 @@ def test_event_names_are_defined_once_in_core() -> None:
     source = Path(const.__file__).read_text()
     for name in (model.EVENT_WRITE_FAILED, model.EVENT_RECOVERED, model.EVENT_FAILSAFE):
         assert name not in source
+
+
+def test_new_setting_constants() -> None:
+    assert const.CONF_SETPOINT_MIN == "setpoint_min"
+    assert const.CONF_SETPOINT_MAX == "setpoint_max"
+    assert const.CONF_WINDOW_WARN_MINUTES == "window_warn_minutes"
+    assert const.CONF_WINDOW_CHECK_MINUTES == "window_check_minutes"
+    assert const.CONF_WINDOW_CHECK_DROP == "window_check_drop_kelvin"
+    assert const.CONF_OUTDOOR_CUTOFF == "outdoor_cutoff"
+    assert const.CONF_OUTDOOR_CUTOFF_CELSIUS == "outdoor_cutoff_celsius"
+    assert const.CONF_OUTDOOR_SENSOR == "outdoor_sensor"
+    assert const.CONF_WINDOW_CONTACTS == "window_contacts"
+    assert const.DEFAULT_SETPOINT_MIN == 5.0
+    assert const.DEFAULT_SETPOINT_MAX == 30.0
+    assert const.DEFAULT_WINDOW_WARN_MINUTES == 120
+    assert const.DEFAULT_WINDOW_CHECK_MINUTES == 30
+    assert const.DEFAULT_WINDOW_CHECK_DROP == 0.3
+    assert const.DEFAULT_OUTDOOR_CUTOFF_CELSIUS is None
