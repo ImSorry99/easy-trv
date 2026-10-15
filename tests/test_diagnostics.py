@@ -107,6 +107,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "hysteresis": 0.4,
         "adaptive_mode": "on",
         "frost_temperature": 5.0,
+        "hide_thermostat_entities": "off",
         "profile": "auto",
         "setpoint_range": "auto",
         "setpoint_min": 5.0,

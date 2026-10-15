@@ -25,6 +25,7 @@ from homeassistant.helpers.selector import (
 from custom_components.easy_trv.const import (
     CONF_ADAPTIVE_MODE,
     CONF_FROST_TEMPERATURE,
+    CONF_HIDE_THERMOSTAT_ENTITIES,
     CONF_HYSTERESIS,
     CONF_MAX_ATTEMPTS,
     CONF_MIN_DELTA,
@@ -64,6 +65,7 @@ SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
     CONF_ADAPTIVE_MODE: ("on", "off", "leave"),
     CONF_SETPOINT_RANGE: ("auto", "manual"),
     CONF_WINDOW_WARN_COLDER: ("on", "off"),
+    CONF_HIDE_THERMOSTAT_ENTITIES: ("on", "off"),
 }
 # A choice that only a room has: the global outdoor cut-off threshold is the
 # value to keep ("global") or to ignore ("off") in this room.
@@ -123,6 +125,7 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
         CONF_HYSTERESIS,
         CONF_ADAPTIVE_MODE,
         CONF_FROST_TEMPERATURE,
+        CONF_HIDE_THERMOSTAT_ENTITIES,
     ),
     _SECTION_ROOM_THERMOSTAT: (
         CONF_SETPOINT_RANGE,
@@ -146,6 +149,7 @@ ROOM_SETTING_KEYS: Final = (
     CONF_HYSTERESIS,
     CONF_ADAPTIVE_MODE,
     CONF_FROST_TEMPERATURE,
+    CONF_HIDE_THERMOSTAT_ENTITIES,
     CONF_REFRESH_MINUTES,
     CONF_VERIFY_DELAY,
     CONF_MAX_ATTEMPTS,

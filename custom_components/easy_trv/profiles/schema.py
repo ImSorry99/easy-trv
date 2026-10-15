@@ -143,10 +143,14 @@ def _verify(value: object) -> dict[str, Any]:
     raise vol.Invalid(msg)
 
 
+# The Home Assistant entity of a capability, which Easy TRV can hide.
+_ENTITY = {vol.Required("domain"): _SLUG, vol.Required("translation_key"): _SLUG}
+
 _CAPABILITY = vol.Schema(
     {
         vol.Required("intent"): vol.In(INTENTS),
         vol.Optional("min_firmware"): _VERSION,
+        vol.Optional("entity"): _ENTITY,
         vol.Required("write"): _WRITE,
         vol.Required("verify"): _verify,
         vol.Optional("observe", default=False): bool,

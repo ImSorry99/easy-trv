@@ -106,6 +106,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "hysteresis",
         "adaptive_mode",
         "frost_temperature",
+        "hide_thermostat_entities",
         "refresh_minutes",
         "verify_delay_seconds",
         "max_attempts",
@@ -160,6 +161,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "hysteresis",
         "adaptive_mode",
         "frost_temperature",
+        "hide_thermostat_entities",
     }
     assert set(options["room_thermostat"]["data"]) == {
         "setpoint_range",
@@ -195,6 +197,11 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "0_6",
         "0_8",
         "1_0",
+    }
+    assert set(data["selector"]["hide_thermostat_entities"]["options"]) == {
+        "global",
+        "on",
+        "off",
     }
     assert set(data["selector"]["capability"]["options"]) == INTENTS
     assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
@@ -633,3 +640,45 @@ def test_german_setpoint_labels() -> None:
     for texts in (settings, section):
         assert texts["setpoint_min"] == "Minimale Solltemperatur (°C)"
         assert texts["setpoint_max"] == "Maximale Solltemperatur (°C)"
+
+
+def test_hide_setting_texts_en() -> None:
+    en = load(EN)
+    room = en["config_subentries"]["room"]["step"]["settings"]
+    section = en["options"]["step"]["init"]["sections"]["thermostat"]
+    assert room["data"]["hide_thermostat_entities"] == "Hide thermostat entities"
+    assert section["data"]["hide_thermostat_entities"] == "Hide thermostat entities"
+    text = section["data_description"]["hide_thermostat_entities"]
+    assert "no longer appear on automatic dashboards" in text
+    assert "shows them again" in text
+    # The room form also says what Global is.
+    assert room["data_description"]["hide_thermostat_entities"] == (
+        f"{text} Global is currently {{global_hide_thermostat_entities}}."
+    )
+    assert en["selector"]["hide_thermostat_entities"]["options"] == {
+        "global": "Global",
+        "on": "Hidden",
+        "off": "Shown",
+    }
+
+
+def test_hide_setting_texts_de() -> None:
+    de = load(DE)
+    room = de["config_subentries"]["room"]["step"]["settings"]
+    section = de["options"]["step"]["init"]["sections"]["thermostat"]
+    assert room["data"]["hide_thermostat_entities"] == "TRV-Entitäten ausblenden"
+    assert section["data"]["hide_thermostat_entities"] == "TRV-Entitäten ausblenden"
+    text = (
+        "Blendet die Klima-Entität der TRVs und die Einstellungen aus, die Easy TRV "
+        "steuert. Sie arbeiten weiter, stehen aber nicht mehr auf automatischen "
+        "Dashboards. Ausschalten blendet sie wieder ein."
+    )
+    assert section["data_description"]["hide_thermostat_entities"] == text
+    assert room["data_description"]["hide_thermostat_entities"] == (
+        f"{text} Global ist derzeit {{global_hide_thermostat_entities}}."
+    )
+    assert de["selector"]["hide_thermostat_entities"]["options"] == {
+        "global": "Global",
+        "on": "Ausgeblendet",
+        "off": "Eingeblendet",
+    }

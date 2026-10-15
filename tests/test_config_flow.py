@@ -265,6 +265,7 @@ ALL_GLOBAL = {
     "window_detection": "global",
     "hysteresis": "global",
     "adaptive_mode": "global",
+    "hide_thermostat_entities": "global",
     "setpoint_range": "global",
     "window_warn_colder": "global",
     "outdoor_cutoff": "global",
@@ -878,6 +879,7 @@ SETTINGS_FIELDS = [
     "hysteresis",
     "adaptive_mode",
     "frost_temperature",
+    "hide_thermostat_entities",
     "refresh_minutes",
     "verify_delay_seconds",
     "max_attempts",
@@ -926,6 +928,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_hysteresis": "0.4 K",
         "global_adaptive_mode": "Adaptive on",
         "global_frost_temperature": "5.0 °C",
+        "global_hide_thermostat_entities": "Shown",
         "global_refresh_minutes": "20 min",
         "global_verify_delay_seconds": "10 s",
         "global_max_attempts": "3",
@@ -1050,6 +1053,46 @@ async def test_room_settings_store_only_overrides(hass, entry) -> None:
     assert data["profile"] == "global"
     for key in SETTING_NUMBERS:
         assert key not in data
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_hide_select_is_global_on_or_off(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    hide = fields(result)["hide_thermostat_entities"]
+
+    assert option_values(hide) == ["global", "on", "off"]
+    assert hide.config["translation_key"] == "hide_thermostat_entities"
+    assert defaults(result)["hide_thermostat_entities"] == "global"
+    # It sits right after the frost protection temperature.
+    names = list(fields(result))
+    assert names[names.index("frost_temperature") + 1] == "hide_thermostat_entities"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+@pytest.mark.parametrize("choice", ["global", "on", "off"])
+async def test_room_stores_the_hide_choice_like_the_other_selects(
+    hass, entry, choice
+) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"hide_thermostat_entities": choice}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    data = next(iter(entry.subentries.values())).data
+    assert data["hide_thermostat_entities"] == choice
+    expected = "off" if choice == "global" else choice
+    assert resolve_settings({}, data).hide_thermostat_entities == expected
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_hide_placeholder_follows_the_global_option(hass) -> None:
+    entry = make_entry(hass, [], {"hide_thermostat_entities": "on"})
+    result = await open_settings_step(hass, entry)
+
+    assert result["description_placeholders"]["global_hide_thermostat_entities"] == (
+        "Hidden"
+    )
 
 
 @pytest.mark.usefixtures("area_with_trvs")
@@ -1791,6 +1834,7 @@ async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
         "hysteresis",
         "adaptive_mode",
         "frost_temperature",
+        "hide_thermostat_entities",
     ]
     assert list(section_fields(result, "room_thermostat")) == [
         "setpoint_range",
@@ -1836,6 +1880,7 @@ async def test_options_form_shows_the_saved_number_else_the_default(
         "window_detection": const.DEFAULT_WINDOW_DETECTION,
         "hysteresis": const.DEFAULT_HYSTERESIS,
         "adaptive_mode": const.DEFAULT_ADAPTIVE_MODE,
+        "hide_thermostat_entities": const.DEFAULT_HIDE_THERMOSTAT_ENTITIES,
     }
     # Each number says what empty means.
     assert result["description_placeholders"] == {
@@ -1881,6 +1926,7 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "window_detection",
         "hysteresis",
         "adaptive_mode",
+        "hide_thermostat_entities",
         "setpoint_range",
         "window_warn_colder",
     }
@@ -1895,6 +1941,7 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "window_detection",
         "hysteresis",
         "adaptive_mode",
+        "hide_thermostat_entities",
         "setpoint_range",
         "window_warn_colder",
     }
@@ -1922,6 +1969,34 @@ async def test_options_form_ranges_units_and_select_options(hass, entry) -> None
     assert option_values(thermostat["adaptive_mode"]) == ["on", "off", "leave"]
     for key in ("window_detection", "hysteresis", "adaptive_mode"):
         assert thermostat[key].config["translation_key"] == key
+
+
+async def test_options_hide_select_is_on_or_off_and_starts_off(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    hide = section_fields(result, "thermostat")["hide_thermostat_entities"]
+
+    assert option_values(hide) == ["on", "off"]
+    assert hide.config["translation_key"] == "hide_thermostat_entities"
+    assert defaults(result, "thermostat")["hide_thermostat_entities"] == "off"
+
+
+@pytest.mark.parametrize("choice", ["on", "off"])
+async def test_options_store_the_hide_choice_flat(hass, entry, choice) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        options_input(thermostat={"hide_thermostat_entities": choice}),
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["hide_thermostat_entities"] == choice
+    assert resolve_settings(entry.options, {}).hide_thermostat_entities == choice
+
+
+async def test_options_form_shows_the_saved_hide_choice(hass) -> None:
+    saved = make_entry(hass, [], {"hide_thermostat_entities": "on"})
+    result = await hass.config_entries.options.async_init(saved.entry_id)
+
+    assert defaults(result, "thermostat")["hide_thermostat_entities"] == "on"
 
 
 async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None:
@@ -1956,6 +2031,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
         "hysteresis": "0_6",
         "adaptive_mode": "off",
         "frost_temperature": 8.5,
+        "hide_thermostat_entities": "off",
         "setpoint_range": "auto",
         "window_warn_colder": "on",
     }

@@ -218,3 +218,22 @@ def test_the_window_warning_waits_for_colder_outside_by_default():
     assert resolve_settings(options, {}).window_warn_colder == "off"
     room = {"window_warn_colder": "on"}
     assert resolve_settings(options, room).window_warn_colder == "on"
+
+
+def test_hiding_the_thermostat_entities_is_off_by_default():
+    assert resolve_settings({}, {}).hide_thermostat_entities == "off"
+
+
+def test_hiding_follows_the_global_option_and_a_room_can_override_it():
+    options = {"hide_thermostat_entities": "on"}
+    assert resolve_settings(options, {}).hide_thermostat_entities == "on"
+    assert (
+        resolve_settings(
+            options, {"hide_thermostat_entities": "global"}
+        ).hide_thermostat_entities
+        == "on"
+    )
+    room = {"hide_thermostat_entities": "off"}
+    assert resolve_settings(options, room).hide_thermostat_entities == "off"
+    on_in_room = {"hide_thermostat_entities": "on"}
+    assert resolve_settings({}, on_in_room).hide_thermostat_entities == "on"

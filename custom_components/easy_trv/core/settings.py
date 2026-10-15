@@ -21,6 +21,7 @@ DEFAULT_WINDOW_DETECTION: Final = "on"
 DEFAULT_HYSTERESIS: Final = "0_4"
 DEFAULT_ADAPTIVE_MODE: Final = "on"
 DEFAULT_FROST_TEMPERATURE: Final = 5.0
+DEFAULT_HIDE_THERMOSTAT_ENTITIES: Final = "off"
 DEFAULT_PROFILE: Final = "auto"
 DEFAULT_SETPOINT_RANGE: Final = "auto"
 DEFAULT_SETPOINT_MIN: Final = 5.0
@@ -53,6 +54,7 @@ DEFAULTS: Final[Mapping[str, Any]] = {
     _KEY_HYSTERESIS: DEFAULT_HYSTERESIS,
     "adaptive_mode": DEFAULT_ADAPTIVE_MODE,
     "frost_temperature": DEFAULT_FROST_TEMPERATURE,
+    "hide_thermostat_entities": DEFAULT_HIDE_THERMOSTAT_ENTITIES,
     "profile": DEFAULT_PROFILE,
     _KEY_SETPOINT_RANGE: DEFAULT_SETPOINT_RANGE,
     _KEY_SETPOINT_MIN: DEFAULT_SETPOINT_MIN,
@@ -79,6 +81,8 @@ class RoomSettings:
     hysteresis: float  # kelvin, 0.2..1.0
     adaptive_mode: Literal["on", "off", "leave"]
     frost_temperature: float  # celsius
+    # on: the thermostat entities Easy TRV controls are hidden in Home Assistant
+    hide_thermostat_entities: Literal["on", "off"]
     profile: str  # "auto" or a profile id
     # auto: the limits the thermostats show; manual: setpoint_min..setpoint_max
     setpoint_range: Literal["auto", "manual"]

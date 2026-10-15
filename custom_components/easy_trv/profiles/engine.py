@@ -93,6 +93,18 @@ class Operation:
 
 
 @dataclass(frozen=True)
+class EntityRef:
+    """The Home Assistant entity a capability is shown as: its domain and key.
+
+    ``translation_key`` is the key the entity registry holds for the entity
+    (ZHA names its entities by it). Easy TRV uses it only to hide the entity.
+    """
+
+    domain: str
+    translation_key: str
+
+
+@dataclass(frozen=True)
 class CapabilitySpec:
     """A capability as declared in a validated profile document.
 
@@ -101,7 +113,8 @@ class CapabilitySpec:
     ``verify_values`` holds the accepted raw values per intent value for the
     ``one_of`` rule and is empty for ``equals``. ``step`` is the grid the
     engine rounds the intent value to before encoding (``None``: no rounding);
-    ``observe`` marks capabilities whose device value the room follows.
+    ``observe`` marks capabilities whose device value the room follows;
+    ``entity`` names the entity that shows the capability, if the profile does.
     """
 
     name: str
@@ -118,6 +131,7 @@ class CapabilitySpec:
     also_read: tuple[int, ...]
     step: float | None = None
     observe: bool = False
+    entity: EntityRef | None = None
 
 
 def _intent_value(intent: Intent) -> _Value:
@@ -244,6 +258,7 @@ def _build_capability(name: str, raw: dict[str, Any]) -> CapabilitySpec:
         )
         raise ValueError(msg)
     min_firmware = raw.get("min_firmware")
+    entity = raw.get("entity")
     return CapabilitySpec(
         name=name,
         intent=raw["intent"],
@@ -261,6 +276,7 @@ def _build_capability(name: str, raw: dict[str, Any]) -> CapabilitySpec:
         also_read=tuple(raw.get("also_read", ())),
         step=None if step is None else float(step),
         observe=bool(raw.get("observe", False)),
+        entity=None if entity is None else EntityRef(**entity),
     )
 
 

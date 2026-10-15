@@ -7,30 +7,36 @@ tested_firmware: ["1.3.0", "1.4.4"]
 capabilities:
   external_temperature:
     intent: set_room_temperature
+    entity: { domain: number, translation_key: external_temperature_sensor_value }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x600D, encode: temperature_centi, range: [0, 99.9] }
     verify: { rule: equals }
     also_read: [0x600E]              # read in the same request; signals apply
   source_select:
     intent: set_source
+    entity: { domain: switch, translation_key: external_temperature_sensor }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x600E, encode: { map: { external: 1, internal: 0 } } }
     verify: { rule: one_of, external: [1, 3], internal: [0] }
     signals: { 2: failsafe }
   window_detection_flag:
     intent: set_window_detection
+    entity: { domain: switch, translation_key: open_window }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6000, encode: bool }
     verify: { rule: equals }
   hysteresis:
     intent: set_hysteresis
     min_firmware: "1.3.0"
+    entity: { domain: number, translation_key: temperature_control_accuracy }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6011, encode: kelvin_centi_negative, range: [0.2, 1.0] }
     verify: { rule: equals }
   adaptive_mode:
     intent: set_adaptive_mode
     min_firmware: "1.4.4"
+    entity: { domain: switch, translation_key: adaptive_mode }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6017, encode: { map: { "true": 2, "false": 0 } } }
     verify: { rule: one_of, "true": [2], "false": [0, 1] }   # the device reports 1 as a read-only alias of off
   frost_protection:
     intent: set_frost_temperature
+    entity: { domain: number, translation_key: frost_protection_temperature }
     write: { endpoint: 1, cluster: 0xFC11, attribute: 0x6002, encode: temperature_centi, range: [4, 35] }
     verify: { rule: equals }
   setpoint:

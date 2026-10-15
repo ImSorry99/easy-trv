@@ -46,6 +46,12 @@ from custom_components.easy_trv.labels import (
     localized_number,
 )
 from custom_components.easy_trv.profiles.loader import LoadResult, async_load_profiles
+from custom_components.easy_trv.visibility import (
+    controlled_entities,
+    reconcile_hidden,
+    show_all,
+    thermostat_devices,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -291,6 +297,43 @@ def _resolve_thermostats(
     return refs
 
 
+def _thermostat_ids(data: Mapping[str, Any]) -> list[str]:
+    """Return the thermostat entity ids a room stores, whatever state the data is in.
+
+    A room is invalid precisely because its data may be broken, so what is not
+    a list of strings is skipped instead of raised on.
+    """
+    trvs = data.get(CONF_TRVS)
+    if not isinstance(trvs, list):
+        return []
+    return [trv for trv in trvs if isinstance(trv, str)]
+
+
+def _reconcile_hidden_entities(
+    hass: HomeAssistant,
+    entry: EasyTrvConfigEntry,
+    profiles: Mapping[str, Profile],
+    settings: Mapping[str, RoomSettings],
+    invalid: set[str],
+) -> None:
+    """Hide the thermostat entities of the rooms that ask for it, show the others.
+
+    ``profiles`` and ``settings`` are those of the rooms that were set up. The
+    thermostats of the rooms that could not be set up (``invalid``) keep their
+    entities as they are.
+    """
+    hidden: set[str] = set()
+    for subentry_id, profile in profiles.items():
+        if settings[subentry_id].hide_thermostat_entities == "on":
+            trvs = _thermostat_ids(entry.subentries[subentry_id].data)
+            hidden |= controlled_entities(hass, trvs, profile)
+    keep_devices: set[str] = set()
+    for subentry_id in invalid:
+        trvs = _thermostat_ids(entry.subentries[subentry_id].data)
+        keep_devices |= thermostat_devices(hass, trvs)
+    reconcile_hidden(hass, hidden, keep_devices)
+
+
 def _describe_room_error(err: Exception) -> str:
     """Return the text of a room's setup problem for the log and the issue."""
     if isinstance(err, ConfigEntryError):
@@ -415,6 +458,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     areas: dict[str, str | None] = {}
     summaries: dict[str, str] = {}
     invalid: set[str] = set()
+    room_profiles: dict[str, Profile] = {}
     for subentry in entry.subentries.values():
         if subentry.subentry_type != SUBENTRY_ROOM:
             continue
@@ -439,6 +483,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
             invalid.add(subentry.subentry_id)
             continue
         rooms[subentry.subentry_id] = controller
+        room_profiles[subentry.subentry_id] = profile
         resolved[subentry.subentry_id] = settings
         areas[subentry.subentry_id] = _area_name(hass, subentry)
         summaries[subentry.subentry_id] = (
@@ -456,6 +501,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
         gateway, profiles, rooms, resolved, areas, labels
     )
     _remove_operating_mode_selects(hass, entry)
+    _reconcile_hidden_entities(hass, entry, room_profiles, resolved, invalid)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _assign_room_areas(hass, entry)
@@ -501,6 +547,11 @@ async def _async_reload_on_update(
 ) -> None:
     """Reload when the options or the rooms (subentries) change."""
     hass.config_entries.async_schedule_reload(entry.entry_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, _entry: ConfigEntry) -> None:
+    """Show the thermostat entities again that Easy TRV hid."""
+    show_all(hass)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> bool:

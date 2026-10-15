@@ -162,3 +162,43 @@ def test_step_and_observe_are_optional() -> None:
     validated = schema.validate_profile_dict(data)
     assert "step" not in validated["capabilities"]["setpoint"]["write"]
     assert validated["capabilities"]["setpoint"]["observe"] is False
+
+
+def test_a_capability_may_name_its_entity() -> None:
+    data = _load_builtin()
+    data["capabilities"]["hysteresis"]["entity"] = {
+        "domain": "number",
+        "translation_key": "temperature_control_accuracy",
+    }
+    validated = schema.validate_profile_dict(data)
+    assert validated["capabilities"]["hysteresis"]["entity"] == {
+        "domain": "number",
+        "translation_key": "temperature_control_accuracy",
+    }
+
+
+def test_the_entity_is_optional() -> None:
+    data = _load_builtin()
+    validated = schema.validate_profile_dict(data)
+    assert "entity" not in validated["capabilities"]["setpoint"]
+    assert "entity" not in validated["capabilities"]["hvac_mode"]
+
+
+@pytest.mark.parametrize(
+    "entity",
+    [
+        {"domain": "number"},
+        {"translation_key": "temperature_control_accuracy"},
+        {},
+        {"domain": "number", "translation_key": "x", "name": "extra"},
+        {"domain": "Number", "translation_key": "x"},
+        {"domain": "number", "translation_key": "Not A Slug"},
+        {"domain": "number", "translation_key": 5},
+        "number.temperature_control_accuracy",
+    ],
+)
+def test_an_entity_needs_both_domain_and_translation_key(entity: object) -> None:
+    data = _load_builtin()
+    data["capabilities"]["hysteresis"]["entity"] = entity
+    with pytest.raises(vol.Invalid):
+        schema.validate_profile_dict(data)

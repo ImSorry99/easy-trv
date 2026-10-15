@@ -293,3 +293,41 @@ def test_a_capability_without_step_and_observe_keeps_working() -> None:
     assert profile.capabilities["setpoint"].step is None
     assert profile.capabilities["setpoint"].observe is False
     assert profile.plan(SetSetpoint(21.3), None).raw_value == 2130
+
+
+def test_the_builtin_profile_names_the_six_entities_easy_trv_controls(
+    trvzb: engine.Profile,
+) -> None:
+    named = {
+        name: spec.entity
+        for name, spec in trvzb.capabilities.items()
+        if spec.entity is not None
+    }
+    assert named == {
+        "external_temperature": engine.EntityRef(
+            "number", "external_temperature_sensor_value"
+        ),
+        "source_select": engine.EntityRef("switch", "external_temperature_sensor"),
+        "window_detection_flag": engine.EntityRef("switch", "open_window"),
+        "hysteresis": engine.EntityRef("number", "temperature_control_accuracy"),
+        "adaptive_mode": engine.EntityRef("switch", "adaptive_mode"),
+        "frost_protection": engine.EntityRef("number", "frost_protection_temperature"),
+    }
+    # The setpoint and the mode belong to the climate entity.
+    assert trvzb.capabilities["setpoint"].entity is None
+    assert trvzb.capabilities["hvac_mode"].entity is None
+
+
+def test_a_capability_without_an_entity_has_none() -> None:
+    data = _builtin_dict()
+    for capability in data["capabilities"].values():
+        capability.pop("entity", None)
+    profile = engine.Profile.from_dict(data)
+    assert {spec.entity for spec in profile.capabilities.values()} == {None}
+
+
+def test_an_entity_reference_is_hashable_and_compared_by_value() -> None:
+    assert engine.EntityRef("number", "a") == engine.EntityRef("number", "a")
+    assert {engine.EntityRef("number", "a"), engine.EntityRef("number", "a")} == {
+        engine.EntityRef("number", "a")
+    }
