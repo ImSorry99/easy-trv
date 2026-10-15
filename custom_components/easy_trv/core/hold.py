@@ -59,11 +59,14 @@ def on_window(  # noqa: PLR0913
     active: _Reading | None,
     capability_of: _Capabilities,
     resync: _Resync,
+    *,
+    at_start: bool = False,
 ) -> _Step:
     """Take the window contacts changing between open and closed.
 
     ``active`` is the active sensor and its value, remembered at opening for the
-    stuck-contact check.
+    stuck-contact check. ``at_start`` takes the state without writing: the start
+    brings the thermostats to the mode they should show in one go.
     """
     if open_ is state.window_open:
         return state, []
@@ -101,6 +104,8 @@ def on_window(  # noqa: PLR0913
             {"room": cfg.name, "state": "open" if open_ else "closed"},
         )
     )
+    if at_start:
+        return after, commands
     after, moved = _transition(cfg, after, now, was_held, capability_of, resync)
     return after, [*commands, *moved]
 
@@ -112,12 +117,14 @@ def on_outdoor(  # noqa: PLR0913
     celsius: float | None,
     capability_of: _Capabilities,
     resync: _Resync,
+    *,
+    at_start: bool = False,
 ) -> _Step:
     """Take a new outdoor temperature; ``None`` means the sensor is unknown.
 
     The hold starts at the cut-off and ends half a kelvin below it. An unknown
     temperature ends it too (and says so), for the room must not stay off on a
-    value nobody can see.
+    value nobody can see. ``at_start`` takes the state without writing.
     """
     cutoff = cfg.outdoor_cutoff
     if cutoff is None:
@@ -148,6 +155,8 @@ def on_outdoor(  # noqa: PLR0913
             EVENT_OUTDOOR_HOLD, {"room": cfg.name, "state": "on" if hold else "off"}
         )
     )
+    if at_start:
+        return after, commands
     after, moved = _transition(cfg, after, now, was_held, capability_of, resync)
     return after, [*commands, *moved]
 

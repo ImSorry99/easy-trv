@@ -188,7 +188,7 @@ class RoomLogic:
         state = replace(state, readings=readings, trvs=trvs)
         state, commands = self._apply_settings(state, self._writable(state))
         # The holds first: a room that starts held is compared with the
-        # thermostats without writing heat or a value, only the hold's off.
+        # thermostats as held, so it writes off and neither heat nor a value.
         state, holds = self._start_holds(event, now, state)
         commands = [*commands, *holds]
         # Before the source: a room that starts switched off writes no value.
@@ -199,11 +199,30 @@ class RoomLogic:
         return state, [*commands, *setpoint_commands, *source_commands]
 
     def _start_holds(self, event: Start, now: datetime, state: RoomState) -> _Step:
-        """Apply the window contact and outdoor temperature known at start."""
-        state, commands = self._on_hold_event(
-            WindowChanged(open=event.window_open), now, state
+        """Take the window contact and outdoor temperature known at start.
+
+        Only the state: the reconcile that follows writes the mode each
+        thermostat should show, once.
+        """
+        state, commands = hold.on_window(
+            self._cfg,
+            state,
+            now,
+            event.window_open,
+            self._active_pair(state, now),
+            self._capability_of,
+            self._source_intents,
+            at_start=True,
         )
-        state, outdoor = self._on_hold_event(OutdoorChanged(event.outdoor), now, state)
+        state, outdoor = hold.on_outdoor(
+            self._cfg,
+            state,
+            now,
+            event.outdoor,
+            self._capability_of,
+            self._source_intents,
+            at_start=True,
+        )
         return state, [*commands, *outdoor]
 
     def _on_room_event(

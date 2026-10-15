@@ -95,39 +95,95 @@ def open_window(st: RoomState) -> tuple[RoomState, list[Command]]:
 # --- Start inside a hold ---------------------------------------------------
 
 
-def test_start_with_an_open_window_holds_before_reconciling() -> None:
+def room_writes(cmds: list[Command]) -> list[tuple[str, object]]:
+    """Return the mode and setpoint writes (the start also writes settings)."""
+    return [e for e in executes(cmds) if isinstance(e[1], SetHvacMode | SetSetpoint)]
+
+
+def started_in_hold(
+    restore: RestoreRoom | None,
+    reported: dict,
+    **hold,
+) -> tuple[RoomLogic, RoomState, list[Command]]:
     logic = room()
-    st, _ = logic.handle(
-        RestoreRoom(21.0, RoomMode.HEAT, None), T0, RoomState.initial(HOLD_CFG)
-    )
-    reported = {A: (18.0, "off"), B: (18.0, "off")}
+    st = RoomState.initial(HOLD_CFG)
+    if restore is not None:
+        st, _ = logic.handle(restore, T0, st)
     st, cmds = logic.handle(
-        Start(
-            (reading("sensor.t1", 21.3),), BOTH_AVAILABLE, reported, window_open=True
-        ),
-        T0,
-        st,
+        Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE, reported, **hold), T0, st
+    )
+    return logic, st, cmds
+
+
+def test_start_held_off_room_turns_heating_thermostats_off_once() -> None:
+    reported = {A: (21.0, "heat"), B: (21.0, "heat")}
+    for hold in ({"window_open": True}, {"outdoor": 20.0}):
+        logic, st, cmds = started_in_hold(
+            RestoreRoom(21.0, RoomMode.OFF, None), reported, **hold
+        )
+
+        assert st.mode is RoomMode.OFF
+        assert room_writes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+        # The hold ends: an off room writes nothing.
+        end = (
+            WindowChanged(open=False) if "window_open" in hold else OutdoorChanged(10.0)
+        )
+        _, closing = logic.handle(end, OPEN_AT, st)
+        assert room_writes(closing) == []
+
+
+def test_start_held_heat_room_does_not_repeat_the_off_of_thermostats() -> None:
+    reported = {A: (18.0, "off"), B: (18.0, "off")}
+    logic, st, cmds = started_in_hold(
+        RestoreRoom(21.0, RoomMode.HEAT, None), reported, window_open=True
     )
 
     assert st.window_open is True
     assert (st.mode, st.setpoint) == (RoomMode.HEAT, 21.0)
-    # Off for both thermostats, no heat and no setpoint.
-    assert [i for _, i in executes(cmds) if isinstance(i, SetHvacMode)] == [
-        SetHvacMode("off"),
-        SetHvacMode("off"),
-    ]
-    assert not [i for _, i in executes(cmds) if isinstance(i, SetSetpoint)]
+    assert room_writes(cmds) == []
+    _, closing = logic.handle(WindowChanged(open=False), OPEN_AT, st)
+    assert (A, SetHvacMode("heat")) in room_writes(closing)
+    assert (A, SetSetpoint(21.0)) in room_writes(closing)
+
+
+def test_start_held_heat_room_turns_a_heating_thermostat_off_once() -> None:
+    reported = {A: (18.0, "off"), B: (18.0, "heat")}
+    _, _, cmds = started_in_hold(
+        RestoreRoom(21.0, RoomMode.HEAT, None), reported, window_open=True
+    )
+
+    assert room_writes(cmds) == [(B, SetHvacMode("off"))]
+
+
+def test_start_held_without_a_restore_and_all_off_writes_nothing() -> None:
+    reported = {A: (18.0, "off"), B: (18.0, "off")}
+    _, st, cmds = started_in_hold(None, reported, window_open=True)
+
+    assert st.window_open is True
+    assert room_writes(cmds) == []
+
+
+def test_start_held_without_a_restore_turns_heating_thermostats_off() -> None:
+    reported = {A: (19.0, "heat"), B: (19.0, "heat")}
+    _, st, cmds = started_in_hold(None, reported, window_open=True)
+
+    assert st.setpoint == 19.0
+    assert room_writes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+
+
+def test_start_held_with_thermostats_on_their_schedule_leaves_them_alone() -> None:
+    reported: dict = {A: (19.0, None), B: (19.0, None)}
+    _, _, cmds = started_in_hold(None, reported, window_open=True)
+
+    assert room_writes(cmds) == []
 
 
 def test_start_with_a_warm_outdoor_holds() -> None:
-    st, cmds = room().handle(
-        Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE, outdoor=20.0),
-        T0,
-        RoomState.initial(HOLD_CFG),
-    )
+    reported = {A: (19.0, "heat"), B: (19.0, "heat")}
+    _, st, cmds = started_in_hold(None, reported, outdoor=20.0)
 
     assert st.outdoor_hold is True
-    assert (A, SetHvacMode("off")) in executes(cmds)
+    assert (A, SetHvacMode("off")) in room_writes(cmds)
 
 
 # --- Window: enter and leave ---------------------------------------------

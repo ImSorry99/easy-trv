@@ -295,8 +295,10 @@ def reconcile_start(
     reported_modes = [m for m in modes if m is not None]
     if reported_modes and all(m == "off" for m in reported_modes):
         state = replace(state, mode=RoomMode.OFF)
+    # A held room still brings heating thermostats to off.
+    with_mode = holding(state)
     if first is None:
-        return state, []
+        return _sync_differing(cfg, state, now, capability_of, with_mode=with_mode)
     adopted = state.trvs[first].reported_setpoint
     if adopted is None:  # pragma: no cover - ``first`` has a setpoint
         return state, []
@@ -305,7 +307,7 @@ def reconcile_start(
         setpoint=clamp(adopted, cfg.setpoint_range),
         setpoint_source="initial",
     )
-    return _sync_differing(cfg, state, now, capability_of, with_mode=False)
+    return _sync_differing(cfg, state, now, capability_of, with_mode=with_mode)
 
 
 # --- Helpers -------------------------------------------------------------
@@ -374,14 +376,14 @@ def _sync_differing(
     A thermostat that runs its schedule or shows its window phase is left alone.
     """
     writes: list[tuple[str, Intent]] = []
-    mode: SetHvacMode = SetHvacMode("off" if state.mode is RoomMode.OFF else "heat")
+    # What the thermostats should show now: off when the room is off or held.
+    mode: SetHvacMode = SetHvacMode("off" if suspended(state) else "heat")
     for trv in writable(cfg, state):
         known = state.trvs[trv]
         if device_driven(known):
             continue
         if (
             with_mode
-            and not holding(state)
             and known.reported_mode is not None
             and known.reported_mode != mode.mode
         ):
