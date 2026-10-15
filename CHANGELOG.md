@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-15
+
 ### Added
 
 - Sensor **Heating state** per room (`sensor.<room>_heating_state`): one of eleven states (`fault`, `off_manual`, `off_window`, `off_outdoor`, `off_away`, `window_pending`, `emergency`, `restricted`, `boost`, `frost`, `heating`) with the attributes `reasons`, `since`, `window_off_at`, `thermostats` and `silent_contacts`; `off_away` and `boost` are reserved and do not occur yet
@@ -106,7 +108,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ImSorry99/easy-trv/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/ImSorry99/easy-trv/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ImSorry99/easy-trv/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ImSorry99/easy-trv/compare/v0.2.0...v0.3.0
