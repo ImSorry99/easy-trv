@@ -235,7 +235,7 @@
     },
     "window_contact_unavailable": {
       "title": "Fensterkontakt im Raum {room} nicht erreichbar",
-      "description": "Seit mindestens 10 Minuten meldet im Raum {room} ein Fensterkontakt keinen Zustand. Gerade ohne Meldung: {contacts}. Easy TRV behandelt einen solchen Kontakt so, wie er zuletzt war, ein nie gesehener Kontakt gilt als geschlossen. Ein offenes Fenster schaltet die Heizung deshalb gerade nicht ab. Prüfe Batterie und Funkverbindung."
+      "description": "Seit mindestens 10 Minuten meldet im Raum {room} ein Fensterkontakt keinen Zustand. Gerade ohne Meldung: {contacts}. Easy TRV behandelt einen solchen Kontakt so, wie er zuletzt war: Ein zuletzt geschlossener oder nie gesehener Kontakt gilt als geschlossen, ein Öffnen schaltet die Heizung dann nicht ab. Ein zuletzt offener Kontakt hält die Heizung aus, bis er sich wieder meldet. Prüfe Batterie und Funkverbindung."
     },
     "schedule_thermostat_off": {
       "title": "{thermostat} in {room} bleibt nach dem Lüften aus",

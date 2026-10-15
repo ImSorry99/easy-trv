@@ -235,7 +235,7 @@
     },
     "window_contact_unavailable": {
       "title": "Window contact in {room} is not reachable",
-      "description": "For at least 10 minutes a window contact in {room} has not reported a state. Currently silent: {contacts}. Easy TRV treats such a contact as it was last, and one never seen counts as closed, so an open window does not switch the heating off right now. Check the contact's battery and radio connection."
+      "description": "For at least 10 minutes a window contact in {room} has not reported a state. Currently silent: {contacts}. Easy TRV treats such a contact as it was last: one last seen closed, or never seen, counts as closed, so opening that window does not switch the heating off. One last seen open keeps the heating off until it reports again. Check the contact's battery and radio connection."
     },
     "schedule_thermostat_off": {
       "title": "{thermostat} in {room} stays off after the window was closed",

@@ -355,18 +355,20 @@ def test_the_silent_contact_issue_says_what_stays_as_it_is() -> None:
     assert de["description"] == (
         "Seit mindestens 10 Minuten meldet im Raum {room} ein Fensterkontakt "
         "keinen Zustand. Gerade ohne Meldung: {contacts}. Easy TRV behandelt "
-        "einen solchen Kontakt so, wie er zuletzt war, ein nie gesehener Kontakt "
-        "gilt als geschlossen. Ein offenes Fenster schaltet die Heizung deshalb "
-        "gerade nicht ab. Prüfe Batterie und Funkverbindung."
+        "einen solchen Kontakt so, wie er zuletzt war: Ein zuletzt geschlossener "
+        "oder nie gesehener Kontakt gilt als geschlossen, ein Öffnen schaltet die "
+        "Heizung dann nicht ab. Ein zuletzt offener Kontakt hält die Heizung aus, "
+        "bis er sich wieder meldet. Prüfe Batterie und Funkverbindung."
     )
     en = load(EN)["issues"]["window_contact_unavailable"]
     assert en["title"] == "Window contact in {room} is not reachable"
     assert en["description"] == (
         "For at least 10 minutes a window contact in {room} has not reported a "
         "state. Currently silent: {contacts}. Easy TRV treats such a contact as "
-        "it was last, and one never seen counts as closed, so an open window "
-        "does not switch the heating off right now. Check the contact's battery "
-        "and radio connection."
+        "it was last: one last seen closed, or never seen, counts as closed, so "
+        "opening that window does not switch the heating off. One last seen open "
+        "keeps the heating off until it reports again. Check the contact's "
+        "battery and radio connection."
     )
 
 
