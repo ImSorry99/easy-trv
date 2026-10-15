@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-15
+
 ### Added
 
 - Diagnostic statistics sensors per room, recorded as long-term statistics: **Control deviation** (`sensor.<room>_deviation`, K: the active sensor minus the target while the room's mode is heat and no hold is active) and **Heating time** (`sensor.<room>_heating_time`, h: while at least one thermostat reports `hvac_action: heating`; unavailable until one has reported an `hvac_action`). Rooms with window contacts also get **Window openings** (`sensor.<room>_window_openings`, counted when the contacts go from all closed to any open, before the opening delay) and **Window open time** (`sensor.<room>_window_open_time`, h)
@@ -131,7 +133,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/ImSorry99/easy-trv/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/ImSorry99/easy-trv/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ImSorry99/easy-trv/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/ImSorry99/easy-trv/compare/v0.4.0...v0.4.1
