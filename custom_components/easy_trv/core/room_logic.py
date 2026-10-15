@@ -65,7 +65,7 @@ from custom_components.easy_trv.core.model import (
     Unsupported,
     WindowChanged,
 )
-from custom_components.easy_trv.core.room_state import failsafe_recent
+from custom_components.easy_trv.core.room_state import failsafe_recent, internal_source
 from custom_components.easy_trv.core.values import is_in_range, round_tenth
 
 if TYPE_CHECKING:
@@ -1099,7 +1099,7 @@ class RoomLogic:
         if TrvHealth.ERROR in healths:
             status = RoomStatus.ERROR
         elif (
-            (bool(self._cfg.temp_sensors) and state.source is not Source.EXTERNAL)
+            internal_source(state, self._cfg)
             or TrvHealth.UNAVAILABLE in healths
             or TrvHealth.UNSUPPORTED in healths
             or failsafe_recent(state, now, self._params.refresh)

@@ -17,6 +17,7 @@ from custom_components.easy_trv.core.room_state import (
     StateFacts,
     failsafe_recent,
     heating_state,
+    internal_source,
     state_facts,
     thermostat_deviations,
 )
@@ -49,6 +50,7 @@ def facts(**overrides: object) -> StateFacts:
         "internal_source": False,
         "failsafe_recent": False,
         "deviations": {},
+        "thermostat_restricted": False,
         "silent_contacts": frozenset(),
     }
     return StateFacts(**{**base, **overrides})  # type: ignore[arg-type]
@@ -57,6 +59,18 @@ def facts(**overrides: object) -> StateFacts:
 def with_trv(st: RoomState, entity_id: str, **changes: object) -> RoomState:
     trvs = {**st.trvs, entity_id: replace(st.trvs[entity_id], **changes)}
     return replace(st, trvs=trvs)
+
+
+def room_facts(st: RoomState) -> StateFacts:
+    """The facts of a room in ``st`` with the default config and nothing outside."""
+    return state_facts(
+        replace(st, source=Source.EXTERNAL),
+        CFG,
+        NOW,
+        REFRESH,
+        window_pending=False,
+        silent_contacts=frozenset(),
+    )
 
 
 def test_plain_heating() -> None:
@@ -132,13 +146,60 @@ def test_emergency_from_failsafe() -> None:
     assert reasons == (HeatingState.EMERGENCY, HeatingState.HEATING)
 
 
-@pytest.mark.parametrize(
-    "reason", ["unavailable", "unsupported", "schedule", "window_phase"]
-)
-def test_restricted_from_each_deviation(reason: str) -> None:
-    state, reasons = heating_state(facts(deviations={"climate.a": reason}))
+def test_restricted_from_thermostat() -> None:
+    state, reasons = heating_state(
+        facts(deviations={"climate.a": "schedule"}, thermostat_restricted=True)
+    )
     assert state is HeatingState.RESTRICTED
     assert reasons == (HeatingState.RESTRICTED, HeatingState.HEATING)
+
+
+@pytest.mark.parametrize(
+    ("health", "note"),
+    [
+        (TrvHealth.UNAVAILABLE, None),
+        (TrvHealth.UNSUPPORTED, None),
+        (TrvHealth.OK, Note.SCHEDULE),
+        (TrvHealth.OK, Note.WINDOW_PHASE),
+    ],
+)
+def test_restricted_from_each_deviation(health: TrvHealth, note: Note | None) -> None:
+    st = with_trv(RoomState.initial(CFG), "climate.a", health=health, note=note)
+    assert heating_state(room_facts(st)) == (
+        HeatingState.RESTRICTED,
+        (HeatingState.RESTRICTED, HeatingState.HEATING),
+    )
+
+
+@pytest.mark.parametrize("note", [Note.SCHEDULE, Note.WINDOW_PHASE])
+def test_fault_and_note_both_in_reasons(note: Note) -> None:
+    st = with_trv(
+        RoomState.initial(CFG), "climate.a", health=TrvHealth.ERROR, note=note
+    )
+    assert heating_state(room_facts(st)) == (
+        HeatingState.FAULT,
+        (HeatingState.FAULT, HeatingState.RESTRICTED, HeatingState.HEATING),
+    )
+
+
+def test_fault_and_schedule_note_both_in_reasons() -> None:
+    st = RoomState.initial(CFG)
+    st = with_trv(st, "climate.a", health=TrvHealth.ERROR, note=Note.SCHEDULE)
+    st = with_trv(st, "climate.b", health=TrvHealth.OK)
+    facts_ = room_facts(st)
+    assert facts_.deviations == {"climate.a": "error"}
+    assert heating_state(facts_) == (
+        HeatingState.FAULT,
+        (HeatingState.FAULT, HeatingState.RESTRICTED, HeatingState.HEATING),
+    )
+
+
+def test_fault_alone_does_not_restrict() -> None:
+    st = with_trv(RoomState.initial(CFG), "climate.a", health=TrvHealth.ERROR)
+    assert heating_state(room_facts(st)) == (
+        HeatingState.FAULT,
+        (HeatingState.FAULT, HeatingState.HEATING),
+    )
 
 
 def test_restricted_from_silent_contact() -> None:
@@ -166,6 +227,7 @@ def test_placeholders_never_hold() -> None:
         facts(window_pending=True, internal_source=True, failsafe_recent=True),
         facts(
             deviations={"climate.a": "error", "climate.b": "schedule"},
+            thermostat_restricted=True,
             silent_contacts=frozenset({"binary_sensor.w"}),
         ),
     ]
@@ -236,6 +298,14 @@ def test_state_facts_internal_source() -> None:
     ).internal_source
 
 
+def test_internal_source_helper() -> None:
+    st = RoomState.initial(CFG)
+    assert internal_source(replace(st, source=Source.INTERNAL), CFG)
+    assert internal_source(replace(st, source=Source.NONE), CFG)
+    assert not internal_source(replace(st, source=Source.EXTERNAL), CFG)
+    assert not internal_source(replace(st, source=Source.INTERNAL), NO_SENSORS)
+
+
 def test_state_facts_collects_the_room() -> None:
     st = replace(
         RoomState.initial(CFG),
@@ -255,6 +325,7 @@ def test_state_facts_collects_the_room() -> None:
         internal_source=False,
         failsafe_recent=False,
         deviations={"climate.b": "schedule"},
+        thermostat_restricted=True,
         silent_contacts=silent,
     )
 

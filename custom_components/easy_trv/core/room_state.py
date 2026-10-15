@@ -53,6 +53,9 @@ class StateFacts:
     failsafe_recent: bool
     # Thermostat climate entity -> why it deviates (see ``thermostat_deviations``).
     deviations: Mapping[str, str]
+    # A thermostat is unavailable, unsupported or carries a note, whatever else
+    # ails it (``deviations`` keeps only the first reason, for display).
+    thermostat_restricted: bool
     silent_contacts: frozenset[str]
 
 
@@ -61,6 +64,18 @@ def failsafe_recent(state: RoomState, now: datetime, refresh: timedelta) -> bool
     return any(
         trv.failsafe_seen_at is not None and now - trv.failsafe_seen_at <= refresh
         for trv in state.trvs.values()
+    )
+
+
+def internal_source(state: RoomState, config: RoomConfig) -> bool:
+    """Return whether the room has temperature sensors but regulates internally."""
+    return bool(config.temp_sensors) and state.source is not Source.EXTERNAL
+
+
+def _restricts(trv: TrvState) -> bool:
+    """Return whether the thermostat is unavailable, unsupported or carries a note."""
+    return trv.health in {TrvHealth.UNAVAILABLE, TrvHealth.UNSUPPORTED} or (
+        trv.note in {Note.SCHEDULE, Note.WINDOW_PHASE}
     )
 
 
@@ -104,10 +119,10 @@ def state_facts(  # noqa: PLR0913 - the room, its config, the clock and the two 
         window_hold=state.window_open,
         outdoor_hold=state.outdoor_hold,
         window_pending=window_pending,
-        internal_source=bool(config.temp_sensors)
-        and state.source is not Source.EXTERNAL,
+        internal_source=internal_source(state, config),
         failsafe_recent=failsafe_recent(state, now, refresh),
         deviations=thermostat_deviations(state),
+        thermostat_restricted=any(_restricts(trv) for trv in state.trvs.values()),
         silent_contacts=silent_contacts,
     )
 
@@ -119,16 +134,15 @@ def heating_state(facts: StateFacts) -> tuple[HeatingState, tuple[HeatingState, 
     list is never empty. ``OFF_AWAY`` and ``BOOST`` are placeholders that never
     hold yet.
     """
-    deviating = set(facts.deviations.values())
     holds = {
-        HeatingState.FAULT: "error" in deviating,
+        HeatingState.FAULT: "error" in facts.deviations.values(),
         HeatingState.OFF_MANUAL: facts.operation is OperatingMode.OFF,
         HeatingState.OFF_WINDOW: facts.window_hold,
         HeatingState.OFF_OUTDOOR: facts.outdoor_hold,
         HeatingState.OFF_AWAY: False,
         HeatingState.WINDOW_PENDING: facts.window_pending,
         HeatingState.EMERGENCY: facts.internal_source or facts.failsafe_recent,
-        HeatingState.RESTRICTED: bool(deviating - {"error"})
+        HeatingState.RESTRICTED: facts.thermostat_restricted
         or bool(facts.silent_contacts),
         HeatingState.BOOST: False,
         HeatingState.FROST: facts.operation is OperatingMode.FROST,
