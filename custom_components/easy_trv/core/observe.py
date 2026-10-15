@@ -274,7 +274,10 @@ def _observe_setpoint(  # noqa: PLR0913
     if leaving_window:
         known = replace(known, note=None, note_since=None)
     if echo:
-        return _store(state, trv, known), []
+        state = _store(state, trv, known)
+        if leaving_window:
+            return _leave_window_phase(cfg, state, now, trv, value, capability_of)
+        return state, []
     wants_window_value = state.setpoint is not None and (
         abs(state.setpoint - WINDOW_PHASE_SETPOINT) <= SAME
     )

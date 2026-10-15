@@ -10,6 +10,7 @@ from custom_components.easy_trv.core.model import (
     Ok,
     Preset,
     RaiseIssue,
+    RestoreRoom,
     RoomMode,
     RoomParams,
     RoomState,
@@ -740,3 +741,65 @@ def test_what_the_thermostats_reported_at_start_is_the_known_value() -> None:
     assert of_type(cmds, ScheduleKnobSettle) == []
     _, cmds = logic().handle(reported(A, 20.0), AFTER, st)
     assert of_type(cmds, ScheduleKnobSettle)
+
+
+# --- fix round 2 ---------------------------------------------------------
+
+
+def test_a_newer_ha_setpoint_drops_a_pending_knob_value() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 22.0), AFTER, st)
+    assert st.trvs[A].knob_pending == {"setpoint": 22.0}
+    st, cmds = logic().handle(SetRoomSetpoint(24.0), AFTER + timedelta(seconds=1), st)
+    assert executes(cmds) == [(A, SetSetpoint(24.0)), (B, SetSetpoint(24.0))]
+    assert st.trvs[A].knob_pending == {}
+    st, _ = logic().handle(reported(A, 24.0), AFTER + timedelta(seconds=2), st)
+    st, cmds = settle(st, at=SETTLED)
+    assert st.setpoint == 24.0
+    assert st.setpoint_source == "ha"
+    assert executes(cmds) == []
+    assert adopted_events(cmds) == []
+
+
+def test_a_newer_ha_preset_or_restore_drops_a_pending_knob_value() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 22.0), AFTER, st)
+    frost, _ = logic().handle(SetRoomPreset(Preset.FROST), AFTER, st)
+    assert frost.trvs[A].knob_pending == {}
+    restored, _ = logic().handle(
+        RestoreRoom(20.0, RoomMode.HEAT, Preset.NONE), AFTER, st
+    )
+    assert restored.trvs[A].knob_pending == {}
+
+
+def test_a_newer_ha_mode_drops_a_pending_knob_mode() -> None:
+    st = with_trv(started_with_setpoint(21.0), A, reported_mode="heat")
+    st, _ = logic().handle(reported_mode(A, "off"), AFTER, st)
+    assert st.trvs[A].knob_pending == {"hvac_mode": "off"}
+    st, _ = logic().handle(SetRoomMode(RoomMode.HEAT), AFTER, st)
+    assert st.trvs[A].knob_pending == {}
+    st, cmds = settle(st, capability="hvac_mode", at=SETTLED)
+    assert st.mode is RoomMode.HEAT
+    assert executes(cmds) == []
+    assert adopted_events(cmds) == []
+
+
+def test_an_adoption_keeps_the_pending_knob_value_of_another_thermostat() -> None:
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 22.0), AFTER, st)
+    st, _ = logic().handle(reported(B, 23.0), AFTER + timedelta(seconds=1), st)
+    st, _ = settle(st, A, at=AFTER + timedelta(seconds=3))
+    assert st.trvs[B].knob_pending == {"setpoint": 23.0}
+
+
+def test_leaving_the_window_phase_with_an_echo_value_still_writes_the_room_value() -> (
+    None
+):
+    st = started_with_setpoint(21.0)
+    st, _ = logic().handle(reported(A, 12.0), T0 + timedelta(seconds=20), st)
+    st, cmds = logic().handle(SetRoomSetpoint(23.0), T0 + timedelta(seconds=30), st)
+    assert executes(cmds) == [(B, SetSetpoint(23.0))]
+    st, cmds = logic().handle(reported(A, 21.0), T0 + timedelta(seconds=60), st)
+    assert st.trvs[A].note is None
+    assert executes(cmds) == [(A, SetSetpoint(23.0))]
+    assert of_type(cmds, ScheduleKnobSettle) == []

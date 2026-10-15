@@ -73,6 +73,7 @@ def on_set_setpoint(
     """Take a setpoint from Home Assistant and write it to the thermostats."""
     if cfg.setpoint_range is None:
         return state, []
+    state = _forget_knobs(state, capability_of(SetSetpoint(celsius)))
     state = replace(
         state,
         setpoint=clamp(celsius, cfg.setpoint_range),
@@ -99,6 +100,7 @@ def on_set_mode(  # noqa: PLR0913
     """
     if cfg.setpoint_range is None:
         return state, []
+    state = _forget_knobs(state, capability_of(SetHvacMode("heat")))
     state = replace(state, mode=mode)
     if holding(state):
         return state, []
@@ -182,6 +184,7 @@ def on_set_preset(
     """Switch the frost preset on (remembering the setpoint) or off (restoring it)."""
     if cfg.setpoint_range is None or preset is state.preset:
         return state, []
+    state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
     if preset is Preset.FROST:
         state = replace(
             state,
@@ -219,6 +222,8 @@ def on_restore(  # noqa: PLR0913
     """
     if cfg.setpoint_range is None:
         return state, []
+    state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
+    state = _forget_knobs(state, capability_of(SetHvacMode("heat")))
     if restore.setpoint is not None:
         state = replace(
             state,
@@ -300,6 +305,24 @@ def reconcile_start(
 
 
 # --- Helpers -------------------------------------------------------------
+
+
+def _forget_knobs(state: RoomState, capability: str) -> RoomState:
+    """Drop the knob values still waiting for their debounce.
+
+    The room itself just set that capability (Home Assistant or a restore); a
+    turn made before it must not overwrite it when its debounce elapses.
+    """
+    trvs = {
+        trv: replace(
+            known,
+            knob_pending={
+                k: v for k, v in known.knob_pending.items() if k != capability
+            },
+        )
+        for trv, known in state.trvs.items()
+    }
+    return replace(state, trvs=trvs)
 
 
 def on_schedule(known: TrvState) -> bool:
