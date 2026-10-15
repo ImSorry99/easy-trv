@@ -1,6 +1,6 @@
 # Testing on real thermostats
 
-A manual checklist for the first run on real hardware: the owner's four Sonoff TRVZB, three in the living room ("Wohnzimmer") and one in the bedroom ("Schlafzimmer"). It also holds the spikes S1 to S4 from [`profiles/sonoff-trvzb-native.md`](profiles/sonoff-trvzb-native.md) plus S10 for the adaptive mode, which the automated tests cannot answer. Work through it top to bottom and write down what you see; the table at the end collects the results.
+A manual checklist for the first run on real hardware: the owner's four Sonoff TRVZB, three in the living room ("Wohnzimmer") and one in the bedroom ("Schlafzimmer"). It also holds the spikes S1 to S4 from [`profiles/sonoff-trvzb-native.md`](profiles/sonoff-trvzb-native.md) plus S5, S8, S9 and S10 from the Phase 2 design (`specs/2026-10-14-easy-trv-phase2-design.md`, section 10), which the automated tests cannot answer. Work through it top to bottom and write down what you see; the table at the end collects the results.
 
 ## What you need
 
@@ -114,7 +114,71 @@ Set the refresh interval back to 20 afterwards (empty field = built-in default).
 - **Thermostat gone.** Take the batteries out of one thermostat. Writes only happen when there is something to write, so trigger one: change the room sensor by 0.1 K or more (warm it with your hand), or wait for the next refresh (default 20 minutes; set the refresh interval to 5 for this check). Expected: while ZHA still shows the thermostat as available, the write fails (`failed: ...` or `mismatch ...` lines in the debug log) and after three attempts Repairs shows `trv_unreachable` (the message names the setting, for example "room temperature", and the thermostat by its device name, not its entity id), the event `easy_trv_write_failed` fires and the Status is `error`. Once ZHA marks it unavailable it is skipped and the Status is `degraded`. Put the batteries back: as soon as the room temperature, the write that failed, is verified, the issue clears and `easy_trv_recovered` fires.
 - **Invalid profile.** Put a broken YAML file into `<config>/easy_trv/profiles/` and reload the integration. Expected: Repairs shows `profile_invalid` naming the file, and the rooms keep working. Remove the file and reload; the issue goes away.
 
-## 6. Spikes
+## 6. Room thermostat, knob and holds
+
+Needs sections 2 and 3 done: Wohnzimmer (three thermostats) and Schlafzimmer run, Status `ok`. Hide the ZHA climate entities of the single thermostats in the dashboard only after this section; the checks below also read them. Raw values: setpoint `0x0012` and system mode `0x001C` on cluster `0x0201` (endpoint 1), read in ZHA like in section 3 (setpoint in hundredths of a degree; system mode `0` off, `4` heat, `1` auto).
+
+### 6.1 The climate entity
+
+1. Expected: `climate.wohnzimmer_heating` and `climate.schlafzimmer_heating` exist on the room devices, modes heat and off, presets none and frost. Attributes: `setpoint_source`, `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff`, `note`; no `hvac_action`.
+2. Set the target to 21.5 °C. Expected: after the verify delay all three living-room thermostats read `0x0012 = 2150`, `in_sync` is true again, `setpoint_source` is `ha`, the debug log shows one setpoint write per thermostat and `-> ok`.
+3. Try 3 °C and 36 °C in the more-info dialog or `climate.set_temperature`. Expected: the slider stops at 5 and 30 (the room's range); Home Assistant rejects a service call outside the range.
+4. Preset **frost**. Expected: target 5 °C (the frost temperature), `setpoint_source` `frost`. Preset **none**: back to 21.5 °C. Repeat with frost on, then restart Home Assistant: the room comes back in frost and **none** still returns to 21.5 °C.
+5. Mode **off**. Expected: all three read `0x001C = 0`, no `0x600D` line appears in the debug log while off (for S1). Mode **heat**: `0x001C = 4`, source, room temperature and target (`0x0012 = 2150`) follow.
+6. Restart Home Assistant with the room at 22 °C: expected the room returns at 22 °C and heat, and no setpoint or mode write is sent unless a thermostat reported something else.
+7. Put one thermostat into its schedule (`auto`, `0x001C = 1`, in ZHA or on the device). Expected after its report: `note` is `schedule`, the room Status sensor lists it under `schedule_thermostats`, `in_sync` false, and a target change in HA does not touch that thermostat (the others get it). Set it back to heat: it is brought up to the room's target.
+
+### 6.2 Knob adoption across three thermostats
+
+1. Turn the knob of living-room thermostat A from 21.5 to 22.5 in 0.5 K steps. Expected: about 3 seconds after the last step the room target is 22.5 (`setpoint_source` `device:climate.<A>`), B and C read `0x0012 = 2250`, the event `easy_trv_setpoint_adopted` fires. Note how many steps arrived as reports (see S8).
+2. Turn B and then, within a few seconds, C to different values. Expected: the last turn wins and all three end on that value.
+3. Turn a knob below the minimum or above the maximum. Expected: the value is clamped and written back to that thermostat too.
+4. Mode **off** in HA, then turn a knob on A. Expected: the room goes to heat at the new target, all three follow. Then turn a knob and switch the room off in HA within 3 seconds: the room stays off, the turn is not adopted.
+5. Switch a thermostat off at the device itself (long press or the display, if the model allows it): expected the room goes off (`setpoint_source` `device:...`) and the other two are switched off.
+
+### 6.3 Window contact
+
+Use a real contact, or a test contact (a helper `input_boolean.easy_trv_test_window` and in `configuration.yaml`):
+
+```yaml
+template:
+  - binary_sensor:
+      - name: "Easy TRV test window"
+        device_class: window
+        state: "{{ is_state('input_boolean.easy_trv_test_window', 'on') }}"
+```
+
+Add it to Wohnzimmer (**Edit room**, window contacts; try a contact from a different area). Warm sensor, target 22 °C.
+
+1. Open the window. Expected: `window_open` true, the event `easy_trv_window_hold`, all three thermostats `0x001C = 0` within the verify delay, the climate entity keeps showing heat and 22 °C, no `0x600D` or `0x0012` line in the debug log meanwhile.
+2. During the hold change the target in HA to 20 °C. Expected: nothing is written to the thermostats. Close the window: they read heat and `0x0012 = 2000`.
+3. Open it again and let the check run. Set **Window contact check** to 5 minutes and **Window open warning** to 10 minutes in the room (reset afterwards). Expected: at 5 minutes with no drop of 0.3 K, Repairs shows `window_contact_suspect`; at 10 minutes `window_open_long`; both disappear on closing. If the room really cools by 0.3 K, no suspect issue appears; note which case happened.
+4. Open the window and restart Home Assistant. Expected: the room is back in the hold, the thermostats stay off and no heat or target is written while the contact is open. Close it: the room resumes.
+5. Make the contact unavailable (disable the helper entity). Expected: counts as closed, `in_sync` false, a debug line says the contact is counted as closed.
+6. Optional (the trade-off): open the window, stop Home Assistant for a few minutes, start it. Note what the thermostats showed meanwhile (off with frost protection) and that the room returns correctly.
+
+### 6.4 Outdoor cut-off via a template sensor
+
+Create the helper `input_number.easy_trv_test_outdoor` (-10 to 30, step 0.5) and:
+
+```yaml
+template:
+  - sensor:
+      - name: "Easy TRV test outdoor"
+        device_class: temperature
+        unit_of_measurement: "°C"
+        state: "{{ states('input_number.easy_trv_test_outdoor') | float(0) }}"
+```
+
+In the Easy TRV options choose it as **Outdoor temperature sensor** and set the cut-off to 15 °C (Wohnzimmer follows Global; Schlafzimmer set to **Off**).
+
+1. Set the helper to 14.5: nothing happens. 15: Wohnzimmer goes off (`outdoor_cutoff` true, the event `easy_trv_outdoor_hold`, `0x001C = 0`); Schlafzimmer stays on.
+2. Back to 14.5: still off (deadband). 14.4: the room is back on with its target.
+3. During the cut-off turn a knob: expected only the target changes (`setpoint_source` `device:...`), the room stays off until the cut-off ends.
+4. Open the window during the cut-off and end the cut-off: the room stays off until the window is closed, and vice versa.
+5. Cut-off on, then make the template sensor unavailable (disable its entity): the room goes back on and the log has a warning.
+
+## 7. Spikes
 
 Each spike answers one question that decides whether a requirement holds. Keep the Easy TRV debug log on (section 1) and note timestamps; the `attr 0x...` lines show every write and its result.
 
@@ -126,6 +190,7 @@ Why: requirement T6 keeps writing regardless of the thermostat's HVAC mode.
 2. Trigger writes: reload the integration (settings, source and value are written), then change the active sensor's value by 0.1 K or more (value only).
 3. Wait at least 5 minutes after each (the thermostat polls infrequently). Watch `hvac_mode` and `hvac_action`, the display on the device, and the system mode in ZHA.
 4. Record for each trigger: stayed `off` or switched on, and after how long. Set the thermostat back to its normal mode.
+5. Result use: the design keeps the room from sending any `0x600D` write while it is off (see 6.1 step 5); if a write does wake an `off` thermostat, that rule is confirmed, if not, it is only a simplification.
 
 ### S2: Does the thermostat report `0x600E = 2`, or only answer reads?
 
@@ -155,6 +220,29 @@ Why: verification compares exact integers.
 4. Record whether each read returns exactly the written value, and `climate.current_temperature` after each (21.4 for 2135 or 2140?).
 5. Enable the entry again and confirm that its first value write verifies (Status `ok`, no `easy_trv_write_failed`).
 
+### S5: Does the thermostat report `0x0012 = 1200` during its open-window phase?
+
+Why: the room treats a thermostat that shows exactly 12 °C as being in its own window phase and leaves it alone for up to 30 minutes. If the device never reports that value, the branch is dead code and will be removed.
+
+1. Use S3 (window detection on, external source active, a clearly colder outside). Make the room target something other than 12 °C (for example 21 °C).
+2. Open the window next to a thermostat until it reacts (valve closes, display shows the window symbol). Read the setpoint `0x0012` in ZHA and watch the debug log and the climate entity's `note`.
+3. Record: does `0x0012` read 1200 (and is it reported without you reading it)? Does `note` become `window_phase`? Does the room write the target meanwhile (it should not)? When the window is closed, how does the setpoint come back (the thermostat's own, or Easy TRV's write after the phase ended or after 30 minutes)?
+
+### S8: Does every knob step arrive as a report?
+
+Why: the room waits 3 seconds after the last report of a knob turn before it adopts the value. That assumes every step is reported; with ZHA's minimum reporting interval of 30 seconds only some might be.
+
+1. Debug logging for Easy TRV on. Turn the knob of a thermostat by 0.5 K per step, 4 steps, one step per second; wait 10 seconds. Repeat with 4 steps, 5 seconds apart.
+2. Record per run: the setpoint reports that reached the diagnostics (Download diagnostics > room > observations: kind, raw, time), how many arrived and how long after the last turn the room target changed. If steps arrive late or are missing, note the delay between knob and report.
+
+### S9: Does a setpoint write while `system_mode = auto` switch the thermostat to heat?
+
+Why: the room never writes into a thermostat on its schedule, so this only matters for what happens if a person writes to it from elsewhere. It checks the assumption behind the exclusion rule.
+
+1. Put one thermostat into `auto` (`0x001C = 1`). Confirm the room shows `note: schedule` and does not write to it.
+2. Write a setpoint to it by hand from ZHA (cluster `0x0201`, attribute `0x0012`, for example 2000) or with the ZHA climate entity.
+3. Record: does `0x001C` stay `1` or change to `4`? Does the thermostat adopt the setpoint? What does the Easy TRV room do (note, adoption, writes)? Put the thermostat back to heat.
+
 ### S10: Adaptive mode with the external sensor
 
 Why: with the adaptive mode on, the thermostat ignores the hysteresis and adapts to the room itself. Whether that works well with a value fed from an external sensor is not known.
@@ -165,18 +253,18 @@ Why: with the adaptive mode on, the thermostat ignores the hysteresis and adapts
 4. Note the valve behaviour (audible motor, display, `hvac_action` if it is correct at all) and any swing: does the temperature oscillate, and with what period and amplitude?
 5. If it swings or misses ±0.5 K, repeat with "Adaptive off" and a hysteresis of 0.4 K for comparison (hardware check above, step 3) and note the difference.
 
-## 7. Where to look
+## 8. Where to look
 
 | What | Where |
 |---|---|
 | Room status and per-thermostat health | Easy TRV page > room device > Status sensor and its attributes |
-| Issues | **Settings > System > Repairs** (`trv_unreachable`, `trv_firmware`, `settings_migrated`, `zha_api_incompatible`, `profile_invalid`, `room_invalid`) |
-| Events | **Developer tools > Events** > listen to `easy_trv_write_failed`, `easy_trv_recovered` or `easy_trv_failsafe_detected` (one event name at a time) |
+| Issues | **Settings > System > Repairs** (`trv_unreachable`, `trv_firmware`, `settings_migrated`, `window_open_long`, `window_contact_suspect`, `zha_api_incompatible`, `profile_invalid`, `room_invalid`) |
+| Events | **Developer tools > Events** > listen to `easy_trv_write_failed`, `easy_trv_recovered`, `easy_trv_failsafe_detected`, `easy_trv_setpoint_adopted`, `easy_trv_window_hold` or `easy_trv_outdoor_hold` (one event name at a time) |
 | Log | **Settings > System > Logs**, or the downloaded debug log; search for `easy_trv` |
-| Full state | Easy TRV page > three dots > **Download diagnostics** |
+| Full state | Easy TRV page > three dots > **Download diagnostics** (including holds and the latest observations per thermostat) |
 | Raw device values | ZHA device page > Manage Zigbee device > Clusters (section 3) |
 
-## 8. Reporting results
+## 9. Reporting results
 
 Open an issue at <https://github.com/ImSorry99/easy-trv/issues> or add the table below to your notes. Attach:
 
@@ -198,8 +286,16 @@ The diagnostics contain the thermostats' IEEE addresses and entity ids. Remove o
 | Sensor lost / regained | | |
 | Thermostat gone / back, Repairs, events | | |
 | Invalid profile | | |
+| Room thermostat: target, frost preset, off / heat, restart | | |
+| Knob adoption across three thermostats, knob while off | | |
+| Schedule (`auto`) thermostat left alone | | |
+| Window contact: off, restore, long-open and suspect issues, restart | | |
+| Outdoor cut-off with template sensor, deadband | | |
 | S1: off thermostat after reload / after value write | | |
 | S2: unsolicited report of `2` (yes / no, when) | | |
 | S3: window detection with external source | | |
 | S4: exact read-back of 2135 and 2140, endpoint | | |
+| S5: `0x0012 = 1200` during the thermostat's window phase (yes / no) | | |
+| S8: knob steps arriving as reports (steps per run, delay) | | |
+| S9: setpoint write in `auto` switches to heat (yes / no) | | |
 | S10: adaptive mode with the external sensor (±0.5 K over an evening, valve behaviour, swing) | | |

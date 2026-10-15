@@ -113,7 +113,7 @@ One `ClimateEntity` per room, attached to the room device, created only when the
 | `current_temperature` | the value last sent to the thermostats (`state.last_written`), else the active sensor's value, else `None` |
 | `target_temperature` | the room setpoint |
 | `hvac_action` | not provided (TRVZB `running_state` is unreliable, wrong in adaptive mode) |
-| extra attributes | `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost`), `in_sync` (all thermostats verified at the room setpoint and mode), `thermostats` (list), `window_open` (2c), `outdoor_cutoff` (2c), `note` (`None`, `window_phase`, `schedule`) |
+| extra attributes | `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost`, `initial`), `in_sync` (every thermostat verified at what it should show now (off during a hold)), `thermostats` (list), `window_open` (2c), `outdoor_cutoff` (2c), `note` (`None`, `window_phase`, `schedule`) |
 
 The entity is a `RestoreEntity`: setpoint, mode and preset survive restarts.
 

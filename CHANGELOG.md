@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Room thermostat: one `climate` entity per room with heat and off, a frost preset and a setpoint range
+- Knob adoption: a turn at one thermostat becomes the room's target and is spread to the others; thermostats on their own schedule are left alone
+- Window contacts switch the room off while open and restore it when closed, with a long-open warning and a hint for contacts that look stuck
+- Outdoor cut-off switches a room off above a global or per-room outdoor temperature, with a 0.5 K deadband
+- Diagnostics list the holds and the latest observations per thermostat
+
 ## [0.2.0] - 2026-10-14
 
 ### Added
