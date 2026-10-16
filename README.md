@@ -281,9 +281,9 @@ The setting **Collect statistics** decides for each room whether the statistics 
 | Hidden (keeps collecting) / Ausgeblendet (sammelt weiter) | The sensors exist and collect, and the recorder records them, but they are hidden from lists and automatic dashboards. You can still use them by their entity id, in YAML cards, templates and automations. |
 | Visible / Sichtbar | The sensors exist, collect and are shown like any other entity. |
 
-A sensor you show again by hand stays shown while the setting is **hidden**, and one you hid yourself is never changed by Easy TRV, the same as with the [thermostat entities](#settings). Switching from **hidden** to **visible** shows the sensors Easy TRV hid; switching to **off** and later back creates them again, see [Notes](#notes) for what happens to their totals.
+A sensor you show again by hand stays shown while the setting is **hidden**, and one you hid yourself, or that another integration hid (a group with **Hide members**, say), is never changed by Easy TRV, the same as with the [thermostat entities](#settings). Switching from **hidden** to **visible** shows the sensors Easy TRV hid; switching to **off** and later back creates them again, see [Notes](#notes) for what happens to their totals.
 
-**Update note.** Version 0.6.0 created the statistics sensors for every room. The update to 0.6.1 sets **Collect statistics** to **hidden** in the integration options, so the sensors keep collecting and drop out of lists and automatic dashboards; choose **visible** to see them again. A new installation starts with **off**.
+**Update note.** Version 0.6.0 created the statistics sensors for every room. The update from 0.6.0 or older to 0.6.1 sets **Collect statistics** to **hidden** in the integration options, so the sensors of 0.6.0 keep collecting and drop out of lists and automatic dashboards; choose **visible** to see them again. An installation older than 0.6.0 gets the sensors, hidden, for the first time; choose **off** to remove them. A new installation starts with **off**. The update also raises the version of the stored configuration entry, so Easy TRV 0.6.0 can no longer load it: going back to 0.6.0 is not supported and needs a restore of a backup from before the update.
 
 ### Room sensors
 

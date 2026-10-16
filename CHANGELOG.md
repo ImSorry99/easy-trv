@@ -12,7 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- The statistics sensors are off by default for new installations. An update from 0.6.0 sets the setting to **Hidden** in the integration options, so the sensors keep collecting and drop out of lists and automatic dashboards; set it to **Visible** to see them again
+- The statistics sensors are off by default for new installations. An update from 0.6.0 or older sets the setting to **Hidden** in the integration options, so the sensors of 0.6.0 keep collecting and drop out of lists and automatic dashboards (an installation older than 0.6.0 gets them, hidden, for the first time); set it to **Visible** to see them, or to **Off** to remove them
+- The update raises the version of the stored configuration entry to 3. Easy TRV 0.6.0 can no longer load it, so going back to 0.6.0 is not supported and needs a restore of a backup from before the update
 
 ## [0.6.0] - 2026-10-15
 
