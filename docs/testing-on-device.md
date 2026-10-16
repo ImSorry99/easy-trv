@@ -1,6 +1,6 @@
 # Testing on real thermostats
 
-A manual checklist for the first run on real hardware: the owner's four Sonoff TRVZB, three in the living room ("Wohnzimmer") and one in the bedroom ("Schlafzimmer"). It also holds the spikes S1 to S4 from [`profiles/sonoff-trvzb-native.md`](profiles/sonoff-trvzb-native.md) plus S5, S8, S9 and S10 from the Phase 2 design (`specs/2026-10-14-easy-trv-phase2-design.md`, section 10) and S11 from the 0.6 design (`specs/2026-10-15-easy-trv-0.6-statistics-design.md`, section 5), which the automated tests cannot answer. Section 7 checks what 0.5 adds: the heating state sensor, silent window contacts, the area of the room device and hiding the thermostat entities. Section 8 checks the statistics sensors of 0.6. Work through it top to bottom and write down what you see; the table at the end collects the results.
+A manual checklist for the first run on real hardware: the owner's four Sonoff TRVZB, three in the living room ("Wohnzimmer") and one in the bedroom ("Schlafzimmer"). It also holds the spikes S1 to S4 from [`profiles/sonoff-trvzb-native.md`](profiles/sonoff-trvzb-native.md) plus S5, S8, S9 and S10 from the Phase 2 design (`specs/2026-10-14-easy-trv-phase2-design.md`, section 10) and S11 from the 0.6 design (`specs/2026-10-15-easy-trv-0.6-statistics-design.md`, section 5), which the automated tests cannot answer. Section 7 checks what 0.5 adds: the heating state sensor, silent window contacts, the area of the room device and hiding the thermostat entities. Section 8 checks the statistics sensors of 0.6 and the setting of 0.6.1 that switches them off, hides them or shows them. Work through it top to bottom and write down what you see; the table at the end collects the results.
 
 ## What you need
 
@@ -35,7 +35,7 @@ A manual checklist for the first run on real hardware: the owner's four Sonoff T
 
 1. **Add room > From area**, choose "Wohnzimmer". Expected: the next page is prefilled with the three thermostats and the area's temperature and humidity sensors (the thermostats' own readings are not among them). Order the temperature sensors by priority and submit. On the next page, **Room settings**, set **Adaptive mode** to "Adaptive off" and leave everything else on **Global** (open-window detection on, hysteresis 0.4 K, frost protection 7 °C, profile auto). This room checks the hysteresis write (section 3).
 2. **Add room > From area**, choose "Schlafzimmer". One thermostat. Before you submit the first page, add one of the living-room thermostats to the thermostats field. Expected: the form says it already belongs to another room. Remove it again and submit. On **Room settings** leave every field on **Global** (so adaptive mode is on). This room checks the adaptive mode and is the one used for S10.
-3. Expected: two devices, "Heizung Wohnzimmer" and "Heizung Schlafzimmer" (English: "Wohnzimmer heating", "Schlafzimmer heating"), each placed in its area and with the diagnostic sensor "Heating state" ("Heizungszustand"), whose entity id is `sensor.wohnzimmer_heating_state` or `sensor.schlafzimmer_heating_state` (called the Heating state sensor below, section 7), and with the statistics sensors that section 8 checks.
+3. Expected: two devices, "Heizung Wohnzimmer" and "Heizung Schlafzimmer" (English: "Wohnzimmer heating", "Schlafzimmer heating"), each placed in its area and with the diagnostic sensor "Heating state" ("Heizungszustand"), whose entity id is `sensor.wohnzimmer_heating_state` or `sensor.schlafzimmer_heating_state` (called the Heating state sensor below, section 7), and, once **Collect statistics** is on (section 8), with the statistics sensors that section 8 checks.
 4. Open **Configure** on the Easy TRV page. Expected: two sections, "Writes" and "Thermostat settings"; number fields can be left empty, and the description of each says what an empty field means (for the refresh interval: "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Empty = 20 min.").
 
 ## 3. The first writes
@@ -238,6 +238,8 @@ Open the device page of one living-room thermostat and note its entities. Before
 
 Needs sections 2, 3 and 6.3 done: Wohnzimmer (three thermostats, with the test window contact from 6.3) and Schlafzimmer (one thermostat, no contact) run, the Heating state is `heating`. Keep the Easy TRV debug log on. The statistics sensors sit on the room device, in its diagnostic group. For exact values use Developer tools > States (filter for the sensor id); the device page rounds the durations to two decimals. Note the values of a sensor before each check. In the entity ids below `<trv>` is the part of the thermostat's climate entity id after `climate.`.
 
+Since 0.6.1 the statistics sensors exist only where the setting **Collect statistics** asks for them. Do 8.10 first, or at least set it to **Visible** in the integration options (section **Statistics**) before 8.1. On an update from 0.6.0 it is already **Hidden**: the sensors are there, but hidden.
+
 Heating time depends on `hvac_action`, and the TRVZB is known to report it wrongly in adaptive mode (it can say heating with the valve closed). Do S11 (section 9) first, or at least read it before 8.5. Both are run on a thermostat with adaptive mode off (Wohnzimmer) and on one with adaptive mode on (Schlafzimmer).
 
 ### 8.1 The sensors exist
@@ -300,6 +302,17 @@ Heating time counts what the thermostats report, not valve-open time. Steps 1 to
 1. After about an hour, open Developer tools > Statistics. Expected: the statistics sensors are listed and none of them shows an issue.
 2. Add a statistics graph card for `sensor.wohnzimmer_heating_time` with the statistic `change`, period day, as in the README. Expected: a bar for today with the hours the room heated.
 3. Optional: create a Utility meter helper on Heating time with a daily reset. Expected: it starts at zero and grows with the heating time.
+
+### 8.10 The setting Collect statistics (0.6.1)
+
+Do step 1 right after the update, before anything else in section 8. Steps 2 to 6 need the rooms of section 8 and the hiding of section 7.
+
+1. **After the update from 0.6.0.** Open Configure on the integration page and the section **Statistics**. Expected: **Collect statistics** shows "Hidden (keeps collecting)" ("Ausgeblendet (sammelt weiter)"). The statistics sensors of Wohnzimmer and Schlafzimmer still have states, and the totals carry on from where they were. They are hidden: not on the automatic dashboard, and shown only as hidden entities in Settings > Devices & services > Entities. On a fresh install the setting shows "Off" and no statistics sensor exists; only the Heating state.
+2. Set it to **Visible** and save. Expected: the integration reloads, the sensors are shown again (also on the automatic dashboard), the totals carry on. Set it to **Hidden**: they are hidden again and keep counting.
+3. With **Hidden**, show one sensor again by hand (entity settings > Visible) and reload the integration. Expected: it stays shown. Hide another one yourself (it then reads "Hidden by user") and switch **Visible**, **Hidden**, **Visible**. Expected: Easy TRV never changes that one.
+4. Open the room settings of Schlafzimmer and set **Collect statistics** to **Off**. Expected: its Control deviation, Heating time and the three sensors of its thermostat are gone from the Entities list; the Heating state stays; Wohnzimmer is unchanged. Set the room back to **Global**. Expected: the sensors are created again, hidden if the global setting is **Hidden**. Their totals continue from the last values if this happens within 7 days (README, Totals), otherwise they start at zero.
+5. Set the global setting to **Off**, and a room (Wohnzimmer) to **Visible**. Expected: only Wohnzimmer has statistics sensors, shown. Set the room back to **Global** and the global setting to **Hidden** for the next step.
+6. Turn on **Hide thermostat entities** globally as well (section 7). Expected: the thermostat entities and the statistics sensors are hidden. Turn the setting for the thermostat entities off: they are shown again, the statistics stay hidden. Turn it back on and set **Collect statistics** to **Visible**: the statistics are shown, the thermostat entities stay hidden. Turn both off to finish.
 
 ## 9. Spikes
 
@@ -436,6 +449,7 @@ The diagnostics contain the thermostats' IEEE addresses and entity ids. Remove o
 | Statistics: writes and failed writes per attempt, dropouts per available to unavailable (also a ZHA reload) | | |
 | Statistics: window opening counted once and before the delay, open time, heating time with `hvac_action`, control deviation | | |
 | Statistics: totals kept after a restart and a reload, sensors removed with a thermostat or contact, charts | | |
+| Collect statistics: hidden after the update from 0.6.0 and still counting, visible and hidden switching, hand choices kept, room override off removes and restores, together with hiding the thermostat entities | | |
 | S1: off thermostat after reload / after value write | | |
 | S2: unsolicited report of `2` (yes / no, when) | | |
 | S3: window detection with external source | | |

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Setting **Collect statistics** (`statistics`) with the values **Off**, **Hidden (keeps collecting)** and **Visible**, global in the new options section **Statistics** and per room in the room settings. It decides for each room whether the statistics sensors of 0.6.0 exist and whether they are hidden from lists and automatic dashboards. Hidden sensors keep collecting and the recorder records them. **Off** creates none and removes the existing ones of the room, so their data stops. A sensor you show again by hand stays shown, and one you hid yourself is never touched
+
+### Changed
+
+- The statistics sensors are off by default for new installations. An update from 0.6.0 sets the setting to **Hidden** in the integration options, so the sensors keep collecting and drop out of lists and automatic dashboards; set it to **Visible** to see them again
+
 ## [0.6.0] - 2026-10-15
 
 ### Added

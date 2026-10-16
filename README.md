@@ -2,7 +2,7 @@
 
 Easy TRV is a Home Assistant integration that lets Sonoff TRVZB radiator thermostats regulate on the temperature of the room instead of the temperature at the radiator. It groups thermostats and temperature sensors into rooms, writes the room temperature to the thermostats' own external-sensor input, and checks by read-back that every write arrived.
 
-It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one diagnostic sensor for what it is doing and why (Heating state) and one thin room thermostat (`climate`) that sets the same target and mode (off, heat, frost protection) on all its thermostats. Diagnostic [statistics sensors](#statistics) count writes, failed writes, dropouts, window openings and heating time, for later analysis.
+It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one diagnostic sensor for what it is doing and why (Heating state) and one thin room thermostat (`climate`) that sets the same target and mode (off, heat, frost protection) on all its thermostats. Optional diagnostic [statistics sensors](#statistics) (off by default) count writes, failed writes, dropouts, window openings and heating time, for later analysis.
 
 Status: version 0.6.0 is released (room thermostat with frost protection in its mode list, window contacts, outdoor cut-off, one diagnostic heating state sensor per room with a plain-text hint, a report of silent window contacts, endless retries of writes that did not arrive, an area for every room and optional hiding of the thermostat entities, and diagnostic statistics sensors for rooms and thermostats); see the [`CHANGELOG`](CHANGELOG.md) for what each version brought. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
 
@@ -74,6 +74,7 @@ Every setting exists in three layers, and the most specific one that is set wins
 | Cooling expected by the check (K) | 0.1 to 3.0 | 0.3 | How far the room temperature must have fallen by then. |
 | Outdoor cut-off temperature | -10 to 30 °C | empty (off) | The room is switched off from this outdoor temperature on (see [Outdoor cut-off](#outdoor-cut-off)). A room can choose **Global**, **Off** or its own threshold. |
 | Outdoor temperature sensor (global only) | a temperature sensor | none | The sensor the cut-off reads. |
+| Collect statistics | off, hidden, visible | off | Whether the room has the [statistics sensors](#statistics): **off** creates none and removes existing ones, **hidden** creates them and keeps collecting but hides them from lists and automatic dashboards, **visible** shows them. See [Collecting statistics](#collecting-statistics). |
 | Profile (rooms only) | `auto` or a profile id | `auto` | `auto` takes the first profile that matches all thermostats of the room. Or choose a shipped or [user profile](#profiles). The profile is not part of the integration options. |
 
 The thermostat settings (open-window detection, adaptive mode, hysteresis, frost protection temperature) are written once when a room starts, which includes every start after you saved a change. The "leave as set in the thermostat" choices write nothing. Hiding the thermostat entities is the exception among the thermostat settings: nothing is written to the thermostats for it.
@@ -165,7 +166,7 @@ Rooms start once Home Assistant has fully started.
 
 ## What you see
 
-Each room is a device ("Heizung Wohnzimmer", see above) with the sensor **Heating state** (German "Heizungszustand"), which says what the room is doing and why, and the diagnostic [statistics sensors](#statistics).
+Each room is a device ("Heizung Wohnzimmer", see above) with the sensor **Heating state** (German "Heizungszustand"), which says what the room is doing and why, and, if you collect them, the diagnostic [statistics sensors](#statistics).
 
 ### Heating state
 
@@ -268,7 +269,21 @@ Home Assistant records what a state does, but not what Easy TRV does. The statis
 
 Home Assistant keeps the long-term statistics of a sensor with a state class for ever. The statistics sensors have one, so their values stay long after the raw history is purged.
 
-All of them are diagnostic sensors on the room's device. They collect whether or not you show them anywhere.
+All of them are diagnostic sensors on the room's device. They exist only where the setting **Collect statistics** asks for them (see below).
+
+### Collecting statistics
+
+The setting **Collect statistics** decides for each room whether the statistics sensors exist and whether they are hidden. Set it globally in the integration options (section **Statistics**) or for one room in its room settings, where **Global** follows the options. Saving it reloads the integration.
+
+| Value | What the room does |
+|---|---|
+| Off / Aus | The room has no statistics sensors and collects nothing. Sensors that exist are removed, and their data stops: the long-term statistics already recorded stay in the database (Developer tools > Statistics offers to delete them), but nothing is added. The Heating state sensor is not affected. This is the default. |
+| Hidden (keeps collecting) / Ausgeblendet (sammelt weiter) | The sensors exist and collect, and the recorder records them, but they are hidden from lists and automatic dashboards. You can still use them by their entity id, in YAML cards, templates and automations. |
+| Visible / Sichtbar | The sensors exist, collect and are shown like any other entity. |
+
+A sensor you show again by hand stays shown while the setting is **hidden**, and one you hid yourself is never changed by Easy TRV, the same as with the [thermostat entities](#settings). Switching from **hidden** to **visible** shows the sensors Easy TRV hid; switching to **off** and later back creates them again, see [Notes](#notes) for what happens to their totals.
+
+**Update note.** Version 0.6.0 created the statistics sensors for every room. The update to 0.6.1 sets **Collect statistics** to **hidden** in the integration options, so the sensors keep collecting and drop out of lists and automatic dashboards; choose **visible** to see them again. A new installation starts with **off**.
 
 ### Room sensors
 
