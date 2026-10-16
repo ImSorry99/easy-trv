@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-16
+
 ### Added
 
 - Setting **Collect statistics** (`statistics`) with the values **Off**, **Hidden (keeps collecting)** and **Visible**, global in the new options section **Statistics** and per room in the room settings. It decides for each room whether the statistics sensors of 0.6.0 exist and whether they are hidden from lists and automatic dashboards. Hidden sensors keep collecting and the recorder records them. **Off** creates none and removes the existing ones of the room, so their data stops. A sensor you show again by hand stays shown, and one you hid yourself is never touched
@@ -142,7 +144,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/ImSorry99/easy-trv/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ImSorry99/easy-trv/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/ImSorry99/easy-trv/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/ImSorry99/easy-trv/compare/v0.4.1...v0.5.0
