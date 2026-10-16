@@ -7,6 +7,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.easy_trv.const import DOMAIN
@@ -735,29 +736,58 @@ async def test_a_failed_room_keeps_its_thermostats_and_statistics_hidden(
     assert marked_entities(hass) == everything
 
 
-def test_reconcile_marks_an_entity_of_ours_that_was_registered_hidden(hass) -> None:
+def test_reconcile_marks_an_entity_of_ours_registered_hidden_in_this_setup(
+    hass, freezer
+) -> None:
     registry = er.async_get(hass)
+    # Hidden by another integration (the group helper's "Hide members") before
+    # this setup, so it is not Easy TRV's.
+    earlier = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "earlier",
+        suggested_object_id="earlier",
+        hidden_by=INTEGRATION,
+    )
+    freezer.tick(1)
+    started = dt_util.utcnow()
+    freezer.tick(1)
     ours = registry.async_get_or_create(
         "sensor", DOMAIN, "ours", suggested_object_id="ours", hidden_by=INTEGRATION
     )
     theirs = registry.async_get_or_create(
         "sensor", "other", "theirs", suggested_object_id="theirs", hidden_by=INTEGRATION
     )
+    wanted = {earlier.entity_id, ours.entity_id, theirs.entity_id}
 
-    reconcile_hidden(hass, {ours.entity_id, theirs.entity_id}, set())
+    reconcile_hidden(hass, wanted, set(), started=started)
 
-    # Ours is Easy TRV's to show later, the other integration's is not.
+    # Ours was registered hidden by this setup: Easy TRV's to show later. The
+    # others were hidden by someone else.
     assert is_marked(entry_of(hass, ours.entity_id))
     assert entry_of(hass, ours.entity_id).hidden_by is INTEGRATION
-    assert not is_marked(entry_of(hass, theirs.entity_id))
-    assert entry_of(hass, theirs.entity_id).hidden_by is INTEGRATION
+    for left_alone in (earlier, theirs):
+        assert not is_marked(entry_of(hass, left_alone.entity_id))
+        assert entry_of(hass, left_alone.entity_id).hidden_by is INTEGRATION
 
-    # Not wanted any more: ours is shown again, the other one is left alone.
-    reconcile_hidden(hass, set(), set())
+    # Not wanted any more: ours is shown again, the others are left alone.
+    reconcile_hidden(hass, set(), set(), started=started)
 
     assert entry_of(hass, ours.entity_id).hidden_by is None
     assert DOMAIN not in entry_of(hass, ours.entity_id).options
-    assert entry_of(hass, theirs.entity_id).hidden_by is INTEGRATION
+    for left_alone in (earlier, theirs):
+        assert entry_of(hass, left_alone.entity_id).hidden_by is INTEGRATION
+
+
+def test_reconcile_adopts_nothing_without_a_start_time(hass) -> None:
+    ours = er.async_get(hass).async_get_or_create(
+        "sensor", DOMAIN, "ours", suggested_object_id="ours", hidden_by=INTEGRATION
+    )
+
+    reconcile_hidden(hass, {ours.entity_id}, set())
+
+    assert not is_marked(entry_of(hass, ours.entity_id))
+    assert entry_of(hass, ours.entity_id).hidden_by is INTEGRATION
 
 
 def test_reconcile_leaves_an_entity_of_ours_the_user_hid_alone(hass) -> None:

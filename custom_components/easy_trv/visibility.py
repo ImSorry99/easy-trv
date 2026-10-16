@@ -16,6 +16,7 @@ from custom_components.easy_trv.const import DOMAIN
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
+    from datetime import datetime
 
     from homeassistant.core import HomeAssistant
 
@@ -50,11 +51,18 @@ def entities_by_unique_id(
     return {entity_id for entity_id in found if entity_id is not None}
 
 
-def _registered_hidden_by_us(entry: er.RegistryEntry) -> bool:
-    """Return whether an entity of Easy TRV was registered hidden by its platform."""
+def _registered_hidden_by_us(entry: er.RegistryEntry, started: datetime | None) -> bool:
+    """Return whether the platform of Easy TRV registered this entity hidden just now.
+
+    Only an entity of Easy TRV that was created since ``started`` qualifies. One
+    that was hidden before (by the group helper's "hide members", say) is not
+    Easy TRV's, and one that Easy TRV hid itself already carries its marker.
+    """
     return (
-        entry.platform == DOMAIN
+        started is not None
+        and entry.platform == DOMAIN
         and entry.hidden_by is er.RegistryEntryHider.INTEGRATION
+        and entry.created_at >= started
     )
 
 
@@ -115,7 +123,11 @@ def controlled_entities(
 
 
 def reconcile_hidden(
-    hass: HomeAssistant, wanted: set[str], keep_devices: set[str]
+    hass: HomeAssistant,
+    wanted: set[str],
+    keep_devices: set[str],
+    *,
+    started: datetime | None = None,
 ) -> None:
     """Hide what ``wanted`` names and show again what Easy TRV hid but no longer wants.
 
@@ -124,7 +136,8 @@ def reconcile_hidden(
       showed it again: that choice stays. One that is hidden stays, and gets no
       marker: it is not Easy TRV's to show later. The exception is an entity of
       Easy TRV itself that Home Assistant registered hidden because its room
-      asked for it: that was Easy TRV's doing, so it gets the marker.
+      asked for it, in the setup that began at ``started``: that was Easy TRV's
+      doing, so it gets the marker. Without ``started`` no entity is adopted.
     - A marked entity that is not wanted any more is shown again if
       ``hidden_by`` is still ``integration``, and loses its marker. One the
       person has hidden by hand since stays hidden.
@@ -140,7 +153,7 @@ def reconcile_hidden(
             registry.async_update_entity(
                 entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
             )
-        elif not _registered_hidden_by_us(entry):
+        elif not _registered_hidden_by_us(entry, started):
             continue
         registry.async_update_entity_options(entity_id, DOMAIN, dict(MARKER))
     # A copy: showing an entity replaces its entry in the registry.

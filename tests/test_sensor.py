@@ -232,8 +232,8 @@ async def test_state_sensor_created_per_room(hass, entry) -> None:
     assert device.identifiers == {(DOMAIN, subentry_id)}
     assert device.manufacturer == "Easy TRV"
     assert device.name == "Living heating"
-    # No status sensor next to it: only the statistics sensors (see
-    # test_statistics_sensor).
+    # No status sensor next to it (the statistics sensors are off by default, see
+    # test_statistics_setting).
     entities = er.async_entries_for_config_entry(registry, entry.entry_id)
     assert [e.entity_id for e in entities if e.translation_key == "room_state"] == [
         STATE_SENSOR

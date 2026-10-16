@@ -281,6 +281,30 @@ async def test_a_statistic_the_user_hid_by_hand_stays_hidden_when_shown(hass) ->
     assert hidden_by_integration(hass, entry) == set()
 
 
+async def test_a_statistic_another_integration_hid_is_left_alone(hass) -> None:
+    entry = make_entry(hass, [room_data()], options(statistics="visible"))
+    await start(hass, entry)
+    # What the group helper's "Hide members" does to a member.
+    er.async_get(hass).async_update_entity(A_WRITES, hidden_by=INTEGRATION)
+
+    await set_options(hass, entry, statistics="hidden")
+
+    theirs = registered(hass, A_WRITES)
+    assert theirs.hidden_by is INTEGRATION
+    assert DOMAIN not in theirs.options
+    assert hidden_by_integration(hass, entry) == LIVING
+    assert marked(hass, entry) == LIVING - {A_WRITES}
+
+    await set_options(hass, entry, statistics="visible")
+
+    # Easy TRV did not hide it, so it does not show it either.
+    theirs = registered(hass, A_WRITES)
+    assert theirs.hidden_by is INTEGRATION
+    assert DOMAIN not in theirs.options
+    assert hidden_by_integration(hass, entry) == {A_WRITES}
+    assert marked(hass, entry) == set()
+
+
 # --- the room's own choice ---------------------------------------------------
 
 

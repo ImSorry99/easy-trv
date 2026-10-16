@@ -25,6 +25,7 @@ from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.profiles.loader import (
     BUILTIN_DIR,
 )
+from custom_components.easy_trv.visibility import MARKER
 from tests.helpers_entry import (
     CELSIUS,
     FAST_OPTIONS,
@@ -96,8 +97,8 @@ async def test_setup_creates_room_device_and_state_sensor(hass, entry) -> None:
     )
     assert device is not None
     assert device.name == "Living heating"
-    # A thermostat and a state sensor per room, next to the statistics sensors
-    # (see test_statistics_sensor), attached to the room's subentry.
+    # A thermostat and a state sensor per room (the statistics sensors are off by
+    # default, see test_statistics_setting), attached to the room's subentry.
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     by_id = {e.entity_id: e for e in entities}
     assert {"climate.living_heating", "sensor.living_heating_state"} <= by_id.keys()
@@ -839,6 +840,15 @@ async def test_the_update_from_0_6_0_hides_the_statistics_that_were_visible(
     }
     assert len(ids) == 8
     assert all(registry.async_get(entity_id).hidden_by is None for entity_id in ids)
+    # The totals the sensors show before the update.
+    totals = {
+        entity_id: float(state.state)
+        for entity_id in ids
+        if (state := hass.states.get(entity_id)) is not None
+        and state.attributes.get("state_class") == "total_increasing"
+        and state.state not in ("unavailable", "unknown")
+    }
+    assert totals["sensor.a_writes"] > 0
     assert await hass.config_entries.async_unload(entry.entry_id)
     hass.config_entries.async_update_entry(entry, options=FAST_OPTIONS, version=2)
 
@@ -848,10 +858,25 @@ async def test_the_update_from_0_6_0_hides_the_statistics_that_were_visible(
     assert entry.options["statistics"] == "hidden"
     for entity_id, registry_id in ids.items():
         found = registry.async_get(entity_id)
-        # The same entities, now hidden, and they carry on.
+        # The same entities, now hidden by Easy TRV, and they carry on.
         assert found.id == registry_id
         assert found.hidden_by is er.RegistryEntryHider.INTEGRATION
+        assert found.options.get(DOMAIN) == MARKER
         assert hass.states.get(entity_id) is not None
+    for entity_id, before in totals.items():
+        assert float(hass.states.get(entity_id).state) >= before, entity_id
+
+
+async def test_a_version_2_entry_is_not_run_through_the_version_1_step(hass) -> None:
+    entry = make_entry(hass, [room_data(hysteresis="leave")], FAST_OPTIONS, version=2)
+
+    await start(hass, entry)
+
+    assert entry.version == 3
+    # The retired choice is only rewritten for version 1 entries.
+    assert subentry_of(entry, "Living").data["hysteresis"] == "leave"
+    assert migrated_issue(hass) is None
+    assert entry.options["statistics"] == "hidden"
 
 
 async def test_a_version_1_entry_migrates_to_the_current_version_in_one_go(

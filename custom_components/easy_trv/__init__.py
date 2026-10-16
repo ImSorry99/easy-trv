@@ -14,6 +14,7 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
+from homeassistant.util import dt as dt_util
 
 from custom_components.easy_trv import issues
 from custom_components.easy_trv.adapters.zha_gateway import (
@@ -62,6 +63,7 @@ from custom_components.easy_trv.visibility import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+    from datetime import datetime
 
     from homeassistant.config_entries import ConfigSubentry
     from homeassistant.core import HomeAssistant
@@ -403,12 +405,13 @@ def _kept_devices(
     return devices
 
 
-def _reconcile_hidden_entities(
+def _reconcile_hidden_entities(  # noqa: PLR0913 - the rooms, what failed and when
     hass: HomeAssistant,
     entry: EasyTrvConfigEntry,
     profiles: Mapping[str, Profile],
     settings: Mapping[str, RoomSettings],
     invalid: set[str],
+    started: datetime,
 ) -> None:
     """Hide what the rooms ask to hide, show again what is no longer wanted.
 
@@ -418,12 +421,14 @@ def _reconcile_hidden_entities(
     shows every marked entity that is not wanted. It runs after the platforms
     are set up, so the statistics sensors exist. ``profiles`` and ``settings``
     are those of the rooms that were set up. The entities of the rooms that
-    could not be set up (``invalid``) stay as they are.
+    could not be set up (``invalid``) stay as they are. ``started`` is when
+    the platforms began to set up: only the statistics sensors they registered
+    hidden since then are Easy TRV's own doing.
     """
     wanted = _hidden_thermostat_entities(
         hass, entry, profiles, settings
     ) | _hidden_statistics(hass, entry, settings)
-    reconcile_hidden(hass, wanted, _kept_devices(hass, entry, invalid))
+    reconcile_hidden(hass, wanted, _kept_devices(hass, entry, invalid), started=started)
 
 
 def _describe_room_error(err: Exception) -> str:
@@ -506,9 +511,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     always written now, so a room that said "leave" follows the global value. The
     rooms that changed are reported in a Repairs issue.
 
-    Version 3 adds the statistics setting, which is off for a new entry. An
-    entry that exists has had the statistics sensors since 0.6.0 and keeps
-    collecting: its global setting becomes "hidden".
+    Version 3 adds the statistics setting, which is off for a new entry. Every
+    entry that exists becomes "hidden" in its global options: one from 0.6.0 has
+    had the statistics sensors since then and keeps collecting, and one from
+    before 0.6.0 gets them, hidden, for the first time.
     """
     if entry.version == 1:
         migrated: list[str] = []
@@ -535,6 +541,23 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             version=_VERSION_STATISTICS,
         )
     return True
+
+
+async def _set_up_platforms(
+    hass: HomeAssistant,
+    entry: EasyTrvConfigEntry,
+    profiles: Mapping[str, Profile],
+    settings: Mapping[str, RoomSettings],
+    invalid: set[str],
+) -> None:
+    """Set up the platforms, then hide what the rooms ask to hide.
+
+    The hiding needs the entities the platforms register, and has to know which
+    of them they registered hidden just now.
+    """
+    started = dt_util.utcnow()
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _reconcile_hidden_entities(hass, entry, profiles, settings, invalid, started)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> bool:
@@ -604,8 +627,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     )
     _remove_unused_entities(hass, entry, invalid)
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    _reconcile_hidden_entities(hass, entry, room_profiles, resolved, invalid)
+    await _set_up_platforms(hass, entry, room_profiles, resolved, invalid)
     _assign_room_areas(hass, entry)
 
     async def _start_rooms(_hass: HomeAssistant) -> None:
