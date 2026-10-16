@@ -425,7 +425,8 @@ async def test_state_sensor_unknown_before_start(hass, entry) -> None:
     assert state.attributes["source"] == "external"
 
 
-async def test_removed_state_sensor_stops_listening(hass, entry) -> None:
+async def test_removed_state_sensor_stops_listening(hass) -> None:
+    entry = make_entry(hass, [room_data()], {**FAST_OPTIONS, "statistics": "visible"})
     await start(hass, entry)
     controller = next(iter(entry.runtime_data.rooms.values()))
     # The room thermostat, the state sensor and the statistics sensors (two of
@@ -434,6 +435,18 @@ async def test_removed_state_sensor_stops_listening(hass, entry) -> None:
     # that.
     assert len(controller._update_listeners) == 2 + 2 + 6  # noqa: SLF001
     assert len(controller._listeners) == 0  # noqa: SLF001
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert len(controller._update_listeners) == 0  # noqa: SLF001
+
+
+async def test_without_statistics_only_the_thermostat_and_the_state_sensor_listen(
+    hass, entry
+) -> None:
+    await start(hass, entry)
+    controller = next(iter(entry.runtime_data.rooms.values()))
+
+    assert len(controller._update_listeners) == 2  # noqa: SLF001
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert len(controller._update_listeners) == 0  # noqa: SLF001

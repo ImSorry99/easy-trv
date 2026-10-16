@@ -125,6 +125,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "window_check_drop_kelvin": 0.3,
         "outdoor_cutoff_celsius": None,
         "window_open_delay_seconds": 30,
+        "statistics": "off",
     }
 
 

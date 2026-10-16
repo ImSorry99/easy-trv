@@ -72,6 +72,9 @@ STATISTICS_KEYS = {
     "dropouts",
 }
 STATE_ENTITY = "sensor.living_heating_state"
+# The statistics are off unless asked for (see test_statistics_setting); these
+# tests are about the sensors, so they ask for them.
+STATISTICS_ON = {**FAST_OPTIONS, "statistics": "visible"}
 HEATING = {"hvac_action": "heating"}
 IDLE = {"hvac_action": "idle"}
 
@@ -84,13 +87,13 @@ def fake_gateway(hass):
 
 @pytest.fixture
 def entry(hass):
-    return make_entry(hass, [room_data()], FAST_OPTIONS)
+    return make_entry(hass, [room_data()], STATISTICS_ON)
 
 
 @pytest.fixture
 def entry_with_contact(hass):
     hass.states.async_set(WINDOW, "off")
-    return make_entry(hass, [room_data(window_contacts=[WINDOW])], FAST_OPTIONS)
+    return make_entry(hass, [room_data(window_contacts=[WINDOW])], STATISTICS_ON)
 
 
 @pytest.fixture
@@ -107,7 +110,7 @@ def big_room(hass, fake_gateway):
                 window_contacts=[WINDOW],
             )
         ],
-        FAST_OPTIONS,
+        STATISTICS_ON,
     )
 
 
@@ -985,7 +988,7 @@ async def test_a_moved_thermostat_keeps_its_entity_ids_in_the_new_room(
             room_data("Living"),
             room_data("Bedroom", trvs=["climate.c"], temp_sensors=["sensor.t2"]),
         ],
-        FAST_OPTIONS,
+        STATISTICS_ON,
     )
     await start(hass, entry)
     living, bedroom = subentry_of(entry, "Living"), subentry_of(entry, "Bedroom")
@@ -1054,7 +1057,7 @@ async def test_a_room_that_cannot_be_set_up_keeps_the_statistics_of_its_data(
                 window_contacts=["binary_sensor.window2"],
             ),
         ],
-        FAST_OPTIONS,
+        STATISTICS_ON,
     )
     await start(hass, entry)
     bedroom_keys = ("deviation", "heating_time", "window_openings", "window_open_time")
@@ -1117,7 +1120,7 @@ async def test_a_room_that_cannot_be_set_up_keeps_everything_its_data_lists(
                 window_contacts=["binary_sensor.window2"],
             ),
         ],
-        FAST_OPTIONS,
+        STATISTICS_ON,
     )
     await start(hass, entry)
     before = sensors(hass, entry)

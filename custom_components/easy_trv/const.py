@@ -56,6 +56,7 @@ CONF_WINDOW_CHECK_DROP: Final = "window_check_drop_kelvin"
 CONF_OUTDOOR_CUTOFF: Final = "outdoor_cutoff"  # room-only: global / off
 CONF_OUTDOOR_CUTOFF_CELSIUS: Final = "outdoor_cutoff_celsius"
 CONF_WINDOW_OPEN_DELAY: Final = "window_open_delay_seconds"
+CONF_STATISTICS: Final = "statistics"
 # Entry-level and room entity configuration (not settings with a default)
 CONF_OUTDOOR_SENSOR: Final = "outdoor_sensor"
 CONF_WINDOW_CONTACTS: Final = "window_contacts"
@@ -80,6 +81,7 @@ DEFAULT_WINDOW_CHECK_MINUTES: Final = _settings.DEFAULT_WINDOW_CHECK_MINUTES
 DEFAULT_WINDOW_CHECK_DROP: Final = _settings.DEFAULT_WINDOW_CHECK_DROP
 DEFAULT_OUTDOOR_CUTOFF_CELSIUS: Final = _settings.DEFAULT_OUTDOOR_CUTOFF_CELSIUS
 DEFAULT_WINDOW_OPEN_DELAY: Final = _settings.DEFAULT_WINDOW_OPEN_DELAY_SECONDS
+DEFAULT_STATISTICS: Final = _settings.DEFAULT_STATISTICS
 
 # Timing
 DEBOUNCE_SECONDS: Final = 5.0

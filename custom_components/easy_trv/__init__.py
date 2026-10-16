@@ -27,6 +27,7 @@ from custom_components.easy_trv.const import (
     CONF_AREA,
     CONF_HYSTERESIS,
     CONF_OUTDOOR_SENSOR,
+    CONF_STATISTICS,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
     CONF_WINDOW_CONTACTS,
@@ -53,6 +54,7 @@ from custom_components.easy_trv.statistics_sensor import (
 )
 from custom_components.easy_trv.visibility import (
     controlled_entities,
+    entities_by_unique_id,
     reconcile_hidden,
     show_all,
     thermostat_devices,
@@ -75,6 +77,9 @@ _RETIRED_SENSOR_SUFFIX: Final = "_status"
 
 # The hysteresis choice that version 1 entries could store and version 2 retired.
 _HYSTERESIS_LEAVE = "leave"
+
+# The first version of an entry that has the statistics setting.
+_VERSION_STATISTICS: Final = 3
 
 # The intent behind each setting that can be left "as set in the thermostat".
 _LEAVABLE_INTENTS: Final = {
@@ -337,19 +342,15 @@ def _left_to_thermostat(profile: Profile, settings: RoomSettings) -> set[str]:
     }
 
 
-def _reconcile_hidden_entities(
+def _hidden_thermostat_entities(
     hass: HomeAssistant,
     entry: EasyTrvConfigEntry,
     profiles: Mapping[str, Profile],
     settings: Mapping[str, RoomSettings],
-    invalid: set[str],
-) -> None:
-    """Hide the thermostat entities of the rooms that ask for it, show the others.
+) -> set[str]:
+    """Return the thermostat entities of the rooms that hide them.
 
-    ``profiles`` and ``settings`` are those of the rooms that were set up. The
-    thermostats of the rooms that could not be set up (``invalid``) keep their
-    entities as they are. A setting the room leaves to the thermostat keeps its
-    entity visible.
+    A setting the room leaves to the thermostat keeps its entity visible.
     """
     hidden: set[str] = set()
     for subentry_id, profile in profiles.items():
@@ -359,11 +360,70 @@ def _reconcile_hidden_entities(
             hidden |= controlled_entities(
                 hass, trvs, profile, skip=_left_to_thermostat(profile, room)
             )
-    keep_devices: set[str] = set()
+    return hidden
+
+
+def _hidden_statistics(
+    hass: HomeAssistant,
+    entry: EasyTrvConfigEntry,
+    settings: Mapping[str, RoomSettings],
+) -> set[str]:
+    """Return the statistics sensors of the rooms that collect them hidden.
+
+    The sensors are looked up by their unique id: the ones the room has now,
+    which the sensor platform has registered by this time.
+    """
+    unique_ids: set[str] = set()
+    for subentry_id, controller in entry.runtime_data.rooms.items():
+        if settings[subentry_id].statistics == "hidden":
+            unique_ids |= room_statistics_unique_ids(
+                subentry_id, controller.statistics()
+            )
+    return entities_by_unique_id(hass, "sensor", unique_ids)
+
+
+def _kept_devices(
+    hass: HomeAssistant, entry: EasyTrvConfigEntry, invalid: set[str]
+) -> set[str]:
+    """Return the devices whose hidden entities stay as they are.
+
+    A room that could not be set up keeps its thermostats' entities and its
+    statistics sensors, which sit on the device of the room.
+    """
+    devices: set[str] = set()
+    registry = dr.async_get(hass)
     for subentry_id in invalid:
         trvs = _thermostat_ids(entry.subentries[subentry_id].data)
-        keep_devices |= thermostat_devices(hass, trvs)
-    reconcile_hidden(hass, hidden, keep_devices)
+        devices |= thermostat_devices(hass, trvs)
+        room = registry.async_get_device_by_identifier(
+            (DOMAIN, subentry_id), entry.entry_id
+        )
+        if room is not None:
+            devices.add(room.id)
+    return devices
+
+
+def _reconcile_hidden_entities(
+    hass: HomeAssistant,
+    entry: EasyTrvConfigEntry,
+    profiles: Mapping[str, Profile],
+    settings: Mapping[str, RoomSettings],
+    invalid: set[str],
+) -> None:
+    """Hide what the rooms ask to hide, show again what is no longer wanted.
+
+    Easy TRV shows again only what it hid itself. The wanted entities are the
+    thermostat entities of the rooms that hide them and the statistics sensors
+    of the rooms that collect them hidden. Both go into one pass, because it
+    shows every marked entity that is not wanted. It runs after the platforms
+    are set up, so the statistics sensors exist. ``profiles`` and ``settings``
+    are those of the rooms that were set up. The entities of the rooms that
+    could not be set up (``invalid``) stay as they are.
+    """
+    wanted = _hidden_thermostat_entities(
+        hass, entry, profiles, settings
+    ) | _hidden_statistics(hass, entry, settings)
+    reconcile_hidden(hass, wanted, _kept_devices(hass, entry, invalid))
 
 
 def _describe_room_error(err: Exception) -> str:
@@ -445,6 +505,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     Version 2 retires the hysteresis choice "leave unchanged": the hysteresis is
     always written now, so a room that said "leave" follows the global value. The
     rooms that changed are reported in a Repairs issue.
+
+    Version 3 adds the statistics setting, which is off for a new entry. An
+    entry that exists has had the statistics sensors since 0.6.0 and keeps
+    collecting: its global setting becomes "hidden".
     """
     if entry.version == 1:
         migrated: list[str] = []
@@ -464,6 +528,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             issues.raise_settings_migrated(
                 hass, migrated, f"{localized_number(hass, kelvin)} K"
             )
+    if entry.version < _VERSION_STATISTICS:
+        hass.config_entries.async_update_entry(
+            entry,
+            options={**entry.options, CONF_STATISTICS: "hidden"},
+            version=_VERSION_STATISTICS,
+        )
     return True
 
 
@@ -533,9 +603,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
         gateway, profiles, rooms, resolved, areas, labels
     )
     _remove_unused_entities(hass, entry, invalid)
-    _reconcile_hidden_entities(hass, entry, room_profiles, resolved, invalid)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _reconcile_hidden_entities(hass, entry, room_profiles, resolved, invalid)
     _assign_room_areas(hass, entry)
 
     async def _start_rooms(_hass: HomeAssistant) -> None:
@@ -564,9 +634,10 @@ def _remove_unused_entities(
     These are the operating mode selects of 0.4.0 (frost protection moved to the
     mode ``auto`` of the room thermostat), the status sensors of 0.5.0 (merged
     into the heating state sensor, which has its own unique id and stays) and
-    the statistics sensors of thermostats and contacts a room has lost. The
-    registry would keep them as unavailable entities otherwise, and a thermostat
-    that joins another room would find its entity ids taken and get ``_2``.
+    the statistics sensors of thermostats and contacts a room has lost and of
+    rooms that do not collect statistics. The registry would keep them as
+    unavailable entities otherwise, and a thermostat that joins another room
+    would find its entity ids taken and get ``_2``.
     """
     expected = _expected_statistics(entry, invalid)
     registry = er.async_get(hass)
@@ -580,13 +651,15 @@ def _remove_unused_entities(
 def _expected_statistics(entry: EasyTrvConfigEntry, invalid: set[str]) -> set[str]:
     """Return the unique ids of the statistics sensors the rooms have now.
 
-    A room that is set up tells it by its controller. A room that cannot be set
-    up (``invalid``) has none: its stored data tells, read as defensively as
-    everywhere else, so its sensors stay for the day the room works again.
+    A room that is set up tells it by its controller, and has none when it does
+    not collect statistics. A room that cannot be set up (``invalid``) has the
+    ones its stored data lists, read as defensively as everywhere else, so its
+    sensors stay for the day the room works again.
     """
     expected: set[str] = set()
     for subentry_id, controller in entry.runtime_data.rooms.items():
-        expected |= room_statistics_unique_ids(subentry_id, controller.statistics())
+        if entry.runtime_data.settings[subentry_id].statistics != "off":
+            expected |= room_statistics_unique_ids(subentry_id, controller.statistics())
     for subentry_id in invalid:
         data = entry.subentries[subentry_id].data
         expected |= statistics_unique_ids(

@@ -32,6 +32,7 @@ DEFAULT_WINDOW_CHECK_MINUTES: Final = 30
 DEFAULT_WINDOW_CHECK_DROP: Final = 0.3
 DEFAULT_OUTDOOR_CUTOFF_CELSIUS: Final[float | None] = None  # None = off
 DEFAULT_WINDOW_OPEN_DELAY_SECONDS: Final = 30
+DEFAULT_STATISTICS: Final = "off"
 
 _KEY_HYSTERESIS: Final = "hysteresis"
 _KEY_SETPOINT_RANGE: Final = "setpoint_range"
@@ -65,6 +66,7 @@ DEFAULTS: Final[Mapping[str, Any]] = {
     "window_check_drop_kelvin": DEFAULT_WINDOW_CHECK_DROP,
     _KEY_OUTDOOR_CUTOFF_CELSIUS: DEFAULT_OUTDOOR_CUTOFF_CELSIUS,
     "window_open_delay_seconds": DEFAULT_WINDOW_OPEN_DELAY_SECONDS,
+    "statistics": DEFAULT_STATISTICS,
 }
 
 
@@ -95,6 +97,9 @@ class RoomSettings:
     window_check_drop_kelvin: float
     outdoor_cutoff_celsius: float | None  # None = off
     window_open_delay_seconds: int  # 0 = an open window counts at once
+    # off: no statistics sensors; hidden: they collect but are hidden in Home
+    # Assistant; visible: they collect and are shown
+    statistics: Literal["off", "hidden", "visible"]
 
 
 def hysteresis_kelvin(stored: str | float) -> float:

@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 INTEGRATION = er.RegistryEntryHider.INTEGRATION
 USER = er.RegistryEntryHider.USER
 HIDE_ON = {**FAST_OPTIONS, "hide_thermostat_entities": "on"}
+HIDE_BOTH = {**HIDE_ON, "statistics": "hidden"}
 NATIVE = load_profiles_sync(None).profiles["sonoff_trvzb_native"]
 
 # What Easy TRV writes to a TRVZB and what ZHA calls the entity: (domain, key).
@@ -654,6 +655,120 @@ async def test_corrupt_thermostat_data_does_not_break_setup(hass, trv_a, trvs) -
     assert entry.state is ConfigEntryState.LOADED
     # The healthy room hides its thermostat; the broken one is skipped.
     assert hidden_by_integration(hass) == trv_a.hidden
+
+
+# --- The statistics sensors are hidden in the same pass ---------------------------
+
+
+def statistics_of(room: str, *thermostats: str) -> set[str]:
+    """Return the statistics sensors of a room without window contacts."""
+    return {
+        f"sensor.{room}_deviation",
+        f"sensor.{room}_heating_time",
+        *(
+            f"sensor.{trv}_{key}"
+            for trv in thermostats
+            for key in ("writes", "write_failures", "dropouts")
+        ),
+    }
+
+
+async def test_hiding_the_thermostats_and_the_statistics_work_together(
+    hass, trv_a
+) -> None:
+    statistics = statistics_of("living", "a")
+    entry = make_entry(hass, [room_data(trvs=["climate.a"])], HIDE_BOTH)
+
+    await start(hass, entry)
+
+    # One pass for both: neither undoes the other.
+    assert hidden_by_integration(hass) == trv_a.hidden | statistics
+    assert marked_entities(hass) == trv_a.hidden | statistics
+
+    set_options(hass, entry, hide_thermostat_entities="on", statistics="visible")
+    await settle(hass)
+
+    assert hidden_by_integration(hass) == trv_a.hidden
+    assert marked_entities(hass) == trv_a.hidden
+
+    set_options(hass, entry, hide_thermostat_entities="off", statistics="hidden")
+    await settle(hass)
+
+    assert hidden_by_integration(hass) == statistics
+    assert marked_entities(hass) == statistics
+    for entity_id in trv_a.hidden:
+        assert is_untouched(entry_of(hass, entity_id)), entity_id
+
+    set_options(hass, entry, hide_thermostat_entities="on", statistics="hidden")
+    await settle(hass)
+
+    assert hidden_by_integration(hass) == trv_a.hidden | statistics
+
+
+async def test_a_failed_room_keeps_its_thermostats_and_statistics_hidden(
+    hass, trv_a, trv_b
+) -> None:
+    rooms = [
+        room_data("Living", trvs=["climate.a"]),
+        room_data("Bedroom", trvs=["climate.b"]),
+    ]
+    entry = make_entry(hass, rooms, HIDE_BOTH)
+    await start(hass, entry)
+    everything = (
+        trv_a.hidden
+        | trv_b.hidden
+        | statistics_of("living", "a")
+        | statistics_of("bedroom", "b")
+    )
+    assert hidden_by_integration(hass) == everything
+    bedroom = next(s for s in entry.subentries.values() if s.title == "Bedroom")
+
+    hass.config_entries.async_update_subentry(
+        entry, bedroom, data={**rooms[1], "hysteresis": "x"}
+    )
+    await settle(hass)
+
+    assert entry.runtime_data.rooms.keys() == {
+        next(s for s in entry.subentries.values() if s.title == "Living").subentry_id
+    }
+    assert hidden_by_integration(hass) == everything
+    assert marked_entities(hass) == everything
+
+
+def test_reconcile_marks_an_entity_of_ours_that_was_registered_hidden(hass) -> None:
+    registry = er.async_get(hass)
+    ours = registry.async_get_or_create(
+        "sensor", DOMAIN, "ours", suggested_object_id="ours", hidden_by=INTEGRATION
+    )
+    theirs = registry.async_get_or_create(
+        "sensor", "other", "theirs", suggested_object_id="theirs", hidden_by=INTEGRATION
+    )
+
+    reconcile_hidden(hass, {ours.entity_id, theirs.entity_id}, set())
+
+    # Ours is Easy TRV's to show later, the other integration's is not.
+    assert is_marked(entry_of(hass, ours.entity_id))
+    assert entry_of(hass, ours.entity_id).hidden_by is INTEGRATION
+    assert not is_marked(entry_of(hass, theirs.entity_id))
+    assert entry_of(hass, theirs.entity_id).hidden_by is INTEGRATION
+
+    # Not wanted any more: ours is shown again, the other one is left alone.
+    reconcile_hidden(hass, set(), set())
+
+    assert entry_of(hass, ours.entity_id).hidden_by is None
+    assert DOMAIN not in entry_of(hass, ours.entity_id).options
+    assert entry_of(hass, theirs.entity_id).hidden_by is INTEGRATION
+
+
+def test_reconcile_leaves_an_entity_of_ours_the_user_hid_alone(hass) -> None:
+    mine = er.async_get(hass).async_get_or_create(
+        "sensor", DOMAIN, "mine", suggested_object_id="mine", hidden_by=USER
+    )
+
+    reconcile_hidden(hass, {mine.entity_id}, set())
+
+    assert entry_of(hass, mine.entity_id).hidden_by is USER
+    assert not is_marked(entry_of(hass, mine.entity_id))
 
 
 # --- Reconcile and show_all on their own ------------------------------------------

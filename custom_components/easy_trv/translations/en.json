@@ -99,7 +99,8 @@
             "window_check_minutes": "Window contact check (minutes, 0 = off)",
             "window_check_drop_kelvin": "Cooling expected by the check (K)",
             "outdoor_cutoff": "Outdoor cut-off",
-            "outdoor_cutoff_celsius": "Outdoor cut-off temperature"
+            "outdoor_cutoff_celsius": "Outdoor cut-off temperature",
+            "statistics": "Collect statistics"
           },
           "data_description": {
             "profile": "Auto picks the first profile that matches all thermostats of the room. Global is currently {global_profile}.",
@@ -122,7 +123,8 @@
             "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the amount set in \"Cooling expected by the check (K)\", otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
             "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Global is currently {global_window_check_drop_kelvin}.",
             "outdoor_cutoff": "Global follows the outdoor cut-off temperature of the integration options (currently {global_outdoor_cutoff_celsius}), unless you enter a temperature of your own below. Off never switches this room off because of the outdoor temperature.",
-            "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. Needs an outdoor sensor in the integration options. -10.0 to 30.0 °C. Empty = Global, currently {global_outdoor_cutoff_celsius}."
+            "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. Needs an outdoor sensor in the integration options. -10.0 to 30.0 °C. Empty = Global, currently {global_outdoor_cutoff_celsius}.",
+            "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones. Global is currently {global_statistics}."
           }
         }
       },
@@ -354,6 +356,16 @@
               "outdoor_sensor": "The temperature sensor the outdoor cut-off reads. Without it the cut-off does nothing.",
               "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. A room can turn this off for itself. -10.0 to 30.0 °C. Empty = {default_outdoor_cutoff_celsius}."
             }
+          },
+          "statistics": {
+            "name": "Statistics",
+            "description": "What Easy TRV records about each room as long-term statistics.",
+            "data": {
+              "statistics": "Collect statistics"
+            },
+            "data_description": {
+              "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones."
+            }
           }
         }
       }
@@ -451,6 +463,14 @@
         "global": "Global",
         "on": "Hidden",
         "off": "Shown"
+      }
+    },
+    "statistics": {
+      "options": {
+        "global": "Global",
+        "off": "Off",
+        "hidden": "Hidden (keeps collecting)",
+        "visible": "Visible"
       }
     }
   }

@@ -99,7 +99,8 @@
             "window_check_minutes": "Fensterkontakt-Prüfung (Minuten, 0 = aus)",
             "window_check_drop_kelvin": "Erwartete Abkühlung bei der Prüfung (K)",
             "outdoor_cutoff": "Außentemperatur-Abschaltung",
-            "outdoor_cutoff_celsius": "Abschalttemperatur außen"
+            "outdoor_cutoff_celsius": "Abschalttemperatur außen",
+            "statistics": "Statistik erfassen"
           },
           "data_description": {
             "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt. Global ist derzeit {global_profile}.",
@@ -122,7 +123,8 @@
             "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um den Wert unter „Erwartete Abkühlung bei der Prüfung (K)“ abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Global ist derzeit {global_window_check_minutes}.",
             "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Global ist derzeit {global_window_check_drop_kelvin}.",
             "outdoor_cutoff": "Global folgt der Abschalttemperatur aus den Integrationsoptionen (derzeit {global_outdoor_cutoff_celsius}), solange du unten keine eigene Temperatur einträgst. Aus schaltet diesen Raum nie wegen der Außentemperatur ab.",
-            "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Braucht einen Außensensor in den Integrationsoptionen. -10,0 bis 30,0 °C. Leer = Global, derzeit {global_outdoor_cutoff_celsius}."
+            "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Braucht einen Außensensor in den Integrationsoptionen. -10,0 bis 30,0 °C. Leer = Global, derzeit {global_outdoor_cutoff_celsius}.",
+            "statistics": "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine Statistik-Sensoren an und entfernt vorhandene. Global ist derzeit {global_statistics}."
           }
         }
       },
@@ -354,6 +356,16 @@
               "outdoor_sensor": "Der Temperatursensor, den die Außentemperatur-Abschaltung liest. Ohne ihn tut die Abschaltung nichts.",
               "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Ein Raum kann das für sich abschalten. -10,0 bis 30,0 °C. Leer = {default_outdoor_cutoff_celsius}."
             }
+          },
+          "statistics": {
+            "name": "Statistik",
+            "description": "Was Easy TRV je Raum als Langzeit-Statistik aufzeichnet.",
+            "data": {
+              "statistics": "Statistik erfassen"
+            },
+            "data_description": {
+              "statistics": "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine Statistik-Sensoren an und entfernt vorhandene."
+            }
           }
         }
       }
@@ -451,6 +463,14 @@
         "global": "Global",
         "on": "Ausgeblendet",
         "off": "Eingeblendet"
+      }
+    },
+    "statistics": {
+      "options": {
+        "global": "Global",
+        "off": "Aus",
+        "hidden": "Ausgeblendet (sammelt weiter)",
+        "visible": "Sichtbar"
       }
     }
   }

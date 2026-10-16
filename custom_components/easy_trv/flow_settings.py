@@ -38,6 +38,7 @@ from custom_components.easy_trv.const import (
     CONF_SETPOINT_MAX,
     CONF_SETPOINT_MIN,
     CONF_SETPOINT_RANGE,
+    CONF_STATISTICS,
     CONF_VERIFY_DELAY,
     CONF_WINDOW_CHECK_DROP,
     CONF_WINDOW_CHECK_MINUTES,
@@ -66,6 +67,7 @@ SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
     CONF_SETPOINT_RANGE: ("auto", "manual"),
     CONF_WINDOW_WARN_COLDER: ("on", "off"),
     CONF_HIDE_THERMOSTAT_ENTITIES: ("on", "off"),
+    CONF_STATISTICS: ("off", "hidden", "visible"),
 }
 # A choice that only a room has: the global outdoor cut-off threshold is the
 # value to keep ("global") or to ignore ("off") in this room.
@@ -112,6 +114,7 @@ _SECTION_WRITES: Final = "writes"
 _SECTION_THERMOSTAT: Final = "thermostat"
 _SECTION_ROOM_THERMOSTAT: Final = "room_thermostat"
 _SECTION_WINDOWS_OUTDOOR: Final = "windows_outdoor"
+_SECTION_STATISTICS: Final = "statistics"
 SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
     _SECTION_WRITES: (
         CONF_REFRESH_MINUTES,
@@ -141,6 +144,7 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
         CONF_OUTDOOR_SENSOR,
         CONF_OUTDOOR_CUTOFF_CELSIUS,
     ),
+    _SECTION_STATISTICS: (CONF_STATISTICS,),
 }
 # The order of the room's settings form.
 ROOM_SETTING_KEYS: Final = (
@@ -165,6 +169,7 @@ ROOM_SETTING_KEYS: Final = (
     CONF_WINDOW_CHECK_DROP,
     CONF_OUTDOOR_CUTOFF,
     CONF_OUTDOOR_CUTOFF_CELSIUS,
+    CONF_STATISTICS,
 )
 ROOM_SELECT_KEYS: Final = (
     CONF_PROFILE,
@@ -339,7 +344,7 @@ def room_settings(user_input: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def options_schema(current: Mapping[str, Any]) -> vol.Schema:
-    """Return the form of the global options in four collapsed sections.
+    """Return the form of the global options in five collapsed sections.
 
     The selects default to what is saved (else the built-in default). The
     numbers get no default: they are suggested by ``options_suggestions``, and

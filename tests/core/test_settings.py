@@ -237,3 +237,17 @@ def test_hiding_follows_the_global_option_and_a_room_can_override_it():
     assert resolve_settings(options, room).hide_thermostat_entities == "off"
     on_in_room = {"hide_thermostat_entities": "on"}
     assert resolve_settings({}, on_in_room).hide_thermostat_entities == "on"
+
+
+def test_statistics_are_off_by_default():
+    assert resolve_settings({}, {}).statistics == "off"
+
+
+@pytest.mark.parametrize("value", ["off", "hidden", "visible"])
+def test_statistics_follow_the_global_option_and_a_room_can_override_it(value):
+    options = {"statistics": value}
+    assert resolve_settings(options, {}).statistics == value
+    assert resolve_settings(options, {"statistics": "global"}).statistics == value
+    other = "visible" if value != "visible" else "hidden"
+    assert resolve_settings(options, {"statistics": other}).statistics == other
+    assert resolve_settings({}, {"statistics": value}).statistics == value

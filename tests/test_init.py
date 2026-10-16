@@ -733,7 +733,7 @@ async def test_migrate_v1_entry_turns_leave_into_global_and_raises_issue(
         version=1,
     )
     await start(hass, entry)
-    assert entry.version == 2
+    assert entry.version == 3
     living = subentry_of(entry, "Living")
     bed = subentry_of(entry, "Bed")
     assert living.data["hysteresis"] == "global"
@@ -784,16 +784,87 @@ async def test_migrated_room_with_default_adaptive_writes_no_hysteresis(
 async def test_migration_without_leave_rooms_raises_no_issue(hass) -> None:
     entry = make_entry(hass, [room_data(hysteresis="0_4")], FAST_OPTIONS, version=1)
     await start(hass, entry)
-    assert entry.version == 2
+    assert entry.version == 3
     assert migrated_issue(hass) is None
 
 
-async def test_a_version_2_entry_is_not_migrated_again(hass) -> None:
+async def test_a_current_entry_is_not_migrated_again(hass) -> None:
     entry = make_entry(hass, [room_data(hysteresis="leave")], FAST_OPTIONS)
     await start(hass, entry)
-    assert entry.version == 2
+    assert entry.version == 3
     assert subentry_of(entry, "Living").data["hysteresis"] == "leave"
     assert migrated_issue(hass) is None
+    # A new entry is not migrated: it has no statistics setting, so the default
+    # (off) applies.
+    assert "statistics" not in entry.options
+    assert not [
+        found
+        for found in er.async_entries_for_config_entry(
+            er.async_get(hass), entry.entry_id
+        )
+        if found.entity_id == "sensor.living_deviation"
+    ]
+
+
+async def test_a_version_2_entry_keeps_collecting_statistics_hidden(hass) -> None:
+    options = {**FAST_OPTIONS, "refresh_minutes": 45}
+    entry = make_entry(hass, [room_data()], options, version=2)
+
+    await start(hass, entry)
+
+    assert entry.version == 3
+    # The global option is added next to the others, which stay.
+    assert dict(entry.options) == {**options, "statistics": "hidden"}
+    registry = er.async_get(hass)
+    for entity_id in ("sensor.living_deviation", "sensor.a_writes"):
+        found = registry.async_get(entity_id)
+        assert found is not None
+        assert found.hidden_by is er.RegistryEntryHider.INTEGRATION
+        assert hass.states.get(entity_id) is not None
+    assert registry.async_get("sensor.living_heating_state").hidden_by is None
+    assert migrated_issue(hass) is None
+
+
+async def test_the_update_from_0_6_0_hides_the_statistics_that_were_visible(
+    hass,
+) -> None:
+    # 0.6.0 created the statistics sensors visible, whatever the options said.
+    entry = make_entry(hass, [room_data()], {**FAST_OPTIONS, "statistics": "visible"})
+    await start(hass, entry)
+    registry = er.async_get(hass)
+    ids = {
+        found.entity_id: found.id
+        for found in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if found.entity_id != "sensor.living_heating_state" and found.domain == "sensor"
+    }
+    assert len(ids) == 8
+    assert all(registry.async_get(entity_id).hidden_by is None for entity_id in ids)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    hass.config_entries.async_update_entry(entry, options=FAST_OPTIONS, version=2)
+
+    await start(hass, entry)
+
+    assert entry.version == 3
+    assert entry.options["statistics"] == "hidden"
+    for entity_id, registry_id in ids.items():
+        found = registry.async_get(entity_id)
+        # The same entities, now hidden, and they carry on.
+        assert found.id == registry_id
+        assert found.hidden_by is er.RegistryEntryHider.INTEGRATION
+        assert hass.states.get(entity_id) is not None
+
+
+async def test_a_version_1_entry_migrates_to_the_current_version_in_one_go(
+    hass,
+) -> None:
+    entry = make_entry(hass, [room_data(hysteresis="leave")], FAST_OPTIONS, version=1)
+
+    await start(hass, entry)
+
+    assert entry.version == 3
+    assert subentry_of(entry, "Living").data["hysteresis"] == "global"
+    assert entry.options["statistics"] == "hidden"
+    assert migrated_issue(hass) is not None
 
 
 async def test_upgrade_from_0_1_0_with_old_and_new_firmware(hass, fake_gateway) -> None:

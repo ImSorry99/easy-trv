@@ -65,7 +65,7 @@ def make_entry(
     hass: HomeAssistant,
     rooms: list[dict[str, Any]],
     options: dict[str, Any] | None = None,
-    version: int = 2,
+    version: int = 3,
 ) -> MockConfigEntry:
     """Add an Easy TRV config entry with one ``room`` subentry per dict."""
     entry = MockConfigEntry(

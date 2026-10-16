@@ -1,7 +1,8 @@
-"""Hide the thermostat entities Easy TRV controls, shown again when it lets go.
+"""Hide the entities Easy TRV controls or collects, shown again when it lets go.
 
-Home Assistant's own helpers do the same for what they take over (the group
-helper's "hide members", ``switch_as_x``): the entity gets
+These are the thermostat entities it controls and, when a room asks for it, its
+own statistics sensors. Home Assistant's own helpers do the same for what they
+take over (the group helper's "hide members", ``switch_as_x``): the entity gets
 ``hidden_by = integration``. Easy TRV also puts a marker into the options of
 the entity registry entry, so it later knows which entities it hid itself and
 never touches one that someone else hid.
@@ -31,6 +32,30 @@ def _is_marked(entry: er.RegistryEntry) -> bool:
     """Return whether Easy TRV has hidden this entity."""
     options = entry.options.get(DOMAIN)
     return options is not None and options.get("hidden") is True
+
+
+def entities_by_unique_id(
+    hass: HomeAssistant, domain: str, unique_ids: Iterable[str]
+) -> set[str]:
+    """Return the entity ids of Easy TRV's own entities with the given unique ids.
+
+    A unique id the entity registry does not know (the entity does not exist
+    yet) adds nothing.
+    """
+    registry = er.async_get(hass)
+    found = (
+        registry.async_get_entity_id(domain, DOMAIN, unique_id)
+        for unique_id in unique_ids
+    )
+    return {entity_id for entity_id in found if entity_id is not None}
+
+
+def _registered_hidden_by_us(entry: er.RegistryEntry) -> bool:
+    """Return whether an entity of Easy TRV was registered hidden by its platform."""
+    return (
+        entry.platform == DOMAIN
+        and entry.hidden_by is er.RegistryEntryHider.INTEGRATION
+    )
 
 
 def thermostat_devices(hass: HomeAssistant, climates: Iterable[str]) -> set[str]:
@@ -97,21 +122,26 @@ def reconcile_hidden(
     - A wanted entity that is shown and not marked is hidden (``integration``)
       and marked. One that is marked stays as it is, also when the person
       showed it again: that choice stays. One that is hidden stays, and gets no
-      marker: it is not Easy TRV's to show later.
+      marker: it is not Easy TRV's to show later. The exception is an entity of
+      Easy TRV itself that Home Assistant registered hidden because its room
+      asked for it: that was Easy TRV's doing, so it gets the marker.
     - A marked entity that is not wanted any more is shown again if
       ``hidden_by`` is still ``integration``, and loses its marker. One the
       person has hidden by hand since stays hidden.
-    - Entities on a device of ``keep_devices`` (the thermostats of rooms that
-      could not be set up) are left as they are.
+    - Entities on a device of ``keep_devices`` (the thermostats and the device
+      of rooms that could not be set up) are left as they are.
     """
     registry = er.async_get(hass)
     for entity_id in wanted:
         entry = registry.async_get(entity_id)
-        if entry is None or entry.hidden_by is not None or _is_marked(entry):
+        if entry is None or _is_marked(entry):
             continue
-        registry.async_update_entity(
-            entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
-        )
+        if entry.hidden_by is None:
+            registry.async_update_entity(
+                entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
+            )
+        elif not _registered_hidden_by_us(entry):
+            continue
         registry.async_update_entity_options(entity_id, DOMAIN, dict(MARKER))
     # A copy: showing an entity replaces its entry in the registry.
     for entry in list(registry.entities.values()):

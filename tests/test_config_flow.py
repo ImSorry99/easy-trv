@@ -269,6 +269,7 @@ ALL_GLOBAL = {
     "setpoint_range": "global",
     "window_warn_colder": "global",
     "outdoor_cutoff": "global",
+    "statistics": "global",
 }
 
 
@@ -336,7 +337,7 @@ async def test_user_flow_creates_single_entry(hass) -> None:
 async def test_config_flow_is_the_registered_handler(entry) -> None:
     # The stand-in flow of the earlier tests is gone: the real one answers.
     assert HANDLERS[DOMAIN] is EasyTrvConfigFlow
-    assert EasyTrvConfigFlow.VERSION == 2
+    assert EasyTrvConfigFlow.VERSION == 3
     assert not hasattr(helpers_entry, "_StandInFlow")
     assert not hasattr(helpers_entry, "CONFIG_FLOW_FILE")
     assert EasyTrvConfigFlow.async_get_supported_subentry_types(entry) == {
@@ -895,6 +896,7 @@ SETTINGS_FIELDS = [
     "window_check_drop_kelvin",
     "outdoor_cutoff",
     "outdoor_cutoff_celsius",
+    "statistics",
 ]
 SETTING_NUMBERS = {
     "frost_temperature": (4.0, 16.0, 0.5, "°C"),
@@ -943,6 +945,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_window_check_minutes": "30 min",
         "global_window_check_drop_kelvin": "0.3 K",
         "global_outdoor_cutoff_celsius": "Off",
+        "global_statistics": "Off",
     }
 
 
@@ -1093,6 +1096,52 @@ async def test_room_hide_placeholder_follows_the_global_option(hass) -> None:
     assert result["description_placeholders"]["global_hide_thermostat_entities"] == (
         "Hidden"
     )
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_statistics_select_is_global_off_hidden_or_visible(
+    hass, entry
+) -> None:
+    result = await open_settings_step(hass, entry)
+    statistics = fields(result)["statistics"]
+
+    assert option_values(statistics) == ["global", "off", "hidden", "visible"]
+    assert statistics.config["translation_key"] == "statistics"
+    assert defaults(result)["statistics"] == "global"
+    # It is the last field of the form, after the outdoor cut-off.
+    assert list(fields(result))[-1] == "statistics"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+@pytest.mark.parametrize("choice", ["global", "off", "hidden", "visible"])
+async def test_room_stores_the_statistics_choice_like_the_other_selects(
+    hass, entry, choice
+) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"statistics": choice}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    data = next(iter(entry.subentries.values())).data
+    assert data["statistics"] == choice
+    expected = "off" if choice == "global" else choice
+    assert resolve_settings({}, data).statistics == expected
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+@pytest.mark.parametrize(
+    ("language", "global_text"),
+    [("en", "Hidden (keeps collecting)"), ("de", "Ausgeblendet (sammelt weiter)")],
+)
+async def test_room_statistics_placeholder_follows_the_global_option(
+    hass, language, global_text
+) -> None:
+    hass.config.language = language
+    entry = make_entry(hass, [], {"statistics": "hidden"})
+    result = await open_settings_step(hass, entry)
+
+    assert result["description_placeholders"]["global_statistics"] == global_text
 
 
 @pytest.mark.usefixtures("area_with_trvs")
@@ -1789,9 +1838,13 @@ WRITES = ["refresh_minutes", "verify_delay_seconds", "max_attempts", "min_delta_
 
 
 def options_input(
-    writes=None, thermostat=None, room_thermostat=None, windows_outdoor=None
+    writes=None,
+    thermostat=None,
+    room_thermostat=None,
+    windows_outdoor=None,
+    statistics=None,
 ) -> dict[str, Any]:
-    """Return what the options form submits: four sections."""
+    """Return what the options form submits: five sections."""
     return {
         "writes": {
             "refresh_minutes": 20,
@@ -1810,10 +1863,11 @@ def options_input(
         },
         "room_thermostat": dict(room_thermostat or {}),
         "windows_outdoor": dict(windows_outdoor or {}),
+        "statistics": dict(statistics or {}),
     }
 
 
-async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
+async def test_options_form_is_grouped_in_five_sections(hass, entry) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "init"
@@ -1822,6 +1876,7 @@ async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
         "thermostat",
         "room_thermostat",
         "windows_outdoor",
+        "statistics",
     ]
     for group in fields(result).values():
         assert group.options == {"collapsed": True}
@@ -1850,6 +1905,7 @@ async def test_options_form_is_grouped_in_four_sections(hass, entry) -> None:
         "outdoor_sensor",
         "outdoor_cutoff_celsius",
     ]
+    assert list(section_fields(result, "statistics")) == ["statistics"]
 
 
 async def test_options_form_shows_the_saved_number_else_the_default(
@@ -1929,12 +1985,19 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "hide_thermostat_entities",
         "setpoint_range",
         "window_warn_colder",
+        "statistics",
     }
 
     # Saving the defaults the form shows does not turn them into options.
     result = await hass.config_entries.options.async_init(entry.entry_id)
     shown = options_input()
-    for name in ("writes", "thermostat", "room_thermostat", "windows_outdoor"):
+    for name in (
+        "writes",
+        "thermostat",
+        "room_thermostat",
+        "windows_outdoor",
+        "statistics",
+    ):
         shown[name].update(suggested_values(result, name))
     result = await hass.config_entries.options.async_configure(result["flow_id"], shown)
     assert set(entry.options) == {
@@ -1944,6 +2007,7 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "hide_thermostat_entities",
         "setpoint_range",
         "window_warn_colder",
+        "statistics",
     }
 
 
@@ -1992,6 +2056,39 @@ async def test_options_store_the_hide_choice_flat(hass, entry, choice) -> None:
     assert resolve_settings(entry.options, {}).hide_thermostat_entities == choice
 
 
+async def test_options_statistics_select_is_off_hidden_or_visible_and_starts_off(
+    hass, entry
+) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    statistics = section_fields(result, "statistics")["statistics"]
+
+    assert option_values(statistics) == ["off", "hidden", "visible"]
+    assert statistics.config["translation_key"] == "statistics"
+    assert (
+        defaults(result, "statistics")
+        == {"statistics": const.DEFAULT_STATISTICS}
+        == {"statistics": "off"}
+    )
+
+
+@pytest.mark.parametrize("choice", ["off", "hidden", "visible"])
+async def test_options_store_the_statistics_choice_flat(hass, entry, choice) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], options_input(statistics={"statistics": choice})
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["statistics"] == choice
+    assert resolve_settings(entry.options, {}).statistics == choice
+
+
+async def test_options_form_shows_the_saved_statistics_choice(hass) -> None:
+    saved = make_entry(hass, [], {"statistics": "hidden"})
+    result = await hass.config_entries.options.async_init(saved.entry_id)
+
+    assert defaults(result, "statistics")["statistics"] == "hidden"
+
+
 async def test_options_form_shows_the_saved_hide_choice(hass) -> None:
     saved = make_entry(hass, [], {"hide_thermostat_entities": "on"})
     result = await hass.config_entries.options.async_init(saved.entry_id)
@@ -2034,6 +2131,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
         "hide_thermostat_entities": "off",
         "setpoint_range": "auto",
         "window_warn_colder": "on",
+        "statistics": "off",
     }
     # Whole numbers are stored as integers, not as the selector's floats.
     assert all(

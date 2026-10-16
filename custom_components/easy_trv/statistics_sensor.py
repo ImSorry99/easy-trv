@@ -186,12 +186,17 @@ def statistics_sensors(
     controller: RoomController,
     subentry: ConfigSubentry,
     device_info: DeviceInfo,
+    *,
+    hidden: bool,
 ) -> list[StatisticSensor]:
     """Return the statistics sensors of a room: its own and one set per thermostat.
 
     A room without window contacts has no window sensors, as the value does not
     exist for it. The heating time is always there; it is unavailable while no
-    thermostat of the room reports what it is doing.
+    thermostat of the room reports what it is doing. With ``hidden`` the sensors
+    that are new to the entity registry are registered hidden; the ones it
+    knows keep what they have (the reconciliation of the hidden entities
+    changes those).
     """
     stats = controller.statistics()
     sensors: list[StatisticSensor] = [
@@ -212,6 +217,9 @@ def statistics_sensors(
             )
             for description in THERMOSTAT_STATISTICS
         )
+    if hidden:
+        for sensor in sensors:
+            sensor.register_hidden()
     return sensors
 
 
@@ -253,6 +261,13 @@ class StatisticSensor(RestoreSensor):
         # What the sensor shows: for a total the highest value it has shown.
         self._shown: Reading = None
         self._available = True
+
+    def register_hidden(self) -> None:
+        """Register the sensor hidden if it is new to the entity registry.
+
+        One the registry knows keeps what it has: it is not hidden by this.
+        """
+        self._attr_entity_registry_visible_default = False
 
     @property
     def native_value(self) -> Reading:

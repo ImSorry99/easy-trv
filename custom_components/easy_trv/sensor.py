@@ -45,25 +45,28 @@ async def async_setup_entry(
     entry: EasyTrvConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add the heating-state sensor and the statistics sensors to each room.
+    """Add the heating-state sensor to each room, and the statistics sensors.
 
-    They sit on the room's subentry and device.
+    The statistics sensors only come for a room that collects statistics; one
+    that hides them has them registered hidden. They sit on the room's subentry
+    and device.
     """
     for subentry_id, controller in entry.runtime_data.rooms.items():
         subentry = entry.subentries[subentry_id]
         area_name = entry.runtime_data.areas[subentry_id]
-        async_add_entities(
-            [
-                RoomStateSensor(controller, subentry, area_name),
-                *statistics_sensors(
+        collect = entry.runtime_data.settings[subentry_id].statistics
+        sensors: list[SensorEntity] = [RoomStateSensor(controller, subentry, area_name)]
+        if collect != "off":
+            sensors.extend(
+                statistics_sensors(
                     hass,
                     controller,
                     subentry,
                     _room_device_info(subentry, area_name),
-                ),
-            ],
-            config_subentry_id=subentry_id,
-        )
+                    hidden=collect == "hidden",
+                )
+            )
+        async_add_entities(sensors, config_subentry_id=subentry_id)
 
 
 def _room_device_info(subentry: ConfigSubentry, area_name: str | None) -> DeviceInfo:

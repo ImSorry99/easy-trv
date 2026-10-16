@@ -122,6 +122,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "window_check_drop_kelvin",
         "outdoor_cutoff",
         "outdoor_cutoff_celsius",
+        "statistics",
     }
     entity_fields = {"trvs", "temp_sensors", "humidity_sensors", "window_contacts"}
     assert set(room["step"]["entities"]["data"]) == entity_fields
@@ -145,6 +146,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "thermostat",
         "room_thermostat",
         "windows_outdoor",
+        "statistics",
     }
     for section in options.values():
         assert set(section) == {"name", "description", "data", "data_description"}
@@ -177,6 +179,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "outdoor_sensor",
         "outdoor_cutoff_celsius",
     }
+    assert set(options["statistics"]["data"]) == {"statistics"}
     assert set(data["selector"]["outdoor_cutoff"]["options"]) == {"global", "off"}
     assert set(data["selector"]["window_detection"]["options"]) == {
         "global",
@@ -202,6 +205,12 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "global",
         "on",
         "off",
+    }
+    assert set(data["selector"]["statistics"]["options"]) == {
+        "global",
+        "off",
+        "hidden",
+        "visible",
     }
     assert set(data["selector"]["capability"]["options"]) == INTENTS
     assert set(data["selector"]["profile"]["options"]) == {"global", "auto"}
@@ -750,6 +759,59 @@ def test_hide_setting_texts_de() -> None:
         "global": "Global",
         "on": "Ausgeblendet",
         "off": "Eingeblendet",
+    }
+
+
+STATISTICS_TEXT_EN = (
+    "Control deviation, heating time, windows and Zigbee counters as long-term "
+    "statistics. Hidden collects without filling lists and dashboards. Off "
+    "creates no statistics sensors and removes existing ones."
+)
+STATISTICS_TEXT_DE = (
+    "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. "
+    "Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine "
+    "Statistik-Sensoren an und entfernt vorhandene."
+)
+
+
+def test_statistics_setting_texts_en() -> None:
+    en = load(EN)
+    room = en["config_subentries"]["room"]["step"]["settings"]
+    section = en["options"]["step"]["init"]["sections"]["statistics"]
+    assert room["data"]["statistics"] == "Collect statistics"
+    assert section["data"]["statistics"] == "Collect statistics"
+    assert section["data_description"]["statistics"] == STATISTICS_TEXT_EN
+    # The room form also says what Global is.
+    assert room["data_description"]["statistics"] == (
+        f"{STATISTICS_TEXT_EN} Global is currently {{global_statistics}}."
+    )
+    assert section["name"] == "Statistics"
+    assert section["description"].strip()
+    assert en["selector"]["statistics"]["options"] == {
+        "global": "Global",
+        "off": "Off",
+        "hidden": "Hidden (keeps collecting)",
+        "visible": "Visible",
+    }
+
+
+def test_statistics_setting_texts_de() -> None:
+    de = load(DE)
+    room = de["config_subentries"]["room"]["step"]["settings"]
+    section = de["options"]["step"]["init"]["sections"]["statistics"]
+    assert room["data"]["statistics"] == "Statistik erfassen"
+    assert section["data"]["statistics"] == "Statistik erfassen"
+    assert section["data_description"]["statistics"] == STATISTICS_TEXT_DE
+    assert room["data_description"]["statistics"] == (
+        f"{STATISTICS_TEXT_DE} Global ist derzeit {{global_statistics}}."
+    )
+    assert section["name"] == "Statistik"
+    assert section["description"].strip()
+    assert de["selector"]["statistics"]["options"] == {
+        "global": "Global",
+        "off": "Aus",
+        "hidden": "Ausgeblendet (sammelt weiter)",
+        "visible": "Sichtbar",
     }
 
 

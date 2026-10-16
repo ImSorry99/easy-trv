@@ -52,6 +52,11 @@ def test_new_setting_constants() -> None:
     assert const.DEFAULT_WINDOW_OPEN_DELAY == 30
 
 
+def test_statistics_setting_constants() -> None:
+    assert const.CONF_STATISTICS == "statistics"
+    assert const.DEFAULT_STATISTICS == "off"
+
+
 def test_every_default_has_a_matching_conf_constant():
     # CONF_* names that are not settings with a built-in default.
     not_settings = {
