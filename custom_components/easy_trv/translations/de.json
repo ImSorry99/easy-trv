@@ -100,6 +100,11 @@
             "window_check_drop_kelvin": "Erwartete Abkühlung bei der Prüfung (K)",
             "outdoor_cutoff": "Außentemperatur-Abschaltung",
             "outdoor_cutoff_celsius": "Abschalttemperatur außen",
+            "presence": "Anwesenheit",
+            "presence_entity": "Anwesenheits-Entität",
+            "presence_unknown": "Bei unbekannter Anwesenheit",
+            "away_action": "Bei Abwesenheit",
+            "away_setback_kelvin": "Absenkung (K)",
             "statistics": "Statistik erfassen"
           },
           "data_description": {
@@ -124,6 +129,11 @@
             "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Global ist derzeit {global_window_check_drop_kelvin}.",
             "outdoor_cutoff": "Global folgt der Abschalttemperatur aus den Integrationsoptionen (derzeit {global_outdoor_cutoff_celsius}), solange du unten keine eigene Temperatur einträgst. Aus schaltet diesen Raum nie wegen der Außentemperatur ab.",
             "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Braucht einen Außensensor in den Integrationsoptionen. -10,0 bis 30,0 °C. Leer = Global, derzeit {global_outdoor_cutoff_celsius}.",
+            "presence": "Global nimmt die Anwesenheits-Entität aus den Integrationsoptionen (derzeit {global_presence_entity}). Keine ignoriert die Abwesenheit für diesen Raum. Eigene nimmt die Entität darunter.",
+            "presence_entity": "Nur bei Anwesenheit Eigene: die Entität dieses Raums (Person, Gerät, Zone, Gruppe, Binärsensor oder Eingabe-Schalter).",
+            "presence_unknown": "Wie ein unbekannter oder nicht verfügbarer Zustand der Entität zählt. Global ist derzeit {global_presence_unknown}.",
+            "away_action": "Absenken senkt die Zieltemperatur um die Absenkung, nie unter die Frostschutztemperatur. Aus schaltet die Thermostate aus wie bei offenem Fenster. Global ist derzeit {global_away_action}.",
+            "away_setback_kelvin": "Um wie viel die Zieltemperatur bei Abwesenheit sinkt. 0,5 bis 10 K. Global ist derzeit {global_away_setback_kelvin}.",
             "statistics": "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine Statistik-Sensoren an und entfernt vorhandene. Global ist derzeit {global_statistics}."
           }
         }
@@ -137,7 +147,8 @@
         "name_exists": "Ein Raum mit diesem Namen existiert bereits.",
         "name_required": "Gib einen Namen für den Raum ein.",
         "timeout_range": "Gib 0 (aus) oder einen Wert zwischen 10 und 1440 Minuten ein.",
-        "setpoint_range": "Die minimale Solltemperatur muss unter der maximalen liegen."
+        "setpoint_range": "Die minimale Solltemperatur muss unter der maximalen liegen.",
+        "presence_entity_required": "Wähle eine Anwesenheits-Entität für diesen Raum oder stelle die Anwesenheit auf Global oder Keine."
       },
       "abort": {
         "reconfigure_successful": "Die Neukonfiguration war erfolgreich",
@@ -358,6 +369,22 @@
               "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Ein Raum kann das für sich abschalten. -10,0 bis 30,0 °C. Leer = {default_outdoor_cutoff_celsius}."
             }
           },
+          "presence": {
+            "name": "Abwesenheit",
+            "description": "Was ein Raum macht, wenn niemand zuhause ist. Die Anwesenheit kommt aus einer Entität, die du hier für alle Räume wählst; ein Raum kann eine eigene oder keine verwenden.",
+            "data": {
+              "presence_entity": "Anwesenheits-Entität",
+              "presence_unknown": "Bei unbekannter Anwesenheit",
+              "away_action": "Bei Abwesenheit",
+              "away_setback_kelvin": "Absenkung (K)"
+            },
+            "data_description": {
+              "presence_entity": "Eine Person, ein Gerät, eine Zone (zum Beispiel zone.home), eine Gruppe, ein Binärsensor oder ein Eingabe-Schalter. Zuhause heißt: Person oder Gerät home, Zone mit mindestens einer Person, Gruppe home oder an, Schalter oder Sensor an. Leer = keine Abwesenheit.",
+              "presence_unknown": "Wie ein unbekannter oder nicht verfügbarer Zustand der Entität zählt. Standard: abwesend.",
+              "away_action": "Absenken senkt die Zieltemperatur um die Absenkung, nie unter die Frostschutztemperatur. Aus schaltet die Thermostate aus wie bei offenem Fenster. Eine neue Zieltemperatur während der Abwesenheit gilt bis zur Rückkehr.",
+              "away_setback_kelvin": "Um wie viel die Zieltemperatur bei Abwesenheit sinkt. 0,5 bis 10 K. Leer = {default_away_setback_kelvin}."
+            }
+          },
           "statistics": {
             "name": "Statistik",
             "description": "Was Easy TRV je Raum als Langzeit-Statistik aufzeichnet.",
@@ -473,6 +500,27 @@
         "off": "Aus",
         "hidden": "Ausgeblendet (sammelt weiter)",
         "visible": "Sichtbar"
+      }
+    },
+    "presence": {
+      "options": {
+        "global": "Global",
+        "none": "Keine",
+        "own": "Eigene"
+      }
+    },
+    "presence_unknown": {
+      "options": {
+        "global": "Global",
+        "away": "Abwesend",
+        "home": "Zuhause"
+      }
+    },
+    "away_action": {
+      "options": {
+        "global": "Global",
+        "setback": "Absenken",
+        "off": "Aus"
       }
     }
   }

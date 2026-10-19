@@ -100,6 +100,11 @@
             "window_check_drop_kelvin": "Cooling expected by the check (K)",
             "outdoor_cutoff": "Outdoor cut-off",
             "outdoor_cutoff_celsius": "Outdoor cut-off temperature",
+            "presence": "Presence",
+            "presence_entity": "Presence entity",
+            "presence_unknown": "When presence is unknown",
+            "away_action": "While away",
+            "away_setback_kelvin": "Setback (K)",
             "statistics": "Collect statistics"
           },
           "data_description": {
@@ -124,6 +129,11 @@
             "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Global is currently {global_window_check_drop_kelvin}.",
             "outdoor_cutoff": "Global follows the outdoor cut-off temperature of the integration options (currently {global_outdoor_cutoff_celsius}), unless you enter a temperature of your own below. Off never switches this room off because of the outdoor temperature.",
             "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. Needs an outdoor sensor in the integration options. -10.0 to 30.0 °C. Empty = Global, currently {global_outdoor_cutoff_celsius}.",
+            "presence": "Global takes the presence entity of the integration options (currently {global_presence_entity}). None ignores presence for this room. Own takes the entity below.",
+            "presence_entity": "Only with presence Own: this room's entity (person, device tracker, zone, group, binary sensor or input boolean).",
+            "presence_unknown": "How an unknown or unavailable state of the entity counts. Global is currently {global_presence_unknown}.",
+            "away_action": "Lower takes the target down by the setback, never below the frost protection temperature. Off switches the thermostats off like an open window. Global is currently {global_away_action}.",
+            "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Global is currently {global_away_setback_kelvin}.",
             "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones. Global is currently {global_statistics}."
           }
         }
@@ -137,7 +147,8 @@
         "name_exists": "A room with this name already exists.",
         "name_required": "Enter a name for the room.",
         "timeout_range": "Enter 0 (off) or a value between 10 and 1440 minutes.",
-        "setpoint_range": "The minimum target temperature must be below the maximum."
+        "setpoint_range": "The minimum target temperature must be below the maximum.",
+        "presence_entity_required": "Choose a presence entity for this room, or set presence to Global or None."
       },
       "abort": {
         "reconfigure_successful": "Re-configuration was successful",
@@ -358,6 +369,22 @@
               "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. A room can turn this off for itself. -10.0 to 30.0 °C. Empty = {default_outdoor_cutoff_celsius}."
             }
           },
+          "presence": {
+            "name": "Presence",
+            "description": "What a room does while nobody is home. Presence comes from an entity you choose here for all rooms; a room can use its own or none.",
+            "data": {
+              "presence_entity": "Presence entity",
+              "presence_unknown": "When presence is unknown",
+              "away_action": "While away",
+              "away_setback_kelvin": "Setback (K)"
+            },
+            "data_description": {
+              "presence_entity": "A person, a device tracker, a zone (for example zone.home), a group, a binary sensor or an input boolean. Home means: person or tracker home, zone with at least one person, group home or on, switch or sensor on. Empty = no presence.",
+              "presence_unknown": "How an unknown or unavailable state of the entity counts. Default: away.",
+              "away_action": "Lower takes the target down by the setback, never below the frost protection temperature. Off switches the thermostats off like an open window. A new target while away holds until someone is home.",
+              "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Empty = {default_away_setback_kelvin}."
+            }
+          },
           "statistics": {
             "name": "Statistics",
             "description": "What Easy TRV records about each room as long-term statistics.",
@@ -473,6 +500,27 @@
         "off": "Off",
         "hidden": "Hidden (keeps collecting)",
         "visible": "Visible"
+      }
+    },
+    "presence": {
+      "options": {
+        "global": "Global",
+        "none": "None",
+        "own": "Own"
+      }
+    },
+    "presence_unknown": {
+      "options": {
+        "global": "Global",
+        "away": "Away",
+        "home": "Home"
+      }
+    },
+    "away_action": {
+      "options": {
+        "global": "Global",
+        "setback": "Lower",
+        "off": "Off"
       }
     }
   }

@@ -24,6 +24,8 @@ from homeassistant.helpers.selector import (
 
 from custom_components.easy_trv.const import (
     CONF_ADAPTIVE_MODE,
+    CONF_AWAY_ACTION,
+    CONF_AWAY_SETBACK,
     CONF_FROST_TEMPERATURE,
     CONF_HIDE_THERMOSTAT_ENTITIES,
     CONF_HYSTERESIS,
@@ -32,6 +34,9 @@ from custom_components.easy_trv.const import (
     CONF_OUTDOOR_CUTOFF,
     CONF_OUTDOOR_CUTOFF_CELSIUS,
     CONF_OUTDOOR_SENSOR,
+    CONF_PRESENCE,
+    CONF_PRESENCE_ENTITY,
+    CONF_PRESENCE_UNKNOWN,
     CONF_PROFILE,
     CONF_REFRESH_MINUTES,
     CONF_SENSOR_TIMEOUT,
@@ -68,13 +73,26 @@ SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
     CONF_WINDOW_WARN_COLDER: ("on", "off"),
     CONF_HIDE_THERMOSTAT_ENTITIES: ("on", "off"),
     CONF_STATISTICS: ("off", "hidden", "visible"),
+    CONF_PRESENCE_UNKNOWN: ("away", "home"),
+    CONF_AWAY_ACTION: ("setback", "off"),
 }
 # A choice that only a room has: the global outdoor cut-off threshold is the
 # value to keep ("global") or to ignore ("off") in this room.
 ROOM_SELECT_VALUES: Final[Mapping[str, tuple[str, ...]]] = {
     **SELECT_VALUES,
     CONF_OUTDOOR_CUTOFF: ("off",),
+    # The room's presence: the global entity, none, or its own entity.
+    CONF_PRESENCE: ("none", "own"),
 }
+# The domains a presence entity may have.
+PRESENCE_DOMAINS: Final = (
+    "person",
+    "device_tracker",
+    "zone",
+    "group",
+    "binary_sensor",
+    "input_boolean",
+)
 
 
 @dataclass(frozen=True)
@@ -103,6 +121,7 @@ NUMBERS: Final[Mapping[str, NumberSpec]] = {
     CONF_OUTDOOR_CUTOFF_CELSIUS: NumberSpec(
         -10.0, 30.0, 0.5, UnitOfTemperature.CELSIUS
     ),
+    CONF_AWAY_SETBACK: NumberSpec(0.5, 10.0, 0.5, UnitOfTemperature.KELVIN),
 }
 # Numbers whose value 0 (or, for the cut-off, no value) reads as "off".
 _OFF_AT_ZERO: Final = frozenset(
@@ -114,6 +133,7 @@ _SECTION_WRITES: Final = "writes"
 _SECTION_THERMOSTAT: Final = "thermostat"
 _SECTION_ROOM_THERMOSTAT: Final = "room_thermostat"
 _SECTION_WINDOWS_OUTDOOR: Final = "windows_outdoor"
+_SECTION_PRESENCE: Final = "presence"
 _SECTION_STATISTICS: Final = "statistics"
 SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
     _SECTION_WRITES: (
@@ -144,8 +164,16 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
         CONF_OUTDOOR_SENSOR,
         CONF_OUTDOOR_CUTOFF_CELSIUS,
     ),
+    _SECTION_PRESENCE: (
+        CONF_PRESENCE_ENTITY,
+        CONF_PRESENCE_UNKNOWN,
+        CONF_AWAY_ACTION,
+        CONF_AWAY_SETBACK,
+    ),
     _SECTION_STATISTICS: (CONF_STATISTICS,),
 }
+# The entity pickers of the options form; stored only when one is chosen.
+_OPTION_ENTITIES: Final = (CONF_OUTDOOR_SENSOR, CONF_PRESENCE_ENTITY)
 # The order of the room's settings form.
 ROOM_SETTING_KEYS: Final = (
     CONF_PROFILE,
@@ -169,6 +197,11 @@ ROOM_SETTING_KEYS: Final = (
     CONF_WINDOW_CHECK_DROP,
     CONF_OUTDOOR_CUTOFF,
     CONF_OUTDOOR_CUTOFF_CELSIUS,
+    CONF_PRESENCE,
+    CONF_PRESENCE_ENTITY,
+    CONF_PRESENCE_UNKNOWN,
+    CONF_AWAY_ACTION,
+    CONF_AWAY_SETBACK,
     CONF_STATISTICS,
 )
 ROOM_SELECT_KEYS: Final = (
@@ -179,6 +212,7 @@ ROOM_NUMBER_KEYS: Final = tuple(key for key in ROOM_SETTING_KEYS if key in NUMBE
 
 ERR_TIMEOUT_RANGE: Final = "timeout_range"
 ERR_SETPOINT_RANGE: Final = "setpoint_range"
+ERR_PRESENCE_ENTITY_REQUIRED: Final = "presence_entity_required"
 
 # The sensor timeout is either off (0) or within these bounds (minutes).
 _TIMEOUT_MIN: Final = 10
@@ -200,6 +234,11 @@ def _number_selector(key: str) -> NumberSelector:
     if spec.unit is not None:
         config["unit_of_measurement"] = spec.unit
     return NumberSelector(config)
+
+
+def _presence_selector() -> EntitySelector:
+    """Return the picker of a presence entity."""
+    return EntitySelector(EntitySelectorConfig(domain=list(PRESENCE_DOMAINS)))
 
 
 def _outdoor_sensor_selector() -> EntitySelector:
@@ -327,17 +366,34 @@ def room_settings_schema(profiles: Mapping[str, Profile]) -> vol.Schema:
             schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
                 key, [SETTING_GLOBAL, *ROOM_SELECT_VALUES[key]]
             )
+        elif key == CONF_PRESENCE_ENTITY:
+            schema[vol.Optional(key)] = _presence_selector()
         else:
             schema[vol.Optional(key)] = _number_selector(key)
     return vol.Schema(schema)
 
 
 def room_settings(user_input: Mapping[str, Any]) -> dict[str, Any]:
-    """Return what a room stores of its settings: the selects and filled numbers."""
-    return {
+    """Return what a room stores of its settings: the selects and filled numbers.
+
+    The room's own presence entity is kept only with ``presence: own``.
+    """
+    settings = {
         **{key: user_input[key] for key in ROOM_SELECT_KEYS},
         **stored_numbers(user_input, ROOM_NUMBER_KEYS),
     }
+    if user_input.get(CONF_PRESENCE) == "own" and user_input.get(CONF_PRESENCE_ENTITY):
+        settings[CONF_PRESENCE_ENTITY] = user_input[CONF_PRESENCE_ENTITY]
+    return settings
+
+
+def presence_error(user_input: Mapping[str, Any]) -> dict[str, str]:
+    """Return the form error of a room set to its own presence without an entity."""
+    if user_input.get(CONF_PRESENCE) == "own" and not user_input.get(
+        CONF_PRESENCE_ENTITY
+    ):
+        return {CONF_PRESENCE_ENTITY: ERR_PRESENCE_ENTITY_REQUIRED}
+    return {}
 
 
 # --- The options form --------------------------------------------------
@@ -361,6 +417,8 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
                 )
             elif key == CONF_OUTDOOR_SENSOR:
                 fields[vol.Optional(key)] = _outdoor_sensor_selector()
+            elif key == CONF_PRESENCE_ENTITY:
+                fields[vol.Optional(key)] = _presence_selector()
             else:
                 fields[vol.Optional(key)] = _number_selector(key)
         return section(vol.Schema(fields), {"collapsed": True})
@@ -371,20 +429,20 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
 
 
 def options_suggestions(current: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """Return the numbers and the sensor the options form shows.
+    """Return the numbers and the entities the options form shows.
 
-    A number shows its saved value, else its built-in default; the sensor and
+    A number shows its saved value, else its built-in default; the entities and
     the outdoor cut-off only when they are saved.
     """
     shown = {
         **effective_settings(current, list(NUMBERS)),
-        CONF_OUTDOOR_SENSOR: current.get(CONF_OUTDOOR_SENSOR),
+        **{key: current.get(key) for key in _OPTION_ENTITIES},
     }
     return {
         name: {
             key: shown[key]
             for key in keys
-            if (key in NUMBERS or key == CONF_OUTDOOR_SENSOR)
+            if (key in NUMBERS or key in _OPTION_ENTITIES)
             and shown.get(key) is not None
         }
         for name, keys in SECTIONS.items()
@@ -405,6 +463,7 @@ def stored_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
         **{key: flat[key] for key in SELECT_VALUES},
         **{key: value for key, value in numbers.items() if value != DEFAULTS[key]},
     }
-    if flat.get(CONF_OUTDOOR_SENSOR):
-        options[CONF_OUTDOOR_SENSOR] = flat[CONF_OUTDOOR_SENSOR]
+    for key in _OPTION_ENTITIES:
+        if flat.get(key):
+            options[key] = flat[key]
     return options
