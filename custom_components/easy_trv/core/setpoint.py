@@ -103,7 +103,11 @@ def on_set_setpoint(
     celsius: float,
     capability_of: _Capabilities,
 ) -> _Step:
-    """Take a setpoint from Home Assistant and write it to the thermostats."""
+    """Take a setpoint from Home Assistant and write it to the thermostats.
+
+    While presence acts on the room, the new setpoint is an override: the room
+    heats to it until presence reads home.
+    """
     if cfg.setpoint_range is None:
         return state, []
     state = _forget_knobs(state, capability_of(SetSetpoint(celsius)))
@@ -113,7 +117,29 @@ def on_set_setpoint(
         setpoint_source="ha",
         preset=Preset.NONE,
         frost_return=None,
+        away_override=state.away_override or away_acts(cfg, state),
     )
+    return _write_setpoint(cfg, state, now, capability_of)
+
+
+def on_presence(
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    away: bool,  # noqa: FBT001
+    capability_of: _Capabilities,
+) -> _Step:
+    """Take presence changing between home and away.
+
+    Home ends an override. A room that heats gets its new target when it
+    changes (lowered while away, the wish at home).
+    """
+    if away is state.away:
+        return state, []
+    before = target(cfg, state)
+    state = replace(state, away=away, away_override=state.away_override and away)
+    if cfg.setpoint_range is None or target(cfg, state) == before:
+        return state, []
     return _write_setpoint(cfg, state, now, capability_of)
 
 
@@ -171,8 +197,9 @@ def resume(
             continue
         writes.append((trv, SetHvacMode("heat")))
         writes.extend((trv, intent) for intent in resync)
-        if state.setpoint is not None:
-            writes.append((trv, SetSetpoint(state.setpoint)))
+        goal = target(cfg, state)
+        if goal is not None:
+            writes.append((trv, SetSetpoint(goal)))
     return write(state, now, writes, capability_of)
 
 
@@ -186,20 +213,23 @@ def leaving_off(cfg: RoomConfig, state: RoomState, mode: RoomMode | None) -> boo
     )
 
 
-def current(state: RoomState, intent: Intent) -> Intent | None:
+def current(cfg: RoomConfig, state: RoomState, intent: Intent) -> Intent | None:
     """Return what a retry of a setpoint or mode write should send now.
 
-    Never an older value than the room's; ``None`` when the room has none. During
-    a hold every thermostat is meant to be off, whatever mode the room wants.
+    Never an older value than the room's target; ``None`` when the room has
+    none. During a hold every thermostat is meant to be off, whatever mode the
+    room wants.
     """
     if isinstance(intent, SetSetpoint):
-        return None if state.setpoint is None else SetSetpoint(state.setpoint)
+        goal = target(cfg, state)
+        return None if goal is None else SetSetpoint(goal)
     if isinstance(intent, SetHvacMode):
         return SetHvacMode("off" if suspended(state) else "heat")
     return intent
 
 
-def retry(
+def retry(  # noqa: PLR0913
+    cfg: RoomConfig,
     state: RoomState,
     now: datetime,
     trv: str,
@@ -213,7 +243,7 @@ def retry(
     """
     if isinstance(intent, SetSetpoint) and suspended(state):
         return state, []
-    newest = current(state, intent)
+    newest = current(cfg, state, intent)
     if newest is None:
         return state, []
     return write(state, now, [(trv, newest)], capability_of)
@@ -429,10 +459,11 @@ def writable(cfg: RoomConfig, state: RoomState) -> list[str]:
 def _write_setpoint(
     cfg: RoomConfig, state: RoomState, now: datetime, capability_of: _Capabilities
 ) -> _Step:
-    """Write the room setpoint to every thermostat, unless writes are suspended."""
-    if state.setpoint is None or suspended(state):
+    """Write the room's target to every thermostat, unless writes are suspended."""
+    goal = target(cfg, state)
+    if goal is None or suspended(state):
         return state, []
-    intent = SetSetpoint(state.setpoint)
+    intent = SetSetpoint(goal)
     writes = [(trv, intent) for trv in writable(cfg, state)]
     return write(state, now, writes, capability_of)
 
@@ -468,13 +499,14 @@ def _sync_differing(
             writes.append((trv, mode))
         if driven:
             continue
+        goal = target(cfg, state)
         if (
-            state.setpoint is not None
+            goal is not None
             and not suspended(state)
             and known.reported_setpoint is not None
-            and abs(known.reported_setpoint - state.setpoint) > SAME
+            and abs(known.reported_setpoint - goal) > SAME
         ):
-            writes.append((trv, SetSetpoint(state.setpoint)))
+            writes.append((trv, SetSetpoint(goal)))
     return write(state, now, writes, capability_of)
 
 

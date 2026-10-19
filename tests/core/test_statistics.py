@@ -171,3 +171,9 @@ def test_deviation_none_when_the_sensor_has_no_value() -> None:
 
 def test_deviation_none_without_setpoint() -> None:
     assert deviation(room(setpoint=None)) is None
+
+
+def test_deviation_measures_against_the_lowered_target():
+    # Wish 21 °C, lowered to 18 °C while away: the room is 1 K above the target.
+    assert deviation(room(19.0, 21.0), goal=18.0) == 1.0
+    assert deviation(room(19.0, 21.0)) == -2.0

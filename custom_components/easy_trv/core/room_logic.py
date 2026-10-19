@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from custom_components.easy_trv.core import hold, observe, setpoint
 from custom_components.easy_trv.core.model import (
+    EVENT_AWAY,
     EVENT_FAILSAFE,
     EVENT_RECOVERED,
     EVENT_WRITE_FAILED,
@@ -30,6 +31,7 @@ from custom_components.easy_trv.core.model import (
     OperatingMode,
     OperationResult,
     OutdoorChanged,
+    PresenceChanged,
     RaiseIssue,
     RestoreRoom,
     RetryDue,
@@ -168,7 +170,7 @@ class RoomLogic:
                 )
             case KnobSettled():
                 state, commands = self._on_knob_settled(event, now, state)
-            case WindowChanged() | OutdoorChanged():
+            case WindowChanged() | OutdoorChanged() | PresenceChanged():
                 state, commands = self._on_hold_event(event, now, state)
             case _:
                 assert_never(event)
@@ -176,6 +178,7 @@ class RoomLogic:
         commands = [
             *self._drop_unsupported(state, commands),
             *self._left_off(before, state),
+            *self._away_event(before, state),
             *settled,
         ]
         state = self._supersede_pending(state, commands)
@@ -194,7 +197,7 @@ class RoomLogic:
             )
             trvs[trv.entity_id] = replace(known, health=self._baseline(known))
         readings = {**state.readings, **{r.entity_id: r for r in event.sensors}}
-        state = replace(state, readings=readings, trvs=trvs)
+        state = replace(state, readings=readings, trvs=trvs, away=event.away)
         state, commands = self._apply_settings(state, self._writable(state))
         # The holds first: a room that starts held is compared with the
         # thermostats as held, so it writes off and neither heat nor a value.
@@ -343,10 +346,15 @@ class RoomLogic:
         return self._write_value(state, active, now)
 
     def _on_hold_event(
-        self, event: WindowChanged | OutdoorChanged, now: datetime, state: RoomState
+        self,
+        event: WindowChanged | OutdoorChanged | PresenceChanged,
+        now: datetime,
+        state: RoomState,
     ) -> _Step:
-        """Route a window or outdoor change to ``hold``."""
+        """Route a window or outdoor change to ``hold``, presence to ``setpoint``."""
         cfg, capability_of = self._cfg, self._capability_of
+        if isinstance(event, PresenceChanged):
+            return setpoint.on_presence(cfg, state, now, event.away, capability_of)
         if isinstance(event, WindowChanged):
             return hold.on_window(
                 cfg,
@@ -431,7 +439,7 @@ class RoomLogic:
             state = self._with_trv(state, trv, updated)
             if isinstance(intent, SetSetpoint | SetHvacMode):
                 state, commands = setpoint.retry(
-                    state, now, trv, intent, self._capability_of
+                    self._cfg, state, now, trv, intent, self._capability_of
                 )
                 if not any(
                     isinstance(command, Execute)
@@ -1113,8 +1121,9 @@ class RoomLogic:
             or not (setpoint.device_driven(trv_state) or trv_state.left_off)
         ):
             intents.append(SetHvacMode("off" if setpoint.suspended(state) else "heat"))
-            if state.setpoint is not None and not setpoint.suspended(state):
-                intents.append(SetSetpoint(state.setpoint))
+            goal = setpoint.target(self._cfg, state)
+            if goal is not None and not setpoint.suspended(state):
+                intents.append(SetSetpoint(goal))
         return {self._capability_of(intent): intent for intent in intents}
 
     def _resync_trv(self, state: RoomState, now: datetime, trv: str) -> _Step:
@@ -1178,12 +1187,11 @@ class RoomLogic:
         """
         return trv_state.health is TrvHealth.ERROR or trv_state.last_error is not None
 
-    @staticmethod
-    def _retry_intent(intent: Intent, state: RoomState) -> Intent:
+    def _retry_intent(self, intent: Intent, state: RoomState) -> Intent:
         """Return what a retry should send: never an older temperature."""
         if isinstance(intent, SetRoomTemperature) and state.last_written is not None:
             return SetRoomTemperature(state.last_written)
-        return setpoint.current(state, intent) or intent
+        return setpoint.current(self._cfg, state, intent) or intent
 
     def _drop_unsupported(
         self, state: RoomState, commands: list[Command]
@@ -1230,6 +1238,18 @@ class RoomLogic:
                     state, command.trv, replace(current, resent=resent)
                 )
         return state
+
+    def _away_event(self, before: RoomState, after: RoomState) -> list[Command]:
+        """Fire ``easy_trv_away`` when presence starts or stops acting on the room."""
+        was = setpoint.away_acts(self._cfg, before)
+        now = setpoint.away_acts(self._cfg, after)
+        if was is now:
+            return []
+        return [
+            FireEvent(
+                EVENT_AWAY, {"room": self._cfg.name, "state": "on" if now else "off"}
+            )
+        ]
 
     def _left_off(self, before: RoomState, after: RoomState) -> list[Command]:
         """Raise or clear the issue of a thermostat a hold left off, as it changes."""
