@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-19
+
+### Added
+
+- Presence: a presence entity in the integration options (new section **Presence**: `presence_entity`), per room **Global**, **None** or its own entity (`presence`, `presence_entity`). A `person`, `device_tracker`, `zone`, `group`, `binary_sensor` or `input_boolean` decides whether someone is home
+- Setting **While away** (`away_action`): **Lower** (default) lowers the target by **Setback** (`away_setback_kelvin`, 0.5 to 10 K, default 3 K, never below the frost protection temperature); **Off** holds the room off like an open window
+- Setting **When presence is unknown** (`presence_unknown`): an unknown or unavailable presence counts as **Away** (default) or **Home**
+- A new target while away, in Home Assistant or at a knob, overrides presence until someone is home; it survives a restart
+- Heating state `setback_away`; `off_away` now occurs. The hint names the presence entity
+- Room thermostat attributes `presence`, `away_target` and `away_override`; event `easy_trv_away`
+
+### Changed
+
+- The control deviation measures against the lowered target while a room is lowered
+
 ## [0.6.1] - 2026-10-16
 
 ### Added
@@ -144,7 +159,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/ImSorry99/easy-trv/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/ImSorry99/easy-trv/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ImSorry99/easy-trv/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/ImSorry99/easy-trv/compare/v0.5.0...v0.5.1

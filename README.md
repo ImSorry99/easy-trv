@@ -4,7 +4,7 @@ Easy TRV is a Home Assistant integration that lets Sonoff TRVZB radiator thermos
 
 It works native first: the thermostat keeps regulating by itself, Home Assistant only feeds it a value and watches over it. There is no regulator and no entity per setting. Each room gets one diagnostic sensor for what it is doing and why (Heating state) and one thin room thermostat (`climate`) that sets the same target and mode (off, heat, frost protection) on all its thermostats. Optional diagnostic [statistics sensors](#statistics) (off by default) count writes, failed writes, dropouts, window openings and heating time, for later analysis.
 
-Status: version 0.6.1 is released (room thermostat with frost protection in its mode list, window contacts, outdoor cut-off, one diagnostic heating state sensor per room with a plain-text hint, a report of silent window contacts, endless retries of writes that did not arrive, an area for every room and optional hiding of the thermostat entities, and diagnostic statistics sensors for rooms and thermostats that are off, hidden or visible per room); see the [`CHANGELOG`](CHANGELOG.md) for what each version brought. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
+Status: version 0.7.0 is released (presence: rooms are lowered or switched off while nobody is home; room thermostat with frost protection in its mode list, window contacts, outdoor cut-off, one diagnostic heating state sensor per room with a plain-text hint, a report of silent window contacts, endless retries of writes that did not arrive, an area for every room and optional hiding of the thermostat entities, and diagnostic statistics sensors for rooms and thermostats that are off, hidden or visible per room); see the [`CHANGELOG`](CHANGELOG.md) for what each version brought. See [`REQUIREMENTS.md`](REQUIREMENTS.md) for what Easy TRV must do and [`docs/README.md`](docs/README.md) for the documentation map.
 
 ## Supported devices
 
@@ -74,6 +74,10 @@ Every setting exists in three layers, and the most specific one that is set wins
 | Cooling expected by the check (K) | 0.1 to 3.0 | 0.3 | How far the room temperature must have fallen by then. |
 | Outdoor cut-off temperature | -10 to 30 °C | empty (off) | The room is switched off from this outdoor temperature on (see [Outdoor cut-off](#outdoor-cut-off)). A room can choose **Global**, **Off** or its own threshold. |
 | Outdoor temperature sensor (global only) | a temperature sensor | none | The sensor the cut-off reads. |
+| Presence entity | a person, device tracker, zone, group, binary sensor or input boolean | none | Where presence comes from (see [Presence](#presence)). A room chooses **Global**, **None** or its own entity. |
+| When presence is unknown | away, home | away | How an unknown or unavailable state of the presence entity counts. |
+| While away | lower, off | lower | Lower takes the target down by the setback; off switches the room off like an open window. |
+| Setback | 0.5 to 10 K in 0.5 K steps | 3 | How far the target goes down while away, never below the frost protection temperature. |
 | Collect statistics | off, hidden, visible | off | Whether the room has the [statistics sensors](#statistics): **off** creates none and removes existing ones, **hidden** creates them and keeps collecting but hides them from lists and automatic dashboards, **visible** shows them. See [Collecting statistics](#collecting-statistics). |
 | Profile (rooms only) | `auto` or a profile id | `auto` | `auto` takes the first profile that matches all thermostats of the room. Or choose a shipped or [user profile](#profiles). The profile is not part of the integration options. |
 
@@ -97,7 +101,7 @@ Each room has one `climate.<room>_heating` (for example `climate.living_room_hea
 - **No presets.** Frost protection is a mode of the room thermostat, not a preset.
 - **Range:** with the setpoint range **automatic** (the default), the `min_temp` and `max_temp` the thermostats show in Home Assistant when the room is set up; with several thermostats the narrowest range that all of them accept. A thermostat that shows no limits is left out, and without any the profile's range applies (4 to 35 °C for the TRVZB). With **manual**, the room's minimum and maximum target temperature. Either way the range is narrowed to the profile's limits, in 0.5 K steps for the TRVZB. A changed limit on a thermostat is read at the next reload of the integration.
 - **`current_temperature`:** the value last sent to the thermostats, else the active sensor's.
-- **Attributes:** `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost` or `initial`), `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff` and `note`.
+- **Attributes:** `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost` or `initial`), `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff`, `note`, `presence`, `away_target` and `away_override` (see [Presence](#presence)).
 - **`in_sync`** is true when every thermostat is verified at what it should show now (off during a hold).
 
 ### Modes
@@ -153,6 +157,26 @@ Choose any number of window, door, opening or garage door `binary_sensor` entiti
 
 Choose an outdoor temperature sensor in the integration options (**Windows and outdoor**) and a cut-off temperature, globally or per room (a room can also choose **Off**). A room is switched off at or above the threshold, like with an open window, and switched on again when the outdoor temperature falls below the threshold minus 0.5 K. There is no averaging. An unavailable sensor ends the cut-off and writes a warning to the log. The state shows as `outdoor_cutoff`, the event `easy_trv_outdoor_hold` fires. A window hold and the cut-off are independent: the room returns when both are clear.
 
+## Presence
+
+Choose a presence entity in the integration options (**Presence**); every room with **Global** follows it. A room can choose its own entity instead, or **None** to ignore presence.
+
+| Domain | Home | Away |
+|---|---|---|
+| `person`, `device_tracker` | `home` | any other state (`not_home`, a zone name) |
+| `zone` (for example `zone.home`) | a number above 0 | `0` |
+| `group` | `home` or `on` | `not_home` or `off` |
+| `binary_sensor`, `input_boolean` | `on` | `off` |
+
+Any other state (`unknown`, `unavailable`, a missing entity) counts as set in **When presence is unknown**: away by default, or home. Away counts at once; for a delay, use a template or group helper in Home Assistant.
+
+- **Lower** (default): the thermostats get the room's target minus the setback (default 3 K), never below the frost protection temperature; a target already below it stays. The room thermostat keeps showing your target; the attribute `away_target` shows the value sent, and the heating state is `setback_away`.
+- **Off:** the room is held off like with an open window (heating state `off_away`). It is a third hold beside the window and the outdoor cut-off; the room returns when all are clear.
+- **Home again:** the target (and the mode) come back.
+- Presence acts only while the room's mode is **Heat**; **Off** stays off and **Frost protection** is below any setback.
+- **Override:** a new target while away, set in Home Assistant or turned at a knob, holds until presence reads home: the room heats normally (with **Off**, it ends the away hold). The next time everybody leaves, presence acts again. The override survives a restart (attribute `away_override`). A thermostat that still reports the target from before the room was lowered is not taken as a knob turn; it gets the lowered value again.
+- The event `easy_trv_away` (`room`, `state`: `on` or `off`) fires when presence starts or stops acting on the room. The room thermostat shows `presence` (`home`, `away` or `none`).
+
 ## How it behaves
 
 - **Active sensor.** A sensor is usable if it is available, shows a number in °C (°F is converted), lies between 0 and 99.9 °C, and has reported within the sensor timeout. The first usable sensor in the room's order is the active one.
@@ -178,7 +202,7 @@ The sensor, for example `sensor.living_room_heating_state`, sits in the diagnost
 | `off_manual` | Off (manual) / Aus (manuell) | The room's mode is off. It comes before the holds: while you have switched the room off, a window decides nothing, and the room stays off after the window closes. |
 | `off_window` | Off: window/door open / Aus: Fenster/Tür offen | An open window contact holds the room off (the opening delay has passed). |
 | `off_outdoor` | Off: outdoor temperature / Aus: Außentemperatur | The outdoor cut-off holds the room off. |
-| `off_away` | Off: away / Aus: Abwesenheit | Does not occur yet; reserved for presence. |
+| `off_away` | Off: away / Aus: Abwesenheit | Presence reads away and the room's **While away** is off (see [Presence](#presence)). |
 | `window_pending` | Window open, switching off soon / Fenster offen, schaltet gleich ab | A contact is open and the opening delay is still running. |
 | `emergency` | Emergency mode / Notbetrieb | The room has temperature sensors but the thermostats are not on the external source (no usable sensor, for example), or a thermostat signalled its fail-safe within the last refresh interval. |
 | `restricted_unavailable` | Restricted: thermostat not reachable / Eingeschränkt: TRV nicht erreichbar | A thermostat is unavailable. |
@@ -187,6 +211,7 @@ The sensor, for example `sensor.living_room_heating_state`, sits in the diagnost
 | `restricted_schedule` | Restricted: thermostat on its schedule / Eingeschränkt: TRV im Wochenplan | A thermostat runs its own weekly schedule (`auto`). |
 | `restricted_window_phase` | Restricted: thermostat's window detection active / Eingeschränkt: TRV-Fenstererkennung aktiv | A thermostat is in its own open-window phase (it shows 12 °C). |
 | `boost` | Manual (boost) / Handbetrieb (Boost) | Does not occur yet; reserved for boost. |
+| `setback_away` | Lowered: away / Abgesenkt: abwesend | Presence reads away and the room is lowered below its target. |
 | `frost` | Frost protection / Frostschutz | The room's mode is frost protection. |
 | `heating` | Heating / Heizbetrieb | The room's mode is heat. |
 
@@ -253,7 +278,7 @@ Events are fired on the Home Assistant bus (Developer tools > Events) and can tr
 
 Payload of these three: `room`, `room_id`, `trv_entity_id`, `ieee`. `easy_trv_write_failed` adds `attribute` (the capability that failed, for example `external_temperature`), `attempts` and `error`.
 
-Four more events report the room thermostat, the holds and the heating state. `easy_trv_setpoint_adopted` (`room`, `trv`, `value`) fires when a knob turn or mode change at a thermostat becomes the room's. `easy_trv_window_hold` (`room`, `state`: `open` or `closed`) and `easy_trv_outdoor_hold` (`room`, `state`: `on` or `off`) fire when a hold starts or ends. `easy_trv_state_changed` (`room`, `state`, `previous`, `reasons`) fires when the [heating state](#heating-state) changes.
+Four more events report the room thermostat, the holds and the heating state. `easy_trv_setpoint_adopted` (`room`, `trv`, `value`) fires when a knob turn or mode change at a thermostat becomes the room's. `easy_trv_window_hold` (`room`, `state`: `open` or `closed`) and `easy_trv_outdoor_hold` (`room`, `state`: `on` or `off`) fire when a hold starts or ends, and `easy_trv_away` (`room`, `state`: `on` or `off`) when presence starts or stops acting on the room. `easy_trv_state_changed` (`room`, `state`, `previous`, `reasons`) fires when the [heating state](#heating-state) changes.
 
 ### Debug log
 
@@ -370,7 +395,8 @@ Firmware minimums are part of a profile. Below the profile's minimum firmware no
 - **Writes while a room is off.** No temperature is written while the room is off or held. Whether a write could wake an `off` thermostat is one of the open checks in [`docs/testing-on-device.md`](docs/testing-on-device.md).
 - **ZHA and the Sonoff TRVZB only.** Other models need their own profile.
 - **ZHA's internal API.** Writing and verifying attributes needs ZHA's internal API. Easy TRV keeps all of it in one adapter module, so a future Home Assistant change is fixed in one place. If the API breaks, the `zha_api_incompatible` issue says so.
-- **Not used yet:** humidity sensors, presence, presets, battery warnings.
+- **Presence:** one entity per room (the global one or its own), no vacation with a return time, no delay before away counts.
+- **Not used yet:** humidity sensors, presets, battery warnings.
 
 ## Removal
 

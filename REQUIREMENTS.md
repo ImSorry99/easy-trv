@@ -53,8 +53,8 @@ Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is der
 
 ## Out of scope for Phases 1 and 2
 
-Native weekly schedules, presets beyond frost, night setback, presence, per-thermostat profiles or contacts, battery warnings, Zigbee2MQTT, other thermostat models.
+Native weekly schedules, presets beyond frost, night setback, vacation with a return time, per-thermostat profiles or contacts, battery warnings, Zigbee2MQTT, other thermostat models.
 
 ## Roadmap
 
-The ordered roadmap lives in the maintainer's planning notes outside this repo. Candidates, each as profile operations where possible: presence, native weekly schedules, validation that no weekly schedule lives on the device, presets, open-plan rooms, humidity use, learning.
+The ordered roadmap lives in the maintainer's planning notes outside this repo. Candidates, each as profile operations where possible: vacation and presence delays, native weekly schedules, validation that no weekly schedule lives on the device, presets, open-plan rooms, humidity use, learning.
