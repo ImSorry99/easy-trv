@@ -67,6 +67,8 @@ def test_every_default_has_a_matching_conf_constant():
         const.CONF_NAME,
         const.CONF_OUTDOOR_CUTOFF,
         const.CONF_OUTDOOR_SENSOR,
+        const.CONF_PRESENCE,
+        const.CONF_PRESENCE_ENTITY,
         const.CONF_WINDOW_CONTACTS,
     }
     conf_values = {
@@ -75,3 +77,13 @@ def test_every_default_has_a_matching_conf_constant():
         if name.startswith("CONF_") and isinstance(value, str)
     }
     assert set(DEFAULTS) == conf_values - not_settings
+
+
+def test_presence_constants() -> None:
+    assert const.CONF_PRESENCE == "presence"
+    assert const.CONF_PRESENCE_ENTITY == "presence_entity"
+    assert const.CONF_PRESENCE_UNKNOWN == "presence_unknown"
+    assert const.CONF_AWAY_ACTION == "away_action"
+    assert const.CONF_AWAY_SETBACK == "away_setback_kelvin"
+    assert (const.DEFAULT_AWAY_ACTION, const.DEFAULT_AWAY_SETBACK) == ("setback", 3.0)
+    assert const.DEFAULT_PRESENCE_UNKNOWN == "away"

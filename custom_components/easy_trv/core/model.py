@@ -233,6 +233,10 @@ class RoomConfig:
     # How long a contact must stay open before the window counts as open;
     # ``None``: at once.
     window_open_delay: timedelta | None = None
+    # What away does; ``None``: the room has no presence entity.
+    away_action: Literal["setback", "off"] | None = None
+    # How far a room is lowered while away (kelvin).
+    away_setback: float = 3.0
 
 
 # --- State ---------------------------------------------------------------
@@ -323,6 +327,11 @@ class RoomState:
     outdoor_hold: bool = False
     # The latest outdoor temperature; None = unknown or no outdoor sensor.
     outdoor: float | None = None
+    # Presence reads away (after the unknown policy); only matters with an
+    # ``away_action``.
+    away: bool = False
+    # A target set while away: the room heats normally until presence is home.
+    away_override: bool = False
     window_warned: bool = False
     window_suspect: bool = False
     # Whether the stuck-contact check already ran for the current opening.

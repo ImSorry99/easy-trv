@@ -290,3 +290,20 @@ def test_the_window_open_delay_reaches_the_room_config(seconds, delay) -> None:
     )
 
     assert config.window_open_delay == delay
+
+
+@pytest.mark.parametrize(("entity", "action"), [(None, None), ("zone.home", "setback")])
+def test_room_config_has_away_only_with_a_presence_entity(entity, action) -> None:
+    gateway = FakeGateway()
+    refs = {"climate.a": gateway.add_device("climate.a", IEEE_A)}
+    data = room_data(trvs=["climate.a"], away_setback_kelvin=2.5)
+    config = room_config_from_subentry(
+        "sub1",
+        "Living",
+        data,
+        refs,
+        resolve_settings({}, data),
+        NATIVE,
+        presence_entity=entity,
+    )
+    assert (config.away_action, config.away_setback) == (action, 2.5)

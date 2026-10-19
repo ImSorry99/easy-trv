@@ -57,6 +57,11 @@ CONF_OUTDOOR_CUTOFF: Final = "outdoor_cutoff"  # room-only: global / off
 CONF_OUTDOOR_CUTOFF_CELSIUS: Final = "outdoor_cutoff_celsius"
 CONF_WINDOW_OPEN_DELAY: Final = "window_open_delay_seconds"
 CONF_STATISTICS: Final = "statistics"
+CONF_PRESENCE: Final = "presence"
+CONF_PRESENCE_ENTITY: Final = "presence_entity"
+CONF_PRESENCE_UNKNOWN: Final = "presence_unknown"
+CONF_AWAY_ACTION: Final = "away_action"
+CONF_AWAY_SETBACK: Final = "away_setback_kelvin"
 # Entry-level and room entity configuration (not settings with a default)
 CONF_OUTDOOR_SENSOR: Final = "outdoor_sensor"
 CONF_WINDOW_CONTACTS: Final = "window_contacts"
@@ -82,6 +87,9 @@ DEFAULT_WINDOW_CHECK_DROP: Final = _settings.DEFAULT_WINDOW_CHECK_DROP
 DEFAULT_OUTDOOR_CUTOFF_CELSIUS: Final = _settings.DEFAULT_OUTDOOR_CUTOFF_CELSIUS
 DEFAULT_WINDOW_OPEN_DELAY: Final = _settings.DEFAULT_WINDOW_OPEN_DELAY_SECONDS
 DEFAULT_STATISTICS: Final = _settings.DEFAULT_STATISTICS
+DEFAULT_PRESENCE_UNKNOWN: Final = _settings.DEFAULT_PRESENCE_UNKNOWN
+DEFAULT_AWAY_ACTION: Final = _settings.DEFAULT_AWAY_ACTION
+DEFAULT_AWAY_SETBACK: Final = _settings.DEFAULT_AWAY_SETBACK
 
 # Timing
 DEBOUNCE_SECONDS: Final = 5.0

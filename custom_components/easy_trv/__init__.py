@@ -42,7 +42,11 @@ from custom_components.easy_trv.const import (
 )
 from custom_components.easy_trv.controller import RoomController
 from custom_components.easy_trv.core.model import RoomConfig, RoomParams, TrvConfig
-from custom_components.easy_trv.core.settings import RoomSettings, resolve_settings
+from custom_components.easy_trv.core.settings import (
+    RoomSettings,
+    resolve_presence_entity,
+    resolve_settings,
+)
 from custom_components.easy_trv.labels import (
     async_capability_labels,
     localized_number,
@@ -198,13 +202,14 @@ def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shape
     profile: Profile,
     *,
     thermostat_limits: tuple[float, float] | None = None,
+    presence_entity: str | None = None,
 ) -> RoomConfig:
     """Build the :class:`RoomConfig` of a ``room`` subentry.
 
     ``device_refs`` must hold every thermostat listed in ``data``. The
     thermostat settings come from ``settings``, the resolved settings of the
     room; ``profile`` and, for an ``auto`` range, ``thermostat_limits`` limit
-    the setpoint range.
+    the setpoint range. Without a ``presence_entity`` the room ignores presence.
 
     Raises:
         ValueError: If the setpoint ranges of the room and the profile are disjoint.
@@ -246,6 +251,8 @@ def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shape
             if settings.window_open_delay_seconds
             else None
         ),
+        away_action=settings.away_action if presence_entity else None,
+        away_setback=settings.away_setback_kelvin,
     )
 
 
@@ -458,6 +465,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
         settings,
         profile,
         thermostat_limits=thermostat_limits(hass, subentry.data[CONF_TRVS]),
+        presence_entity=resolve_presence_entity(entry.options, subentry.data),
     )
     params = RoomParams.from_settings(settings)
     controller = RoomController(

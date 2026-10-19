@@ -126,6 +126,9 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "outdoor_cutoff_celsius": None,
         "window_open_delay_seconds": 30,
         "statistics": "off",
+        "presence_unknown": "away",
+        "away_action": "setback",
+        "away_setback_kelvin": 3.0,
     }
 
 

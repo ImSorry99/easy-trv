@@ -7,6 +7,7 @@ from custom_components.easy_trv.core.settings import (
     RoomSettings,
     hysteresis_kelvin,
     overrides,
+    resolve_presence_entity,
     resolve_settings,
 )
 
@@ -251,3 +252,44 @@ def test_statistics_follow_the_global_option_and_a_room_can_override_it(value):
     other = "visible" if value != "visible" else "hidden"
     assert resolve_settings(options, {"statistics": other}).statistics == other
     assert resolve_settings({}, {"statistics": value}).statistics == value
+
+
+def test_presence_settings_defaults():
+    s = resolve_settings({}, {})
+    assert (s.presence_unknown, s.away_action, s.away_setback_kelvin) == (
+        "away",
+        "setback",
+        3.0,
+    )
+    room = {"away_action": "off", "away_setback_kelvin": 2, "presence_unknown": "home"}
+    s = resolve_settings({"away_action": "setback"}, room)
+    assert (s.presence_unknown, s.away_action, s.away_setback_kelvin) == (
+        "home",
+        "off",
+        2.0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("options", "room", "entity"),
+    [
+        ({}, {}, None),
+        ({"presence_entity": "zone.home"}, {}, "zone.home"),
+        ({"presence_entity": "zone.home"}, {"presence": "global"}, "zone.home"),
+        ({"presence_entity": "zone.home"}, {"presence": "none"}, None),
+        (
+            {"presence_entity": "zone.home"},
+            {"presence": "own", "presence_entity": "person.a"},
+            "person.a",
+        ),
+        ({}, {"presence": "own"}, None),
+        ({"presence_entity": ""}, {}, None),
+    ],
+)
+def test_resolve_presence_entity(options, room, entity):
+    assert resolve_presence_entity(options, room) == entity
+
+
+def test_the_room_presence_choice_is_kept_as_an_override():
+    assert overrides({"presence": "none"}) == {"presence": "none"}
+    assert overrides({"presence": "global"}) == {}

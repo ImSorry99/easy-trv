@@ -33,6 +33,9 @@ DEFAULT_WINDOW_CHECK_DROP: Final = 0.3
 DEFAULT_OUTDOOR_CUTOFF_CELSIUS: Final[float | None] = None  # None = off
 DEFAULT_WINDOW_OPEN_DELAY_SECONDS: Final = 30
 DEFAULT_STATISTICS: Final = "off"
+DEFAULT_PRESENCE_UNKNOWN: Final = "away"
+DEFAULT_AWAY_ACTION: Final = "setback"
+DEFAULT_AWAY_SETBACK: Final = 3.0
 
 _KEY_HYSTERESIS: Final = "hysteresis"
 _KEY_SETPOINT_RANGE: Final = "setpoint_range"
@@ -40,6 +43,8 @@ _KEY_SETPOINT_MIN: Final = "setpoint_min"
 _KEY_SETPOINT_MAX: Final = "setpoint_max"
 _KEY_OUTDOOR_CUTOFF: Final = "outdoor_cutoff"  # room-only switch: global / off
 _KEY_OUTDOOR_CUTOFF_CELSIUS: Final = "outdoor_cutoff_celsius"
+_KEY_PRESENCE: Final = "presence"  # room-only: global / none / own
+_KEY_PRESENCE_ENTITY: Final = "presence_entity"
 _OFF: Final = "off"
 # Settings whose default is None but that are numbers when set.
 _FLOAT_KEYS: Final = frozenset({_KEY_OUTDOOR_CUTOFF_CELSIUS})
@@ -67,6 +72,9 @@ DEFAULTS: Final[Mapping[str, Any]] = {
     _KEY_OUTDOOR_CUTOFF_CELSIUS: DEFAULT_OUTDOOR_CUTOFF_CELSIUS,
     "window_open_delay_seconds": DEFAULT_WINDOW_OPEN_DELAY_SECONDS,
     "statistics": DEFAULT_STATISTICS,
+    "presence_unknown": DEFAULT_PRESENCE_UNKNOWN,
+    "away_action": DEFAULT_AWAY_ACTION,
+    "away_setback_kelvin": DEFAULT_AWAY_SETBACK,
 }
 
 
@@ -100,6 +108,11 @@ class RoomSettings:
     # off: no statistics sensors; hidden: they collect but are hidden in Home
     # Assistant; visible: they collect and are shown
     statistics: Literal["off", "hidden", "visible"]
+    # How an unknown presence counts: away (default) or home
+    presence_unknown: Literal["away", "home"]
+    # What away does: lower the target or switch the room off
+    away_action: Literal["setback", "off"]
+    away_setback_kelvin: float
 
 
 def hysteresis_kelvin(stored: str | float) -> float:
@@ -127,14 +140,29 @@ def _is_set(key: str, value: object) -> bool:
 def overrides(room: Mapping[str, Any]) -> dict[str, Any]:
     """Return the settings a room sets itself, i.e. the keys that are not global.
 
-    ``outdoor_cutoff`` is a room-only switch, not a setting with a default. It is
-    kept when it is ``off``.
+    ``outdoor_cutoff`` and ``presence`` are room-only switches, not settings
+    with a default. They are kept when they are not ``global``.
     """
     return {
         key: room[key]
-        for key in (*DEFAULTS, _KEY_OUTDOOR_CUTOFF)
+        for key in (*DEFAULTS, _KEY_OUTDOOR_CUTOFF, _KEY_PRESENCE)
         if key in room and _is_set(key, room[key])
     }
+
+
+def resolve_presence_entity(
+    options: Mapping[str, Any], room: Mapping[str, Any]
+) -> str | None:
+    """Return the presence entity of a room, ``None`` if it has no presence.
+
+    The room's ``presence`` decides: ``global`` (or nothing) takes the entity of
+    the options, ``none`` takes none, ``own`` takes the room's own entity.
+    """
+    choice = room.get(_KEY_PRESENCE) or GLOBAL
+    if choice == "none":
+        return None
+    layer = room if choice == "own" else options
+    return layer.get(_KEY_PRESENCE_ENTITY) or None
 
 
 def _coerce(key: str, value: Any) -> Any:

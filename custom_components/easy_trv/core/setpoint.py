@@ -51,6 +51,38 @@ def clamp(value: float, rng: tuple[float, float, float]) -> float:
     return min(max(value, low), high)
 
 
+def away_acts(cfg: RoomConfig, state: RoomState) -> bool:
+    """Return whether presence acts on the room now.
+
+    The room has a presence entity, it reads away, nobody overrode it, and the
+    room heats (operating mode heat).
+    """
+    return (
+        cfg.away_action is not None
+        and state.away
+        and not state.away_override
+        and operation(state) is OperatingMode.HEAT
+    )
+
+
+def lowered(cfg: RoomConfig, state: RoomState) -> bool:
+    """Return whether the room is lowered because nobody is home."""
+    return away_acts(cfg, state) and cfg.away_action == "setback"
+
+
+def target(cfg: RoomConfig, state: RoomState) -> float | None:
+    """Return the value the thermostats should show: the wish, unless lowered.
+
+    Lowered is the wish minus the setback, never below the frost protection
+    temperature (a wish below it stays) and rounded and clamped to the range.
+    """
+    wish = state.setpoint
+    if wish is None or cfg.setpoint_range is None or not lowered(cfg, state):
+        return wish
+    floor = min(cfg.frost_temperature, wish)
+    return clamp(max(wish - cfg.away_setback, floor), cfg.setpoint_range)
+
+
 def holding(state: RoomState) -> bool:
     """Return whether a window or outdoor hold keeps the thermostats off."""
     return state.window_open or state.outdoor_hold
