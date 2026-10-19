@@ -304,8 +304,9 @@ class RoomLogic:
     ) -> _Step:
         """Select off, frost or heat; leaving off resyncs source and value first."""
         resync: list[Intent] = []
-        if event.operation is not OperatingMode.OFF and setpoint.leaving_off(
-            self._cfg, state, RoomMode.HEAT
+        if event.operation is not OperatingMode.OFF and (
+            setpoint.leaving_off(self._cfg, state, RoomMode.HEAT)
+            or setpoint.held_by_away_only(state)
         ):
             state, resync = self._source_intents(state, now)
         return setpoint.on_set_operation(

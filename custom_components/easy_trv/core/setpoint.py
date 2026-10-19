@@ -127,19 +127,22 @@ def on_set_setpoint(  # noqa: PLR0913
     heats to it until presence reads home. An override that ends the away hold
     resumes the thermostats, writing the ``resync`` intents too.
     """
-    ends_away_hold = held_by_away_only(state)
     if cfg.setpoint_range is None:
         return state, []
+    held_by_away = held_by_away_only(state)
+    clamped = clamp(celsius, cfg.setpoint_range)
+    # Only a new value overrides presence; the same one sent again does not.
+    changed = state.setpoint is None or abs(clamped - state.setpoint) > SAME
     state = _forget_knobs(state, capability_of(SetSetpoint(celsius)))
     state = replace(
         state,
-        setpoint=clamp(celsius, cfg.setpoint_range),
+        setpoint=clamped,
         setpoint_source="ha",
         preset=Preset.NONE,
         frost_return=None,
-        away_override=state.away_override or away_acts(cfg, state),
+        away_override=state.away_override or (changed and away_acts(cfg, state)),
     )
-    if ends_away_hold:
+    if held_by_away and not holding(state):
         return resume(cfg, state, now, capability_of, resync)
     return write_target(cfg, state, now, capability_of)
 
@@ -306,9 +309,39 @@ def on_set_operation(  # noqa: PLR0913
         return on_set_mode(cfg, state, now, RoomMode.HEAT, capability_of, resync)
     if frost is (state.preset is Preset.FROST):
         return state, []
+    return _change_frost(cfg, state, now, capability_of, resync, frost=frost)
+
+
+def _change_frost(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    capability_of: _Capabilities,
+    resync: Sequence[Intent],
+    *,
+    frost: bool,
+) -> _Step:
+    """Start or end frost protection on a room that is switched on.
+
+    Presence holds a heating room only: frost ends the away hold (the
+    thermostats resume), heat starts it (they are switched off).
+    """
+    was_held = holding(state)
     state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
     state = _with_frost(cfg, state, frost=frost)
+    if was_held and not holding(state):
+        return resume(cfg, state, now, capability_of, resync)
+    if holding(state) and not was_held:
+        return switch_off(cfg, state, now, capability_of)
     return write_target(cfg, state, now, capability_of)
+
+
+def switch_off(
+    cfg: RoomConfig, state: RoomState, now: datetime, capability_of: _Capabilities
+) -> _Step:
+    """Switch every available thermostat off, for a hold that starts."""
+    writes = [(trv, SetHvacMode("off")) for trv in writable(cfg, state)]
+    return write(state, now, writes, capability_of)
 
 
 def on_restore(  # noqa: PLR0913

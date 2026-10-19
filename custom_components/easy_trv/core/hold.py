@@ -12,7 +12,7 @@ commands to run.
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from custom_components.easy_trv.core import setpoint
+from custom_components.easy_trv.core import observe, setpoint
 from custom_components.easy_trv.core.model import (
     ClearIssue,
     Command,
@@ -80,7 +80,15 @@ def on_presence(  # noqa: PLR0913
         return _transition(cfg, state, now, was_held, capability_of, resync)
     if cfg.setpoint_range is None or setpoint.target(cfg, state) == before:
         return state, []
-    return setpoint.write_target(cfg, state, now, capability_of)
+    # Marked per thermostat until the writes arrive, so a sleepy thermostat that
+    # still reports the value from before is not taken as a knob turn.
+    commands: list[Command] = []
+    for trv in setpoint.writable(cfg, state):
+        state, written = observe.resync_trv(
+            cfg, state, now, trv, capability_of, with_mode=False
+        )
+        commands.extend(written)
+    return state, commands
 
 
 def on_window(  # noqa: PLR0913
