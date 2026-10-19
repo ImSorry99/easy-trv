@@ -52,6 +52,8 @@ def facts(**overrides: object) -> StateFacts:
         "deviations": {},
         "thermostat_reasons": frozenset(),
         "silent_contacts": frozenset(),
+        "away_hold": False,
+        "away_lowered": False,
     }
     return StateFacts(**{**base, **overrides})  # type: ignore[arg-type]
 
@@ -357,6 +359,38 @@ def test_emergency_before_restricted() -> None:
     )
 
 
+def test_away_states() -> None:
+    state, reasons = heating_state(facts(away_hold=True))
+    assert state is HeatingState.OFF_AWAY
+    assert HeatingState.HEATING in reasons
+    state, reasons = heating_state(facts(away_lowered=True))
+    assert state is HeatingState.SETBACK_AWAY
+    assert reasons == (HeatingState.SETBACK_AWAY, HeatingState.HEATING)
+    state, _ = heating_state(facts(away_lowered=True, window_hold=True))
+    assert state is HeatingState.OFF_WINDOW
+
+
+def test_away_facts_come_from_the_room() -> None:
+    cfg = replace(
+        CFG, setpoint_range=(5.0, 30.0, 0.5), away_action="setback", away_setback=3.0
+    )
+    st = replace(RoomState.initial(cfg), setpoint=21.0, away=True)
+    found = state_facts(
+        st, cfg, NOW, REFRESH, window_pending=False, silent_contacts=frozenset()
+    )
+    assert (found.away_lowered, found.away_hold) == (True, False)
+    st = replace(st, away_off=True)
+    found = state_facts(
+        st,
+        replace(cfg, away_action="off"),
+        NOW,
+        REFRESH,
+        window_pending=False,
+        silent_contacts=frozenset(),
+    )
+    assert (found.away_lowered, found.away_hold) == (False, True)
+
+
 def test_placeholders_never_hold() -> None:
     combos = [
         facts(),
@@ -371,7 +405,6 @@ def test_placeholders_never_hold() -> None:
     ]
     for combo in combos:
         _, reasons = heating_state(combo)
-        assert HeatingState.OFF_AWAY not in reasons
         assert HeatingState.BOOST not in reasons
 
 
@@ -390,6 +423,7 @@ def test_enum_order() -> None:
         "restricted_schedule",
         "restricted_window_phase",
         "boost",
+        "setback_away",
         "frost",
         "heating",
     ]

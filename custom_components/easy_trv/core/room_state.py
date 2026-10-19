@@ -18,6 +18,7 @@ from custom_components.easy_trv.core.model import (
     TrvHealth,
     TrvState,
 )
+from custom_components.easy_trv.core.setpoint import away_held, lowered, target
 from custom_components.easy_trv.core.setpoint import operation as room_operation
 
 if TYPE_CHECKING:
@@ -41,6 +42,7 @@ class HeatingState(StrEnum):
     RESTRICTED_SCHEDULE = "restricted_schedule"
     RESTRICTED_WINDOW_PHASE = "restricted_window_phase"
     BOOST = "boost"
+    SETBACK_AWAY = "setback_away"
     FROST = "frost"
     HEATING = "heating"
 
@@ -62,6 +64,9 @@ class StateFacts:
     # it (``deviations`` keeps only the first reason, for display).
     thermostat_reasons: frozenset[str]
     silent_contacts: frozenset[str]
+    # Presence switched the room off, or lowered its target.
+    away_hold: bool = False
+    away_lowered: bool = False
 
 
 def failsafe_recent(state: RoomState, now: datetime, refresh: timedelta) -> bool:
@@ -142,6 +147,19 @@ def state_facts(  # noqa: PLR0913 - the room, its config, the clock and the two 
             *(_restrictions(trv) for trv in state.trvs.values())
         ),
         silent_contacts=silent_contacts,
+        away_hold=away_held(state),
+        away_lowered=_lowered_below_wish(config, state),
+    )
+
+
+def _lowered_below_wish(config: RoomConfig, state: RoomState) -> bool:
+    """Return whether presence lowers the room's target below its wish."""
+    goal = target(config, state)
+    return (
+        lowered(config, state)
+        and goal is not None
+        and state.setpoint is not None
+        and goal < state.setpoint
     )
 
 
@@ -149,15 +167,14 @@ def heating_state(facts: StateFacts) -> tuple[HeatingState, tuple[HeatingState, 
     """Return the state and every condition that holds, both in priority order.
 
     The operating mode (off, frost or heat) is always among the reasons, so the
-    list is never empty. ``OFF_AWAY`` and ``BOOST`` are placeholders that never
-    hold yet.
+    list is never empty. ``BOOST`` is a placeholder that never holds yet.
     """
     holds = {
         HeatingState.FAULT: "error" in facts.deviations.values(),
         HeatingState.OFF_MANUAL: facts.operation is OperatingMode.OFF,
         HeatingState.OFF_WINDOW: facts.window_hold,
         HeatingState.OFF_OUTDOOR: facts.outdoor_hold,
-        HeatingState.OFF_AWAY: False,
+        HeatingState.OFF_AWAY: facts.away_hold,
         HeatingState.WINDOW_PENDING: facts.window_pending,
         HeatingState.EMERGENCY: facts.internal_source or facts.failsafe_recent,
         HeatingState.RESTRICTED_UNAVAILABLE: "unavailable" in facts.thermostat_reasons,
@@ -168,6 +185,7 @@ def heating_state(facts: StateFacts) -> tuple[HeatingState, tuple[HeatingState, 
             "window_phase" in facts.thermostat_reasons
         ),
         HeatingState.BOOST: False,
+        HeatingState.SETBACK_AWAY: facts.away_lowered,
         HeatingState.FROST: facts.operation is OperatingMode.FROST,
         HeatingState.HEATING: facts.operation is OperatingMode.HEAT,
     }

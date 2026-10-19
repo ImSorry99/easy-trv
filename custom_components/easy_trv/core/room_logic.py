@@ -203,6 +203,7 @@ class RoomLogic:
             trvs=trvs,
             away=event.away,
             away_off=event.away and self._cfg.away_action == "off",
+            away_override=state.away_override and event.away,
         )
         state, commands = self._apply_settings(state, self._writable(state))
         # The holds first: a room that starts held is compared with the

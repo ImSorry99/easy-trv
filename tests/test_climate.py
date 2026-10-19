@@ -108,6 +108,9 @@ async def test_room_climate_entity_properties(hass, entry) -> None:
     assert attributes["window_open"] is False
     assert attributes["outdoor_cutoff"] is False
     assert attributes["note"] is None
+    assert attributes["presence"] == "none"
+    assert attributes["away_target"] is None
+    assert attributes["away_override"] is False
     assert "frost_return" not in attributes
     assert attributes["friendly_name"] == "Living heating"
 
@@ -533,7 +536,51 @@ async def test_the_extra_data_carries_frost_protection(hass, entry) -> None:
         stored.state.entity_id: stored.extra_data
         for stored in async_restore_data(hass).async_get_stored_states()
     }
-    assert stored[CLIMATE].as_dict() == {"frost_return": 23.0, "preset": "frost"}
+    assert stored[CLIMATE].as_dict() == {
+        "frost_return": 23.0,
+        "preset": "frost",
+        "away_override": False,
+    }
+
+
+async def test_presence_attributes_and_the_stored_override(hass) -> None:
+    hass.states.async_set("person.a", "not_home")
+    options = {**FAST_OPTIONS, "presence_entity": "person.a"}
+    entry = make_entry(hass, [room_data()], options)
+    await start(hass, entry)
+
+    attributes = hass.states.get(CLIMATE).attributes
+    assert attributes[ATTR_TEMPERATURE] == 21.0
+    assert (attributes["presence"], attributes["away_target"]) == ("away", 18.0)
+    assert attributes["away_override"] is False
+
+    await call(hass, SERVICE_SET_TEMPERATURE, **{ATTR_TEMPERATURE: 22.0})
+    attributes = hass.states.get(CLIMATE).attributes
+    assert (attributes["away_target"], attributes["away_override"]) == (None, True)
+    stored = {
+        stored.state.entity_id: stored.extra_data
+        for stored in async_restore_data(hass).async_get_stored_states()
+    }
+    assert stored[CLIMATE].as_dict()["away_override"] is True
+
+
+async def test_a_restored_override_holds_while_away(hass) -> None:
+    hass.states.async_set("person.a", "not_home")
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(CLIMATE, "heat", {ATTR_TEMPERATURE: 22.0}),
+                {"frost_return": None, "preset": "none", "away_override": True},
+            )
+        ],
+    )
+    options = {**FAST_OPTIONS, "presence_entity": "person.a"}
+    entry = make_entry(hass, [room_data()], options)
+    await start(hass, entry)
+
+    attributes = hass.states.get(CLIMATE).attributes
+    assert (attributes["away_override"], attributes["away_target"]) == (True, None)
 
 
 @pytest.mark.parametrize(

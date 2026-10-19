@@ -94,6 +94,7 @@ from custom_components.easy_trv.core.setpoint import (
     SAME,
     device_driven,
     holding,
+    lowered,
     suspended,
     target,
 )
@@ -104,6 +105,7 @@ from custom_components.easy_trv.labels import thermostat_name
 from custom_components.easy_trv.observation import (
     HoldInputs,
     KnobTimers,
+    PresenceInput,
     ThermostatSubscriptions,
 )
 from custom_components.easy_trv.profiles.engine import CapabilityUnsupported
@@ -282,13 +284,17 @@ class RoomController:
         *,
         labels: Mapping[str, str] = MappingProxyType({}),
         outdoor_sensor: str | None = None,
+        presence_entity: str | None = None,
+        presence_unknown: str = "away",
     ) -> None:
         """Wire the room logic to Home Assistant, the profile and the gateway.
 
         ``labels`` maps an intent name to the plain-language name of the setting
         for Repairs texts; a setting without a label is shown by its key.
         ``outdoor_sensor`` is the global outdoor temperature sensor, which only
-        matters for a room with an outdoor cut-off.
+        matters for a room with an outdoor cut-off. ``presence_entity`` is the
+        room's resolved presence entity (only with an ``away_action``); an
+        unknown state of it counts as ``presence_unknown``.
         """
         self._hass = hass
         self._config = config
@@ -327,6 +333,19 @@ class RoomController:
             self._dispatch,
             self._notify_update,
             raw_changed=self._on_window_raw,
+        )
+        self._presence_entity = (
+            presence_entity if config.away_action is not None else None
+        )
+        self._presence = (
+            PresenceInput(
+                hass,
+                self._presence_entity,
+                unknown_is_away=presence_unknown != "home",
+                feed=self._dispatch,
+            )
+            if self._presence_entity
+            else None
         )
         self._warned_units: set[str] = set()
         self._stopped = False
@@ -499,6 +518,31 @@ class RoomController:
         return self._state.window_open
 
     @property
+    def presence_entity(self) -> str | None:
+        """Return the room's presence entity, ``None`` without presence."""
+        return self._presence_entity
+
+    @property
+    def presence(self) -> str:
+        """Return ``home``, ``away`` or ``none`` for a room without presence."""
+        if self._presence is None:
+            return "none"
+        return "away" if self._state.away else "home"
+
+    @property
+    def away_target(self) -> float | None:
+        """Return the target sent while the room is lowered, else ``None``."""
+        goal = target(self._config, self._state)
+        if goal is None or not lowered(self._config, self._state):
+            return None
+        return goal
+
+    @property
+    def away_override(self) -> bool:
+        """Return whether a target set while away overrides presence."""
+        return self._state.away_override
+
+    @property
     def outdoor_hold(self) -> bool:
         """Return whether the outdoor cut-off hold is active."""
         return self._state.outdoor_hold
@@ -598,9 +642,11 @@ class RoomController:
         mode: RoomMode | None,
         preset: Preset | None,
         frost_return: float | None = None,
+        *,
+        away_override: bool = False,
     ) -> None:
         """Take the state remembered across a restart; call it before the start."""
-        self._dispatch(RestoreRoom(setpoint, mode, preset, frost_return))
+        self._dispatch(RestoreRoom(setpoint, mode, preset, frost_return, away_override))
 
     def snapshot(self) -> dict[str, Any]:
         """Return configuration, tunables and state as JSON-able data.
@@ -749,6 +795,7 @@ class RoomController:
         issues.clear_window_contact_unavailable(self._hass, config.room_id)
         self._subscriptions.subscribe_all()
         window_open, outdoor = self._holds.start()
+        away = self._presence.start() if self._presence is not None else False
         self._started = True
         self._begin_periods(window_open=window_open)
         self._dispatch(
@@ -765,6 +812,7 @@ class RoomController:
                 },
                 window_open=window_open,
                 outdoor=outdoor,
+                away=away,
             )
         )
 
@@ -781,6 +829,8 @@ class RoomController:
         self._subscriptions.stop()
         self._knobs.stop()
         self._holds.stop()
+        if self._presence is not None:
+            self._presence.stop()
         if self._cancel_debounce is not None:
             self._cancel_debounce()
             self._cancel_debounce = None

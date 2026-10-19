@@ -175,6 +175,7 @@
           "restricted_schedule": "Eingeschränkt: TRV im Wochenplan",
           "restricted_window_phase": "Eingeschränkt: TRV-Fenstererkennung aktiv",
           "boost": "Handbetrieb (Boost)",
+          "setback_away": "Abgesenkt: abwesend",
           "frost": "Frostschutz",
           "heating": "Heizbetrieb"
         },
@@ -435,7 +436,8 @@
         "window_phase": "{name}: eigene Fenstererkennung aktiv",
         "why_unavailable": "nicht verfügbar",
         "why_unknown": "unbekannt",
-        "why_missing": "gibt es nicht"
+        "why_missing": "gibt es nicht",
+        "away": "{name} abwesend"
       }
     },
     "outdoor_cutoff": {

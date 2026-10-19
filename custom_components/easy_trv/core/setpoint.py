@@ -342,6 +342,7 @@ def on_restore(  # noqa: PLR0913
         state = replace(state, preset=restore.preset)
     if restore.frost_return is not None:
         state = replace(state, frost_return=restore.frost_return)
+    state = replace(state, away_override=restore.away_override)
     if state.mode is RoomMode.OFF:
         # A room remembered off with frost protection (0.3.0 allowed that) is off.
         state = _with_frost(cfg, state, frost=False)

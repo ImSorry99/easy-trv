@@ -186,6 +186,7 @@ HEATING_STATES = [
     "restricted_schedule",
     "restricted_window_phase",
     "boost",
+    "setback_away",
     "frost",
     "heating",
 ]
@@ -766,6 +767,33 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
         "restricted_schedule": "mdi:calendar-clock",
         "restricted_window_phase": "mdi:window-open",
         "boost": "mdi:fire",
+        "setback_away": "mdi:home-thermometer-outline",
         "frost": "mdi:snowflake-thermometer",
         "heating": "mdi:radiator",
     }
+
+
+async def test_the_heating_state_shows_presence(hass) -> None:
+    hass.states.async_set("person.a", "not_home", {"friendly_name": "Alex"})
+    for entity_id in ("climate.a", "climate.b"):
+        hass.states.async_set(entity_id, "heat", {"temperature": 21.0})
+    options = {**FAST_OPTIONS, "presence_entity": "person.a"}
+    entry = make_entry(hass, [room_data()], options)
+    await start(hass, entry)
+
+    assert hass.states.get(STATE_SENSOR).state == "setback_away"
+    assert hint(hass) == "Alex away"
+
+    hass.states.async_set("person.a", "home", {"friendly_name": "Alex"})
+    await settle(hass)
+    assert hass.states.get(STATE_SENSOR).state == "heating"
+    assert hint(hass) is None
+
+
+async def test_the_heating_state_shows_the_away_hold(hass) -> None:
+    hass.states.async_set("person.a", "not_home")
+    options = {**FAST_OPTIONS, "presence_entity": "person.a", "away_action": "off"}
+    entry = make_entry(hass, [room_data()], options)
+    await start(hass, entry)
+
+    assert hass.states.get(STATE_SENSOR).state == "off_away"

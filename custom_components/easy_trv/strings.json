@@ -175,6 +175,7 @@
           "restricted_schedule": "Restricted: thermostat on its schedule",
           "restricted_window_phase": "Restricted: thermostat's window detection active",
           "boost": "Manual (boost)",
+          "setback_away": "Lowered: away",
           "frost": "Frost protection",
           "heating": "Heating"
         },
@@ -435,7 +436,8 @@
         "window_phase": "{name}: own window detection active",
         "why_unavailable": "unavailable",
         "why_unknown": "unknown",
-        "why_missing": "does not exist"
+        "why_missing": "does not exist",
+        "away": "{name} away"
       }
     },
     "outdoor_cutoff": {

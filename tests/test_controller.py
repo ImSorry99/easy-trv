@@ -176,8 +176,15 @@ async def make_controller(hass, gateway, profile, config):
     """Build controllers for the room and stop them again after the test."""
     created: list[RoomController] = []
 
-    def make(
-        *, cfg=None, params=PARAMS, prof=None, labels=LABELS, outdoor_sensor=None
+    def make(  # noqa: PLR0913
+        *,
+        cfg=None,
+        params=PARAMS,
+        prof=None,
+        labels=LABELS,
+        outdoor_sensor=None,
+        presence_entity=None,
+        presence_unknown="away",
     ) -> RoomController:
         refs = {ref.entity_id: ref for ref in gateway.devices.values()}
         controller = RoomController(
@@ -189,6 +196,8 @@ async def make_controller(hass, gateway, profile, config):
             refs,
             labels=labels,
             outdoor_sensor=outdoor_sensor,
+            presence_entity=presence_entity,
+            presence_unknown=presence_unknown,
         )
         created.append(controller)
         return controller
@@ -3349,3 +3358,54 @@ async def test_restoring_what_the_room_does_not_have_is_ignored(
     assert stats.deviation is None
     assert set(stats.per_thermostat) == {"climate.a", "climate.b"}
     assert trv_stats(controller, "climate.a") == ThermostatStatistics(0, 0, 0)
+
+
+# Presence
+
+PERSON = "person.a"
+
+
+@pytest.fixture
+def climate_presence(make_controller, config) -> RoomController:
+    return make_controller(
+        cfg=with_climate(config, away_action="setback", away_setback=3.0),
+        presence_entity=PERSON,
+    )
+
+
+async def test_presence_entity_change_feeds_the_room(
+    hass, climate_presence, gateway
+) -> None:
+    hass.states.async_set(PERSON, "home")
+    await start_with_setpoint(hass, climate_presence, gateway)
+    assert (climate_presence.presence, climate_presence.away_target) == ("home", None)
+
+    hass.states.async_set(PERSON, "not_home")
+    await settle(hass)
+
+    assert climate_presence.presence == "away"
+    assert climate_presence.away_target == 18.0
+    assert climate_presence.setpoint == 21.0
+    assert writes_to(gateway, IEEE_A, SETPOINT) == [1800]
+    assert climate_presence.in_sync is True
+
+
+async def test_a_room_without_presence_shows_none(hass, climate) -> None:
+    await climate.async_start()
+    await settle(hass)
+    assert climate.presence == "none"
+
+
+async def test_override_restored_then_cleared_by_home(hass, climate_presence) -> None:
+    hass.states.async_set(PERSON, "not_home")
+    await climate_presence.async_restore(
+        22.0, RoomMode.HEAT, Preset.NONE, None, away_override=True
+    )
+    await climate_presence.async_start()
+    await settle(hass)
+    assert climate_presence.away_override is True
+    assert climate_presence.away_target is None
+
+    hass.states.async_set(PERSON, "home")
+    await settle(hass)
+    assert climate_presence.away_override is False
