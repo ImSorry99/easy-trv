@@ -197,7 +197,13 @@ class RoomLogic:
             )
             trvs[trv.entity_id] = replace(known, health=self._baseline(known))
         readings = {**state.readings, **{r.entity_id: r for r in event.sensors}}
-        state = replace(state, readings=readings, trvs=trvs, away=event.away)
+        state = replace(
+            state,
+            readings=readings,
+            trvs=trvs,
+            away=event.away,
+            away_off=event.away and self._cfg.away_action == "off",
+        )
         state, commands = self._apply_settings(state, self._writable(state))
         # The holds first: a room that starts held is compared with the
         # thermostats as held, so it writes off and neither heat nor a value.
@@ -247,9 +253,7 @@ class RoomLogic:
         cfg, capability_of = self._cfg, self._capability_of
         match event:
             case SetRoomSetpoint():
-                return setpoint.on_set_setpoint(
-                    cfg, state, now, event.celsius, capability_of
-                )
+                return self._on_set_setpoint(event, now, state)
             case SetRoomMode():
                 return self._on_set_mode(event, now, state)
             case SetRoomOperation():
@@ -281,6 +285,17 @@ class RoomLogic:
             state, resync = self._source_intents(state, now)
         return setpoint.on_set_mode(
             self._cfg, state, now, event.mode, self._capability_of, resync
+        )
+
+    def _on_set_setpoint(
+        self, event: SetRoomSetpoint, now: datetime, state: RoomState
+    ) -> _Step:
+        """Set the room's target; one that ends the away hold resyncs first."""
+        resync: list[Intent] = []
+        if setpoint.held_by_away_only(state):
+            state, resync = self._source_intents(state, now)
+        return setpoint.on_set_setpoint(
+            self._cfg, state, now, event.celsius, self._capability_of, resync
         )
 
     def _on_set_operation(
@@ -354,7 +369,9 @@ class RoomLogic:
         """Route a window or outdoor change to ``hold``, presence to ``setpoint``."""
         cfg, capability_of = self._cfg, self._capability_of
         if isinstance(event, PresenceChanged):
-            return setpoint.on_presence(cfg, state, now, event.away, capability_of)
+            return hold.on_presence(
+                cfg, state, now, event.away, capability_of, self._source_intents
+            )
         if isinstance(event, WindowChanged):
             return hold.on_window(
                 cfg,

@@ -83,9 +83,26 @@ def target(cfg: RoomConfig, state: RoomState) -> float | None:
     return clamp(max(wish - cfg.away_setback, floor), cfg.setpoint_range)
 
 
+def away_held(state: RoomState) -> bool:
+    """Return whether presence keeps the thermostats off (``away_action`` off).
+
+    Only while the room heats and nobody overrode it.
+    """
+    return (
+        state.away_off
+        and not state.away_override
+        and operation(state) is OperatingMode.HEAT
+    )
+
+
+def held_by_away_only(state: RoomState) -> bool:
+    """Return whether presence is the only hold that keeps the room off."""
+    return away_held(state) and not (state.window_open or state.outdoor_hold)
+
+
 def holding(state: RoomState) -> bool:
-    """Return whether a window or outdoor hold keeps the thermostats off."""
-    return state.window_open or state.outdoor_hold
+    """Return whether a window, outdoor or away hold keeps the thermostats off."""
+    return state.window_open or state.outdoor_hold or away_held(state)
 
 
 def suspended(state: RoomState) -> bool:
@@ -96,18 +113,21 @@ def suspended(state: RoomState) -> bool:
     return state.mode is RoomMode.OFF or holding(state)
 
 
-def on_set_setpoint(
+def on_set_setpoint(  # noqa: PLR0913
     cfg: RoomConfig,
     state: RoomState,
     now: datetime,
     celsius: float,
     capability_of: _Capabilities,
+    resync: Sequence[Intent] = (),
 ) -> _Step:
     """Take a setpoint from Home Assistant and write it to the thermostats.
 
     While presence acts on the room, the new setpoint is an override: the room
-    heats to it until presence reads home.
+    heats to it until presence reads home. An override that ends the away hold
+    resumes the thermostats, writing the ``resync`` intents too.
     """
+    ends_away_hold = held_by_away_only(state)
     if cfg.setpoint_range is None:
         return state, []
     state = _forget_knobs(state, capability_of(SetSetpoint(celsius)))
@@ -119,28 +139,9 @@ def on_set_setpoint(
         frost_return=None,
         away_override=state.away_override or away_acts(cfg, state),
     )
-    return _write_setpoint(cfg, state, now, capability_of)
-
-
-def on_presence(
-    cfg: RoomConfig,
-    state: RoomState,
-    now: datetime,
-    away: bool,  # noqa: FBT001
-    capability_of: _Capabilities,
-) -> _Step:
-    """Take presence changing between home and away.
-
-    Home ends an override. A room that heats gets its new target when it
-    changes (lowered while away, the wish at home).
-    """
-    if away is state.away:
-        return state, []
-    before = target(cfg, state)
-    state = replace(state, away=away, away_override=state.away_override and away)
-    if cfg.setpoint_range is None or target(cfg, state) == before:
-        return state, []
-    return _write_setpoint(cfg, state, now, capability_of)
+    if ends_away_hold:
+        return resume(cfg, state, now, capability_of, resync)
+    return write_target(cfg, state, now, capability_of)
 
 
 def on_set_mode(  # noqa: PLR0913
@@ -307,7 +308,7 @@ def on_set_operation(  # noqa: PLR0913
         return state, []
     state = _forget_knobs(state, capability_of(SetSetpoint(0.0)))
     state = _with_frost(cfg, state, frost=frost)
-    return _write_setpoint(cfg, state, now, capability_of)
+    return write_target(cfg, state, now, capability_of)
 
 
 def on_restore(  # noqa: PLR0913
@@ -456,7 +457,7 @@ def writable(cfg: RoomConfig, state: RoomState) -> list[str]:
     return [trv.entity_id for trv in cfg.trvs if state.trvs[trv.entity_id].available]
 
 
-def _write_setpoint(
+def write_target(
     cfg: RoomConfig, state: RoomState, now: datetime, capability_of: _Capabilities
 ) -> _Step:
     """Write the room's target to every thermostat, unless writes are suspended."""
