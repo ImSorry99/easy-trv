@@ -1,6 +1,8 @@
 from dataclasses import replace
 from datetime import timedelta
 
+import pytest
+
 from custom_components.easy_trv.core.model import (
     DebounceElapsed,
     Execute,
@@ -30,7 +32,7 @@ from custom_components.easy_trv.core.model import (
 )
 from custom_components.easy_trv.core.observe import shown
 from custom_components.easy_trv.core.room_logic import RoomLogic
-from custom_components.easy_trv.core.setpoint import clamp, operation
+from custom_components.easy_trv.core.setpoint import clamp, operation, target
 from tests.core.test_room_logic import (
     BOTH_AVAILABLE,
     CFG,
@@ -798,3 +800,28 @@ def test_a_room_without_a_climate_does_not_resend_setpoint_or_mode() -> None:
     )
     _, cmds = room.handle(Tick(), T0 + timedelta(minutes=21), st)
     assert writes(cmds) == []
+
+
+# --- target while away ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("wish", "setback", "expected"),
+    [(21.0, 3.0, 18.0), (9.0, 3.0, 7.0), (6.0, 3.0, 6.0), (21.0, 2.3, 18.5)],
+)
+def test_target_while_away(wish, setback, expected) -> None:
+    cfg = replace(CFG, away_action="setback", away_setback=setback)
+    st = replace(started_with_setpoint(wish), away=True)
+    assert target(cfg, st) == expected
+    assert target(cfg, replace(st, away_override=True)) == wish
+    assert target(replace(cfg, away_action="off"), st) == wish
+    assert target(replace(cfg, away_action=None), st) == wish
+
+
+def test_target_at_home_or_not_heating_is_the_wish() -> None:
+    cfg = replace(CFG, away_action="setback", away_setback=3.0)
+    st = started_with_setpoint(21.0)
+    assert target(cfg, st) == 21.0
+    away = replace(st, away=True)
+    assert target(cfg, replace(away, mode=RoomMode.OFF)) == 21.0
+    assert target(cfg, replace(away, setpoint=None)) is None
