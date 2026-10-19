@@ -34,6 +34,7 @@ from custom_components.easy_trv.const import (
     CONF_AREA,
     CONF_HUMIDITY_SENSORS,
     CONF_NAME,
+    CONF_PRESENCE_ENTITY,
     CONF_PROFILE,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
@@ -53,6 +54,7 @@ from custom_components.easy_trv.flow_settings import (
     effective_settings,
     options_schema,
     options_suggestions,
+    presence_error,
     room_settings,
     room_settings_schema,
     setpoint_range_error,
@@ -428,6 +430,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
             settings = room_settings(user_input)
             errors = (
                 timeout_error(settings)
+                or presence_error(user_input)
                 or setpoint_range_error(entry.options, settings)
                 or self._profile_errors(
                     entry, subentry, settings[CONF_PROFILE], profiles
@@ -461,6 +464,10 @@ class RoomSubentryFlow(ConfigSubentryFlow):
             effective_settings(
                 entry.options, [key for key in ROOM_SETTING_KEYS if key in DEFAULTS]
             ),
+        )
+        # The global presence entity, for the room's choice "Global".
+        global_texts[CONF_PRESENCE_ENTITY] = (
+            entry.options.get(CONF_PRESENCE_ENTITY) or "-"
         )
         suggested = user_input
         if user_input is None and subentry is not None:

@@ -36,6 +36,7 @@ ROOM_ERRORS = {
     "name_required",
     "timeout_range",
     "setpoint_range",
+    "presence_entity_required",
 }
 
 
@@ -122,6 +123,11 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "window_check_drop_kelvin",
         "outdoor_cutoff",
         "outdoor_cutoff_celsius",
+        "presence",
+        "presence_entity",
+        "presence_unknown",
+        "away_action",
+        "away_setback_kelvin",
         "statistics",
     }
     entity_fields = {"trvs", "temp_sensors", "humidity_sensors", "window_contacts"}
@@ -146,6 +152,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "thermostat",
         "room_thermostat",
         "windows_outdoor",
+        "presence",
         "statistics",
     }
     for section in options.values():
@@ -178,6 +185,12 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "window_check_drop_kelvin",
         "outdoor_sensor",
         "outdoor_cutoff_celsius",
+    }
+    assert set(options["presence"]["data"]) == {
+        "presence_entity",
+        "presence_unknown",
+        "away_action",
+        "away_setback_kelvin",
     }
     assert set(options["statistics"]["data"]) == {"statistics"}
     assert set(data["selector"]["outdoor_cutoff"]["options"]) == {"global", "off"}

@@ -269,6 +269,9 @@ ALL_GLOBAL = {
     "setpoint_range": "global",
     "window_warn_colder": "global",
     "outdoor_cutoff": "global",
+    "presence": "global",
+    "presence_unknown": "global",
+    "away_action": "global",
     "statistics": "global",
 }
 
@@ -896,9 +899,15 @@ SETTINGS_FIELDS = [
     "window_check_drop_kelvin",
     "outdoor_cutoff",
     "outdoor_cutoff_celsius",
+    "presence",
+    "presence_entity",
+    "presence_unknown",
+    "away_action",
+    "away_setback_kelvin",
     "statistics",
 ]
 SETTING_NUMBERS = {
+    "away_setback_kelvin": (0.5, 10.0, 0.5, "K"),
     "frost_temperature": (4.0, 16.0, 0.5, "°C"),
     "refresh_minutes": (1, 120, 1, "min"),
     "verify_delay_seconds": (2, 60, 1, "s"),
@@ -942,6 +951,10 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_window_open_delay_seconds": "30 s",
         "global_window_warn_minutes": "120 min",
         "global_window_warn_colder": "Only when it is colder outside",
+        "global_presence_entity": "-",
+        "global_presence_unknown": "Away",
+        "global_away_action": "Lower",
+        "global_away_setback_kelvin": "3.0 K",
         "global_window_check_minutes": "30 min",
         "global_window_check_drop_kelvin": "0.3 K",
         "global_outdoor_cutoff_celsius": "Off",
@@ -1837,14 +1850,15 @@ def test_params_read_the_keys_the_options_flow_writes() -> None:
 WRITES = ["refresh_minutes", "verify_delay_seconds", "max_attempts", "min_delta_kelvin"]
 
 
-def options_input(
+def options_input(  # noqa: PLR0913
     writes=None,
     thermostat=None,
     room_thermostat=None,
     windows_outdoor=None,
     statistics=None,
+    presence=None,
 ) -> dict[str, Any]:
-    """Return what the options form submits: five sections."""
+    """Return what the options form submits: six sections."""
     return {
         "writes": {
             "refresh_minutes": 20,
@@ -1863,6 +1877,7 @@ def options_input(
         },
         "room_thermostat": dict(room_thermostat or {}),
         "windows_outdoor": dict(windows_outdoor or {}),
+        "presence": dict(presence or {}),
         "statistics": dict(statistics or {}),
     }
 
@@ -1876,6 +1891,7 @@ async def test_options_form_is_grouped_in_five_sections(hass, entry) -> None:
         "thermostat",
         "room_thermostat",
         "windows_outdoor",
+        "presence",
         "statistics",
     ]
     for group in fields(result).values():
@@ -1905,7 +1921,55 @@ async def test_options_form_is_grouped_in_five_sections(hass, entry) -> None:
         "outdoor_sensor",
         "outdoor_cutoff_celsius",
     ]
+    assert list(section_fields(result, "presence")) == [
+        "presence_entity",
+        "presence_unknown",
+        "away_action",
+        "away_setback_kelvin",
+    ]
     assert list(section_fields(result, "statistics")) == ["statistics"]
+
+
+async def test_the_presence_entity_picker_takes_the_presence_domains(
+    hass, entry
+) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    picker = section_fields(result, "presence")["presence_entity"]
+    assert sorted(picker.config["domain"]) == [
+        "binary_sensor",
+        "device_tracker",
+        "group",
+        "input_boolean",
+        "person",
+        "zone",
+    ]
+    assert defaults(result, "presence") == {
+        "presence_unknown": "away",
+        "away_action": "setback",
+    }
+    assert suggested_values(result, "presence") == {"away_setback_kelvin": 3.0}
+
+
+async def test_options_store_the_presence_entity(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        options_input(
+            presence={
+                "presence_entity": "zone.home",
+                "presence_unknown": "home",
+                "away_action": "off",
+                "away_setback_kelvin": 2.5,
+            }
+        ),
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["presence_entity"] == "zone.home"
+    assert (entry.options["presence_unknown"], entry.options["away_action"]) == (
+        "home",
+        "off",
+    )
+    assert entry.options["away_setback_kelvin"] == 2.5
 
 
 async def test_options_form_shows_the_saved_number_else_the_default(
@@ -1949,6 +2013,7 @@ async def test_options_form_shows_the_saved_number_else_the_default(
         "default_setpoint_min": "5.0 °C",
         "default_setpoint_max": "30.0 °C",
         "default_window_open_delay_seconds": "30 s",
+        "default_away_setback_kelvin": "3.0 K",
         "default_window_warn_minutes": "120 min",
         "default_window_check_minutes": "30 min",
         "default_window_check_drop_kelvin": "0.3 K",
@@ -1986,6 +2051,8 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "setpoint_range",
         "window_warn_colder",
         "statistics",
+        "presence_unknown",
+        "away_action",
     }
 
     # Saving the defaults the form shows does not turn them into options.
@@ -1996,6 +2063,7 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "thermostat",
         "room_thermostat",
         "windows_outdoor",
+        "presence",
         "statistics",
     ):
         shown[name].update(suggested_values(result, name))
@@ -2008,6 +2076,8 @@ async def test_options_empty_numbers_stay_empty_across_saves(hass, entry) -> Non
         "setpoint_range",
         "window_warn_colder",
         "statistics",
+        "presence_unknown",
+        "away_action",
     }
 
 
@@ -2132,6 +2202,8 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
         "setpoint_range": "auto",
         "window_warn_colder": "on",
         "statistics": "off",
+        "presence_unknown": "away",
+        "away_action": "setback",
     }
     # Whole numbers are stored as integers, not as the selector's floats.
     assert all(
@@ -2354,3 +2426,33 @@ async def test_options_flow_rejects_a_setpoint_range_that_is_not_a_range(
             "setpoint_range": "auto",
         }
         assert not entry.options
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_presence_own_needs_an_entity(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"presence": "own"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"presence_entity": "presence_entity_required"}
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+@pytest.mark.parametrize(
+    ("submitted", "stored"),
+    [
+        ({"presence": "own", "presence_entity": "person.a"}, "person.a"),
+        ({"presence": "none", "presence_entity": "person.a"}, None),
+        ({"presence": "global", "presence_entity": "person.a"}, None),
+    ],
+)
+async def test_room_keeps_its_own_presence_entity_only_with_own(
+    hass, entry, submitted, stored
+) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(result["flow_id"], submitted)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    data = next(iter(entry.subentries.values())).data
+    assert data.get("presence_entity") == stored
+    assert data["presence"] == submitted["presence"]
