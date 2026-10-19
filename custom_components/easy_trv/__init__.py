@@ -457,6 +457,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
     settings = resolve_settings(entry.options, subentry.data)
     device_refs = _resolve_thermostats(gateway, list(subentry.data[CONF_TRVS]))
     profile = select_profile(profiles, settings.profile, device_refs)
+    presence_entity = resolve_presence_entity(entry.options, subentry.data)
     config = room_config_from_subentry(
         subentry.subentry_id,
         subentry.title,
@@ -465,7 +466,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
         settings,
         profile,
         thermostat_limits=thermostat_limits(hass, subentry.data[CONF_TRVS]),
-        presence_entity=resolve_presence_entity(entry.options, subentry.data),
+        presence_entity=presence_entity,
     )
     params = RoomParams.from_settings(settings)
     controller = RoomController(
@@ -477,6 +478,8 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
         device_refs,
         labels=labels,
         outdoor_sensor=entry.options.get(CONF_OUTDOOR_SENSOR) or None,
+        presence_entity=presence_entity,
+        presence_unknown=settings.presence_unknown,
     )
     return controller, profile, settings
 

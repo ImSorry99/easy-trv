@@ -494,6 +494,8 @@ class RestoreRoom:
     preset: Preset | None
     # The setpoint to return to when frost protection ends.
     frost_return: float | None = None
+    # A target set while away; the start drops it if presence reads home.
+    away_override: bool = False
 
 
 @dataclass(frozen=True)

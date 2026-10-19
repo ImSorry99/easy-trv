@@ -28,6 +28,7 @@ from custom_components.easy_trv.const import CONTACT_SILENT_ISSUE_MINUTES
 from custom_components.easy_trv.core.model import (
     KnobSettled,
     OutdoorChanged,
+    PresenceChanged,
     TrvObserved,
     WindowChanged,
 )
@@ -197,6 +198,97 @@ class KnobTimers:
         for cancel in self._timers.values():
             cancel()
         self._timers.clear()
+
+
+# What each presence domain reports while someone is home.
+_HOME_STATES: Final[Mapping[str, frozenset[str]]] = {
+    "person": frozenset({"home"}),
+    "device_tracker": frozenset({"home"}),
+    "group": frozenset({"home", "on"}),
+    "binary_sensor": frozenset({"on"}),
+    "input_boolean": frozenset({"on"}),
+}
+_AWAY_STATES: Final[Mapping[str, frozenset[str]]] = {
+    "group": frozenset({"not_home", "off"}),
+    "binary_sensor": frozenset({"off"}),
+    "input_boolean": frozenset({"off"}),
+}
+_UNKNOWN_STATES: Final = frozenset({STATE_UNAVAILABLE, STATE_UNKNOWN})
+
+
+def presence_home(domain: str, state: str | None) -> bool | None:
+    """Return whether an entity's state says someone is home; ``None``: unknown.
+
+    ``person`` and ``device_tracker`` are home at ``home`` and away in any other
+    zone; ``zone`` counts the persons in it; the switch-like domains read
+    ``on`` as home. Anything else, a missing or unavailable state included, is
+    unknown.
+    """
+    if state is None or state in _UNKNOWN_STATES:
+        return None
+    if domain == "zone":
+        try:
+            return float(state) > 0
+        except ValueError:
+            return None
+    home = _HOME_STATES.get(domain)
+    if home is None:
+        return None
+    if state in home:
+        return True
+    # ``person`` and ``device_tracker`` list no away states: any zone is away.
+    away = _AWAY_STATES.get(domain)
+    return False if away is None or state in away else None
+
+
+class PresenceInput:
+    """Track a room's presence entity and feed home and away to the room."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entity_id: str,
+        *,
+        unknown_is_away: bool,
+        feed: Callable[[LogicEvent], None],
+    ) -> None:
+        """Watch ``entity_id``; an unknown state reads as ``unknown_is_away``."""
+        self._hass = hass
+        self._entity_id = entity_id
+        self._unknown_is_away = unknown_is_away
+        self._feed = feed
+        self._away: bool | None = None
+        self._unsubscribe: CALLBACK_TYPE | None = None
+
+    def start(self) -> bool:
+        """Start tracking; return whether presence reads away now."""
+        self._unsubscribe = async_track_state_change_event(
+            self._hass, [self._entity_id], self._on_change
+        )
+        self._away = self._read(self._hass.states.get(self._entity_id))
+        return self._away
+
+    def stop(self) -> None:
+        """Stop tracking."""
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
+
+    def _read(self, state: State | None) -> bool:
+        """Return whether ``state`` reads away, the unknown policy applied."""
+        home = presence_home(
+            self._entity_id.partition(".")[0], None if state is None else state.state
+        )
+        return self._unknown_is_away if home is None else not home
+
+    @callback
+    def _on_change(self, event: Event[EventStateChangedData]) -> None:
+        """Feed a change between home and away; anything else is not news."""
+        away = self._read(event.data["new_state"])
+        if away is self._away:
+            return
+        self._away = away
+        self._feed(PresenceChanged(away))
 
 
 def _outdoor_celsius(state: State | None) -> float | None:

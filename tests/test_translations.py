@@ -405,6 +405,7 @@ STATE_NAMES_EN = {
     "restricted_schedule": "Restricted: thermostat on its schedule",
     "restricted_window_phase": "Restricted: thermostat's window detection active",
     "boost": "Manual (boost)",
+    "setback_away": "Lowered: away",
     "frost": "Frost protection",
     "heating": "Heating",
 }
@@ -422,6 +423,7 @@ STATE_NAMES_DE = {
     "restricted_schedule": "Eingeschränkt: TRV im Wochenplan",
     "restricted_window_phase": "Eingeschränkt: TRV-Fenstererkennung aktiv",
     "boost": "Handbetrieb (Boost)",
+    "setback_away": "Abgesenkt: abwesend",
     "frost": "Frostschutz",
     "heating": "Heizbetrieb",
 }
@@ -460,6 +462,7 @@ HINT_EN = {
     "unsupported": "{name}: lacks a function ({functions})",
     "schedule": "{name} runs its own schedule",
     "window_phase": "{name}: own window detection active",
+    "away": "{name} away",
     "why_unavailable": "unavailable",
     "why_unknown": "unknown",
     "why_missing": "does not exist",
@@ -471,6 +474,7 @@ HINT_DE = {
     "unsupported": "{name}: Funktion fehlt ({functions})",
     "schedule": "{name} läuft im eigenen Wochenplan",
     "window_phase": "{name}: eigene Fenstererkennung aktiv",
+    "away": "{name} abwesend",
     "why_unavailable": "nicht verfügbar",
     "why_unknown": "unbekannt",
     "why_missing": "gibt es nicht",
