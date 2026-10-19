@@ -36,6 +36,7 @@ from custom_components.easy_trv.core.setpoint import (
     SAME,
     clamp,
     device_driven,
+    held_by_away_only,
     holding,
     lowered,
     on_schedule,
@@ -195,11 +196,11 @@ def knob_wakes_room(
     capability_of: _Capabilities,
 ) -> bool:
     """Return whether adopting the settled knob turn takes the room out of ``off``."""
+    off_room = state.mode is RoomMode.OFF and not holding(state)
     if (
         cfg.setpoint_range is None
         or event.trv not in state.trvs
-        or state.mode is not RoomMode.OFF
-        or holding(state)
+        or not (off_room or held_by_away_only(state))
     ):
         return False
     known = state.trvs[event.trv]
@@ -546,8 +547,10 @@ def _adopt_setpoint(  # noqa: PLR0913
         settled = _settled_while_lowered(cfg, state, now, trv, adopted, capability_of)
         if settled is not None:
             return settled
-    # Any other value while lowered is an override until presence is home.
-    override = state.away_override or lowered(cfg, state)
+    # Any other value while lowered or held by presence is an override until
+    # presence is home; ending the away hold resumes the room.
+    ends_away_hold = held_by_away_only(state)
+    override = state.away_override or lowered(cfg, state) or ends_away_hold
     capability = capability_of(SetSetpoint(adopted))
     changed = state.setpoint is None or abs(adopted - state.setpoint) > SAME
     waking = state.mode is RoomMode.OFF and not holding(state)
@@ -573,7 +576,7 @@ def _adopt_setpoint(  # noqa: PLR0913
     event = _adopted(cfg, trv, adopted)
     if holding(state):
         return state, [event]
-    if waking:
+    if waking or ends_away_hold:
         state, commands = resume(cfg, state, now, capability_of, resync)
         return state, [*commands, event]
     writes = [(other, SetSetpoint(adopted)) for other in behind]

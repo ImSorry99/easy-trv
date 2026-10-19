@@ -9,6 +9,7 @@ from custom_components.easy_trv.core.model import (
     PresenceChanged,
     RetryDue,
     RoomConfig,
+    RoomMode,
     RoomParams,
     RoomState,
     SetHvacMode,
@@ -17,8 +18,10 @@ from custom_components.easy_trv.core.model import (
     SetSetpoint,
     Start,
     TrvObserved,
+    WindowChanged,
 )
 from custom_components.easy_trv.core.room_logic import RoomLogic
+from custom_components.easy_trv.core.setpoint import holding
 from tests.core.test_room_logic import (
     BOTH_AVAILABLE,
     CFG,
@@ -180,3 +183,96 @@ def test_start_away_starts_lowered() -> None:
         RoomState.initial(LOWER_CFG),
     )
     assert setpoints(cmds) == [(A, SetSetpoint(18.0)), (B, SetSetpoint(18.0))]
+
+
+# --- away switches the room off ---------------------------------------------
+
+OFF_CFG = replace(CFG, away_action="off")
+
+
+def modes(cmds: list) -> list:
+    return [(trv, i) for trv, i in executes(cmds) if isinstance(i, SetHvacMode)]
+
+
+def test_away_off_switches_every_thermostat_off() -> None:
+    st, cmds = away(heating(OFF_CFG), OFF_CFG)
+    assert modes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+    assert setpoints(cmds) == []
+    assert holding(st)
+    assert st.mode is RoomMode.HEAT
+    assert away_events(cmds) == [
+        FireEvent("easy_trv_away", {"room": "Living", "state": "on"})
+    ]
+
+
+def test_home_resumes_heat_and_the_wish() -> None:
+    st, _ = away(heating(OFF_CFG), OFF_CFG)
+    st, cmds = away(st, OFF_CFG, is_away=False)
+    assert (A, SetHvacMode("heat")) in modes(cmds)
+    assert (B, SetHvacMode("heat")) in modes(cmds)
+    assert setpoints(cmds) == [(A, SetSetpoint(21.0)), (B, SetSetpoint(21.0))]
+    assert not holding(st)
+
+
+def test_window_closes_during_away_off_room_stays_off() -> None:
+    st, _ = away(heating(OFF_CFG), OFF_CFG)
+    st, _ = room(OFF_CFG).handle(WindowChanged(open=True), AFTER, st)
+    st, cmds = room(OFF_CFG).handle(WindowChanged(open=False), AFTER, st)
+    assert modes(cmds) == []
+    assert setpoints(cmds) == []
+    assert holding(st)
+
+
+def test_away_ends_while_window_open_room_stays_off() -> None:
+    st, _ = room(OFF_CFG).handle(WindowChanged(open=True), AFTER, heating(OFF_CFG))
+    st, _ = away(st, OFF_CFG)
+    st, cmds = away(st, OFF_CFG, is_away=False)
+    assert modes(cmds) == []
+    assert holding(st)
+
+
+def test_ha_setpoint_ends_the_away_hold() -> None:
+    st, _ = away(heating(OFF_CFG), OFF_CFG)
+    st, cmds = room(OFF_CFG).handle(SetRoomSetpoint(22.0), AFTER, st)
+    assert st.away_override is True
+    assert not holding(st)
+    assert (A, SetHvacMode("heat")) in modes(cmds)
+    assert setpoints(cmds) == [(A, SetSetpoint(22.0)), (B, SetSetpoint(22.0))]
+
+
+def test_knob_turn_ends_the_away_hold() -> None:
+    st, _ = away(heating(OFF_CFG), OFF_CFG)
+    st, cmds = knob(st, 23.0, OFF_CFG)
+    assert (st.setpoint, st.away_override) == (23.0, True)
+    assert not holding(st)
+    assert (B, SetHvacMode("heat")) in modes(cmds)
+
+
+def test_a_setpoint_during_a_window_hold_only_changes_the_wish() -> None:
+    st, _ = room(OFF_CFG).handle(WindowChanged(open=True), AFTER, heating(OFF_CFG))
+    st, _ = away(st, OFF_CFG)
+    st, cmds = room(OFF_CFG).handle(SetRoomSetpoint(22.0), AFTER, st)
+    assert st.setpoint == 22.0
+    assert holding(st)
+    assert modes(cmds) == []
+
+
+def test_heat_selected_during_the_away_hold_stays_off() -> None:
+    st, _ = room(OFF_CFG).handle(
+        SetRoomOperation(OperatingMode.OFF), T0, heating(OFF_CFG)
+    )
+    st, _ = away(st, OFF_CFG)
+    st, cmds = room(OFF_CFG).handle(SetRoomOperation(OperatingMode.HEAT), AFTER, st)
+    assert modes(cmds) == []
+    assert holding(st)
+
+
+def test_start_away_off_starts_held() -> None:
+    reported = {A: (21.0, "heat"), B: (21.0, "heat")}
+    st, cmds = room(OFF_CFG).handle(
+        Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE, reported, away=True),
+        T0,
+        RoomState.initial(OFF_CFG),
+    )
+    assert holding(st)
+    assert modes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]

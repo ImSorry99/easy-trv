@@ -332,6 +332,8 @@ class RoomState:
     away: bool = False
     # A target set while away: the room heats normally until presence is home.
     away_override: bool = False
+    # Presence reads away and the room's ``away_action`` is ``off``.
+    away_off: bool = False
     window_warned: bool = False
     window_suspect: bool = False
     # Whether the stuck-contact check already ran for the current opening.

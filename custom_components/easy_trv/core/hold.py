@@ -1,4 +1,4 @@
-"""Holds: window contacts and the outdoor cut-off.
+"""Holds: window contacts, the outdoor cut-off and presence.
 
 A hold keeps the thermostats of the room ``off`` while a window is open or the
 outdoor temperature is at or above the cut-off, those on their own schedule
@@ -48,8 +48,39 @@ _TOLERANCE = 1e-9
 
 
 def held(state: RoomState) -> bool:
-    """Return whether a window or outdoor hold keeps the thermostats off."""
+    """Return whether a window, outdoor or away hold keeps the thermostats off."""
     return setpoint.holding(state)
+
+
+def on_presence(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    away: bool,  # noqa: FBT001
+    capability_of: _Capabilities,
+    resync: _Resync,
+) -> _Step:
+    """Take presence changing between home and away.
+
+    Home ends an override. With ``away_action`` off, away is a hold like an open
+    window. With setback, a room that heats gets its new target when it changes
+    (lowered while away, the wish at home).
+    """
+    if away is state.away:
+        return state, []
+    was_held = held(state)
+    before = setpoint.target(cfg, state)
+    state = replace(
+        state,
+        away=away,
+        away_off=away and cfg.away_action == "off",
+        away_override=state.away_override and away,
+    )
+    if was_held is not held(state):
+        return _transition(cfg, state, now, was_held, capability_of, resync)
+    if cfg.setpoint_range is None or setpoint.target(cfg, state) == before:
+        return state, []
+    return setpoint.write_target(cfg, state, now, capability_of)
 
 
 def on_window(  # noqa: PLR0913
