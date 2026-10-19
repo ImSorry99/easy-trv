@@ -34,6 +34,7 @@ from custom_components.easy_trv.core.setpoint import (
     ECHO_WINDOW,
     OWN_MODES,
     SAME,
+    away_acts,
     clamp,
     device_driven,
     held_by_away_only,
@@ -573,6 +574,9 @@ def _adopt_setpoint(  # noqa: PLR0913
         # A turn during a hold only changes the wish; the room stays as it was.
         mode=state.mode if holding(state) else RoomMode.HEAT,
     )
+    if waking and away_acts(cfg, state):
+        # A turn that switches the room on while away is an override as well.
+        state = replace(state, away_override=True)
     event = _adopted(cfg, trv, adopted)
     if holding(state):
         return state, [event]
@@ -620,7 +624,8 @@ def _adopt_mode(  # noqa: PLR0913
         return state, []
     state = replace(state, mode=mode, setpoint_source=f"device:{trv}")
     event = _adopted(cfg, trv, mode.value)
-    if mode is RoomMode.HEAT:
+    # Switched on into the away hold, the room stays off like its thermostats.
+    if mode is RoomMode.HEAT and not holding(state):
         state, commands = resume(cfg, state, now, capability_of, resync)
         return state, [*commands, event]
     off = SetHvacMode("off")

@@ -5,6 +5,7 @@ from custom_components.easy_trv.core.model import (
     Failed,
     FireEvent,
     KnobSettled,
+    Ok,
     OperatingMode,
     PresenceChanged,
     RetryDue,
@@ -63,7 +64,12 @@ def away_events(cmds: list) -> list[FireEvent]:
 
 
 def away(st: RoomState, cfg: RoomConfig = LOWER_CFG, *, is_away: bool = True):
-    return room(cfg).handle(PresenceChanged(away=is_away), AFTER, st)
+    """Change presence; the writes it makes arrive, as they do on a device."""
+    st, cmds = room(cfg).handle(PresenceChanged(away=is_away), AFTER, st)
+    for trv, intent in executes(cmds):
+        if isinstance(intent, SetSetpoint | SetHvacMode):
+            st, _ = room(cfg).handle(result(trv, intent, Ok()), AFTER, st)
+    return st, cmds
 
 
 def knob(st: RoomState, value: float, cfg: RoomConfig = LOWER_CFG):
@@ -276,3 +282,92 @@ def test_start_away_off_starts_held() -> None:
     )
     assert holding(st)
     assert modes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+
+
+# --- review fixes ------------------------------------------------------------
+
+
+def mode_knob(st: RoomState, mode: str, cfg: RoomConfig = OFF_CFG):
+    """Switch the mode of climate.a at the device, well after the last write."""
+    turned = AFTER + timedelta(minutes=5)
+    raw = 4 if mode == "heat" else 0
+    st, _ = room(cfg).handle(
+        TrvObserved(A, "hvac_mode", mode, raw, "report"), turned, st
+    )
+    return room(cfg).handle(
+        KnobSettled(A, "hvac_mode"), turned + timedelta(seconds=3), st
+    )
+
+
+def test_frost_during_the_away_hold_switches_the_thermostats_on() -> None:
+    st, _ = away(heating(OFF_CFG), OFF_CFG)
+    st, cmds = room(OFF_CFG).handle(SetRoomOperation(OperatingMode.FROST), AFTER, st)
+    assert not holding(st)
+    assert (A, SetHvacMode("heat")) in modes(cmds)
+    assert (B, SetHvacMode("heat")) in modes(cmds)
+    assert setpoints(cmds) == [(A, SetSetpoint(7.0)), (B, SetSetpoint(7.0))]
+
+
+def test_heat_from_frost_while_away_off_switches_the_thermostats_off() -> None:
+    st, _ = room(OFF_CFG).handle(
+        SetRoomOperation(OperatingMode.FROST), T0, heating(OFF_CFG)
+    )
+    st, _ = away(st, OFF_CFG)
+    assert not holding(st)
+    st, cmds = room(OFF_CFG).handle(SetRoomOperation(OperatingMode.HEAT), AFTER, st)
+    assert holding(st)
+    assert modes(cmds) == [(A, SetHvacMode("off")), (B, SetHvacMode("off"))]
+    assert setpoints(cmds) == []
+
+
+def test_a_knob_mode_change_into_the_away_hold_keeps_the_room_off() -> None:
+    st, _ = room(OFF_CFG).handle(
+        SetRoomOperation(OperatingMode.OFF), T0, heating(OFF_CFG)
+    )
+    st, _ = away(st, OFF_CFG)
+    st, cmds = mode_knob(st, "heat")
+    assert holding(st)
+    assert setpoints(cmds) == []
+    assert (A, SetHvacMode("off")) in modes(cmds)
+    assert (A, SetHvacMode("heat")) not in modes(cmds)
+
+
+def test_a_knob_turn_that_wakes_a_room_while_away_is_an_override() -> None:
+    for cfg in (LOWER_CFG, OFF_CFG):
+        st, _ = room(cfg).handle(SetRoomOperation(OperatingMode.OFF), T0, heating(cfg))
+        st, _ = away(st, cfg)
+        st, cmds = knob(st, 23.0, cfg)
+        assert (st.setpoint, st.away_override) == (23.0, True), cfg.away_action
+        assert not holding(st)
+        assert (B, SetSetpoint(23.0)) in setpoints(cmds)
+        assert (B, SetHvacMode("heat")) in modes(cmds)
+
+
+def test_a_stale_lowered_value_after_coming_home_is_not_adopted() -> None:
+    st, _ = away(heating())
+    later = AFTER + timedelta(hours=3)
+    st, _ = room().handle(PresenceChanged(away=False), later, st)
+    reported = later + timedelta(minutes=3)
+    st, _ = room().handle(
+        TrvObserved(A, "setpoint", 18.0, 1800, "report"), reported, st
+    )
+    st, cmds = room().handle(
+        KnobSettled(A, "setpoint"), reported + timedelta(seconds=3), st
+    )
+    assert st.setpoint == 21.0
+    assert (B, SetSetpoint(18.0)) not in setpoints(cmds)
+
+
+def test_the_same_ha_setpoint_while_lowered_is_no_override() -> None:
+    st, _ = away(heating())
+    st, cmds = room().handle(SetRoomSetpoint(21.0), AFTER, st)
+    assert st.away_override is False
+    assert (A, SetSetpoint(21.0)) not in setpoints(cmds)
+
+
+def test_the_same_ha_setpoint_during_the_away_hold_keeps_it() -> None:
+    st, _ = away(heating(OFF_CFG), OFF_CFG)
+    st, cmds = room(OFF_CFG).handle(SetRoomSetpoint(21.0), AFTER, st)
+    assert st.away_override is False
+    assert holding(st)
+    assert modes(cmds) == []
