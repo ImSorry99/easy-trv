@@ -76,8 +76,11 @@ def restored(duration: Duration, stored: float) -> Duration:
     return replace(duration, total=max(duration.total, stored))
 
 
-def deviation(state: RoomState) -> float | None:
-    """Return the active sensor's value minus the setpoint, rounded to 0.1 K.
+def deviation(state: RoomState, goal: float | None = None) -> float | None:
+    """Return the active sensor's value minus the target, rounded to 0.1 K.
+
+    The target is ``goal`` (the lowered value while the room is away), else the
+    room's setpoint.
 
     Rounds like the room: the reading to a tenth first (half-up), then the
     difference. Only while the room heats with no hold; ``None`` otherwise, or
@@ -94,4 +97,5 @@ def deviation(state: RoomState) -> float | None:
     if reading is None or reading.value is None:
         return None
     # ``+ 0.0`` turns a rounded ``-0.0`` into ``0.0``.
-    return round_tenth(round_tenth(reading.value) - state.setpoint) + 0.0
+    aim = state.setpoint if goal is None else goal
+    return round_tenth(round_tenth(reading.value) - aim) + 0.0

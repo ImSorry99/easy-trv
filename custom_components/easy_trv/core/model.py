@@ -415,6 +415,8 @@ class Start:
     # it compares the thermostats with its values.
     window_open: bool = False
     outdoor: float | None = None
+    # Presence reads away at start (after the unknown policy).
+    away: bool = False
 
 
 @dataclass(frozen=True)
@@ -519,6 +521,13 @@ class WindowChanged:
 
 
 @dataclass(frozen=True)
+class PresenceChanged:
+    """Presence changed between home and away (after the unknown policy)."""
+
+    away: bool
+
+
+@dataclass(frozen=True)
 class OutdoorChanged:
     """The outdoor temperature changed; ``None`` means unknown."""
 
@@ -541,6 +550,7 @@ Event = (
     | KnobSettled
     | WindowChanged
     | OutdoorChanged
+    | PresenceChanged
 )
 
 # --- Commands ------------------------------------------------------------
@@ -551,6 +561,7 @@ EVENT_WRITE_FAILED: Final = "easy_trv_write_failed"
 EVENT_RECOVERED: Final = "easy_trv_recovered"
 EVENT_FAILSAFE: Final = "easy_trv_failsafe_detected"
 EVENT_SETPOINT_ADOPTED: Final = "easy_trv_setpoint_adopted"
+EVENT_AWAY: Final = "easy_trv_away"
 
 # ``unreachable``, ``firmware`` and ``schedule_thermostat_off`` belong to a
 # thermostat (``trv`` is its entity); the window kinds belong to the room

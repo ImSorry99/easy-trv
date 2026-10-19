@@ -37,9 +37,11 @@ from custom_components.easy_trv.core.setpoint import (
     clamp,
     device_driven,
     holding,
+    lowered,
     on_schedule,
     resume,
     suspended,
+    target,
     writable,
     write,
 )
@@ -280,12 +282,13 @@ def expire_window_phase(
         if holding(state):
             writes.append((name, SetHvacMode("off")))
             continue
-        if suspended(state) or state.setpoint is None:
+        goal = target(cfg, state)
+        if suspended(state) or goal is None:
             continue
         # A hold may have switched it off while it showed its window phase.
         if trvs[name].reported_mode == "off":
             writes.append((name, SetHvacMode("heat")))
-        writes.append((name, SetSetpoint(state.setpoint)))
+        writes.append((name, SetSetpoint(goal)))
     return write(state, now, writes, capability_of)
 
 
@@ -322,8 +325,9 @@ def resync_trv(  # noqa: PLR0913
     if with_mode or held:
         mode = SetHvacMode("off" if suspended(state) else "heat")
         writes.append((trv, mode))
-    if not suspended(state) and state.setpoint is not None:
-        writes.append((trv, SetSetpoint(state.setpoint)))
+    goal = target(cfg, state)
+    if not suspended(state) and goal is not None:
+        writes.append((trv, SetSetpoint(goal)))
     state, commands = write(state, now, writes, capability_of)
     written = {
         capability_of(command.intent): _value_of(command.intent)
@@ -374,8 +378,9 @@ def _observe_setpoint(  # noqa: PLR0913
         # A write the room made while the thermostat showed its window phase
         # does not exist (it is left alone), so an echo never ends that phase.
         return _store(state, trv, known), []
-    wants_window_value = state.setpoint is not None and (
-        abs(state.setpoint - WINDOW_PHASE_SETPOINT) <= SAME
+    goal = target(cfg, state)
+    wants_window_value = goal is not None and (
+        abs(goal - WINDOW_PHASE_SETPOINT) <= SAME
     )
     if (
         known.note is None
@@ -409,11 +414,8 @@ def _leave_window_phase(  # noqa: PLR0913
     The value it shows now is not the user's: it is what the device went back
     to, so it is not adopted.
     """
-    if (
-        state.setpoint is not None
-        and abs(value - state.setpoint) <= SAME
-        and not holding(state)
-    ):
+    goal = target(cfg, state)
+    if goal is not None and abs(value - goal) <= SAME and not holding(state):
         return state, []
     return resync_trv(cfg, state, now, trv, capability_of, with_mode=False)
 
@@ -540,6 +542,12 @@ def _adopt_setpoint(  # noqa: PLR0913
     if cfg.setpoint_range is None:  # pragma: no cover - checked by the caller
         return state, []
     adopted = clamp(value, cfg.setpoint_range)
+    if lowered(cfg, state):
+        settled = _settled_while_lowered(cfg, state, now, trv, adopted, capability_of)
+        if settled is not None:
+            return settled
+    # Any other value while lowered is an override until presence is home.
+    override = state.away_override or lowered(cfg, state)
     capability = capability_of(SetSetpoint(adopted))
     changed = state.setpoint is None or abs(adopted - state.setpoint) > SAME
     waking = state.mode is RoomMode.OFF and not holding(state)
@@ -558,6 +566,7 @@ def _adopt_setpoint(  # noqa: PLR0913
         setpoint_source=f"device:{trv}",
         preset=Preset.NONE,
         frost_return=None,
+        away_override=override,
         # A turn during a hold only changes the wish; the room stays as it was.
         mode=state.mode if holding(state) else RoomMode.HEAT,
     )
@@ -570,6 +579,28 @@ def _adopt_setpoint(  # noqa: PLR0913
     writes = [(other, SetSetpoint(adopted)) for other in behind]
     state, commands = write(state, now, writes, capability_of)
     return state, [*commands, event]
+
+
+def _settled_while_lowered(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    trv: str,
+    value: float,
+    capability_of: _Capabilities,
+) -> _Step | None:
+    """Handle a knob value that is the lowered target or the wish; else ``None``.
+
+    The lowered target is no turn. The wish from before the room was lowered
+    comes from a thermostat that has not taken the lowered value yet: it gets
+    the target again.
+    """
+    goal = target(cfg, state)
+    if goal is not None and abs(value - goal) <= SAME:
+        return state, []
+    if state.setpoint is not None and abs(value - state.setpoint) <= SAME:
+        return resync_trv(cfg, state, now, trv, capability_of, with_mode=False)
+    return None
 
 
 def _adopt_mode(  # noqa: PLR0913

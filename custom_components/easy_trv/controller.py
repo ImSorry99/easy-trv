@@ -95,6 +95,7 @@ from custom_components.easy_trv.core.setpoint import (
     device_driven,
     holding,
     suspended,
+    target,
 )
 from custom_components.easy_trv.core.setpoint import current as current_target
 from custom_components.easy_trv.core.setpoint import operation as room_operation
@@ -571,11 +572,12 @@ class RoomController:
         if mode is not None and mode != ("off" if suspended(state) else "heat"):
             return False
         celsius = shown(trv, setpoint_capability, trv.reported_setpoint)
+        goal = target(self._config, state)
         return (
             suspended(state)
-            or state.setpoint is None
+            or goal is None
             or not isinstance(celsius, float)
-            or abs(celsius - state.setpoint) <= SAME
+            or abs(celsius - goal) <= SAME
         )
 
     async def async_set_setpoint(self, celsius: float) -> None:
@@ -650,7 +652,9 @@ class RoomController:
         now = dt_util.utcnow() if now is None else now
         contacts = bool(self._config.window_contacts)
         return RoomStatistics(
-            deviation=room_stats.deviation(self._state),
+            deviation=room_stats.deviation(
+                self._state, target(self._config, self._state)
+            ),
             heating_hours=(
                 room_stats.seconds(self._heating_time, now) / _SECONDS_PER_HOUR
                 if self._reports_action
@@ -1197,7 +1201,7 @@ class RoomController:
             (device_driven(known) or known.left_off) and not holding(state)
         ):
             return intent
-        return current_target(state, intent) or intent
+        return current_target(self._config, state, intent) or intent
 
     async def _run_operation(self, trv: str, intent: Intent) -> OperationResult:
         """Plan, write and read back one intent; every failure is an outcome."""
