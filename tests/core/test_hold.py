@@ -19,7 +19,6 @@ from custom_components.easy_trv.core.model import (
     RetryDue,
     RoomConfig,
     RoomMode,
-    RoomParams,
     RoomState,
     ScheduleKnobSettle,
     ScheduleRetry,
@@ -42,6 +41,7 @@ from custom_components.easy_trv.core.room_logic import RoomLogic
 from tests.core.test_room_logic import (
     BOTH_AVAILABLE,
     CFG,
+    DEFAULTS,
     T0,
     capability_of,
     executes,
@@ -55,7 +55,7 @@ A, B = "climate.a", "climate.b"
 OPEN_AT = T0 + timedelta(minutes=5)
 HOLD_CFG = replace(CFG, outdoor_cutoff=16.0)
 # No sensor timeout: the readings of these tests are not kept fresh.
-PARAMS = replace(RoomParams.defaults(), sensor_timeout=None)
+PARAMS = replace(DEFAULTS, sensor_timeout=None)
 
 
 def room(cfg: RoomConfig = HOLD_CFG) -> RoomLogic:
@@ -975,6 +975,43 @@ def test_a_knob_turn_during_a_hold_is_written_at_the_close_of_a_heating_room() -
     st, cmds = room().handle(WindowChanged(open=False), LATER, st)
     assert (A, SetSetpoint(23.5)) in executes(cmds)
     assert (B, SetSetpoint(23.5)) in executes(cmds)
+
+
+# --- A thermostat that is off shows its frost temperature: no knob turn -----------
+
+
+def test_the_frost_value_of_a_thermostat_switched_off_by_a_hold_is_no_knob_turn() -> (
+    None
+):
+    # The TRVZB reports its frost protection temperature as setpoint once off.
+    st, cmds = open_window(heating())
+    assert (A, SetHvacMode("off")) in executes(cmds)
+    st, cmds = room().handle(
+        setpoint_report(A, 7.0), OPEN_AT + timedelta(seconds=1), st
+    )
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert st.trvs[A].knob_pending == {}
+    assert st.setpoint == 21.0
+    st, cmds = room().handle(WindowChanged(open=False), LATER, st)
+    assert (A, SetSetpoint(21.0)) in executes(cmds)
+    assert (B, SetSetpoint(21.0)) in executes(cmds)
+
+
+def test_the_frost_value_of_a_room_switched_off_does_not_wake_it() -> None:
+    st, cmds = room().handle(SetRoomMode(RoomMode.OFF), T0, heating())
+    assert (A, SetHvacMode("off")) in executes(cmds)
+    st, cmds = room().handle(setpoint_report(A, 7.0), T0 + timedelta(seconds=1), st)
+    assert of_type(cmds, ScheduleKnobSettle) == []
+    assert st.mode is RoomMode.OFF
+    assert st.setpoint == 21.0
+
+
+def test_the_frost_value_is_a_knob_turn_while_the_thermostat_heats() -> None:
+    st, cmds = room().handle(
+        setpoint_report(A, 7.0), T0 + timedelta(seconds=1), heating()
+    )
+    assert of_type(cmds, ScheduleKnobSettle) != []
+    assert st.trvs[A].knob_pending == {"setpoint": 7.0}
 
 
 # --- Stuck check: sensor identity, sensor loss -----------------------------------

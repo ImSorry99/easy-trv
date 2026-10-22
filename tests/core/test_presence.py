@@ -11,7 +11,6 @@ from custom_components.easy_trv.core.model import (
     RetryDue,
     RoomConfig,
     RoomMode,
-    RoomParams,
     RoomState,
     SetHvacMode,
     SetRoomOperation,
@@ -26,6 +25,7 @@ from custom_components.easy_trv.core.setpoint import holding
 from tests.core.test_room_logic import (
     BOTH_AVAILABLE,
     CFG,
+    DEFAULTS,
     T0,
     capability_of,
     executes,
@@ -37,7 +37,7 @@ from tests.core.test_room_logic import (
 A, B = "climate.a", "climate.b"
 LOWER_CFG = replace(CFG, away_action="setback", away_setback=3.0)
 AFTER = T0 + timedelta(seconds=300)
-PARAMS = replace(RoomParams.defaults(), sensor_timeout=None)
+PARAMS = replace(DEFAULTS, sensor_timeout=None)
 
 
 def room(cfg: RoomConfig = LOWER_CFG) -> RoomLogic:

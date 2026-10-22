@@ -55,7 +55,7 @@ Every setting exists in three layers, and the most specific one that is set wins
 
 | Setting | Range | Built-in default | Meaning |
 |---|---|---|---|
-| Refresh interval | 1 to 120 minutes | 20 | The room temperature is written again at least this often, even if it has not changed. The TRVZB drops the external value after about two hours without a write. |
+| Refresh interval | 1 to 120 minutes | 30 | The room temperature is written again at least this often, even if it has not changed. The TRVZB drops the external value after about two hours without a write. |
 | Read-back delay | 2 to 60 seconds | 10 | Wait this long after a write before reading the value back. The thermostat is a sleepy device and may need a moment. |
 | Attempts | 1 to 10 | 3 | How often a failing write is tried before the thermostat is reported as not responding. |
 | Minimum change | 0.0 to 1.0 K | 0.1 | A new room temperature is written only if it differs from the last written value by at least this much. |

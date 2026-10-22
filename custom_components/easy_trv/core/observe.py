@@ -380,6 +380,9 @@ def _observe_setpoint(  # noqa: PLR0913
         # A write the room made while the thermostat showed its window phase
         # does not exist (it is left alone), so an echo never ends that phase.
         return _store(state, trv, known), []
+    if _shows_frost_while_off(cfg, known, value, capability_of):
+        known = replace(known, knob_pending=_dropped(known.knob_pending, capability))
+        return _store(state, trv, known), []
     goal = target(cfg, state)
     wants_window_value = goal is not None and (
         abs(goal - WINDOW_PHASE_SETPOINT) <= SAME
@@ -401,6 +404,21 @@ def _observe_setpoint(  # noqa: PLR0913
     if previous is None or _equal(previous, value):
         return state, []
     return _pend(state, trv, known, capability, value)
+
+
+def _shows_frost_while_off(
+    cfg: RoomConfig, known: TrvState, value: float, capability_of: _Capabilities
+) -> bool:
+    """Return whether a thermostat that is off reports its frost temperature.
+
+    A thermostat switched off shows its frost protection temperature as its
+    setpoint (the TRVZB does): that is no knob turn and no new wish.
+    """
+    mode = capability_of(SetHvacMode("off"))
+    return (
+        shown(known, mode, known.reported_mode) == "off"
+        and abs(value - cfg.frost_temperature) <= SAME
+    )
 
 
 def _leave_window_phase(  # noqa: PLR0913

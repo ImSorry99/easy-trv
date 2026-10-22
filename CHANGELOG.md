@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-22
+
+### Fixed
+
+- A thermostat that is switched off (open window, outdoor or away hold, room off) reports its frost protection temperature as its setpoint. Easy TRV took that for a knob turn: during a hold the room's target became the frost temperature (raised to the room minimum) and was written when the hold ended; a room that was off was switched on again. That report is now ignored; a turn to any other value still counts
+
+### Changed
+
+- The default refresh interval is 30 minutes instead of 20, as in Better Thermostat. The TRVZB drops the external value only after about two hours without a write
+
 ## [0.7.0] - 2026-10-19
 
 ### Added
@@ -159,7 +169,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/ImSorry99/easy-trv/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ImSorry99/easy-trv/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/ImSorry99/easy-trv/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ImSorry99/easy-trv/compare/v0.5.1...v0.6.0

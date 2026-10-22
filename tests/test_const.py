@@ -7,7 +7,7 @@ from custom_components.easy_trv.core.settings import DEFAULTS
 
 def test_defaults_match_requirements() -> None:
     assert const.DOMAIN == "easy_trv"
-    assert const.DEFAULT_REFRESH_MINUTES == 20
+    assert const.DEFAULT_REFRESH_MINUTES == 30
     assert const.DEFAULT_VERIFY_DELAY == 10
     assert const.DEFAULT_MAX_ATTEMPTS == 3
     assert const.DEFAULT_MIN_DELTA == 0.1

@@ -76,6 +76,8 @@ CFG = RoomConfig(
 )
 T0 = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
 BOTH_AVAILABLE = {"climate.a": True, "climate.b": True}
+# The tests are written around a refresh interval of 20 minutes.
+DEFAULTS = replace(RoomParams.defaults(), refresh=timedelta(minutes=20))
 
 
 def reading(eid: str, value: float | None, at: datetime = T0) -> SensorReading:
@@ -87,7 +89,7 @@ def capability_of(intent: Intent) -> str:
 
 
 def logic() -> RoomLogic:
-    return RoomLogic(CFG, RoomParams.defaults(), capability_of=capability_of)
+    return RoomLogic(CFG, DEFAULTS, capability_of=capability_of)
 
 
 def executes(cmds: list[Command]) -> list[tuple[str, Intent]]:
@@ -216,9 +218,9 @@ def test_out_of_range_value_is_unusable() -> None:
 
 def test_room_without_sensors_never_touches_source() -> None:
     cfg = replace(CFG, temp_sensors=())
-    st, cmds = RoomLogic(
-        cfg, RoomParams.defaults(), capability_of=capability_of
-    ).handle(Start((), {}), T0, RoomState.initial(cfg))
+    st, cmds = RoomLogic(cfg, DEFAULTS, capability_of=capability_of).handle(
+        Start((), {}), T0, RoomState.initial(cfg)
+    )
     assert not any(
         isinstance(i, (SetSource, SetRoomTemperature)) for _, i in executes(cmds)
     )
@@ -228,7 +230,7 @@ def test_room_without_sensors_never_touches_source() -> None:
 
 def test_settings_are_only_emitted_when_configured() -> None:
     cfg = replace(CFG, window_detection="leave", adaptive_mode="leave")
-    _, cmds = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of).handle(
+    _, cmds = RoomLogic(cfg, DEFAULTS, capability_of=capability_of).handle(
         Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )
     sent = {type(i) for _, i in executes(cmds) if isinstance(i, SETTING_INTENTS)}
@@ -246,7 +248,7 @@ def test_settings_are_applied_only_once() -> None:
 
 def test_window_detection_off_is_sent_as_disabled() -> None:
     cfg = replace(CFG, window_detection="off", temp_sensors=())
-    _, cmds = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of).handle(
+    _, cmds = RoomLogic(cfg, DEFAULTS, capability_of=capability_of).handle(
         Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )
     assert executes(cmds) == [
@@ -311,7 +313,7 @@ def test_reading_without_timestamp_is_unusable_when_timeout_is_set() -> None:
 
 
 def test_timeout_can_be_disabled() -> None:
-    params = replace(RoomParams.defaults(), sensor_timeout=None)
+    params = replace(DEFAULTS, sensor_timeout=None)
     room = RoomLogic(CFG, params, capability_of=capability_of)
     assert room.usable(SensorReading("sensor.t1", 21.3, None), T0)
     assert room.usable(reading("sensor.t1", 21.3), T0 + timedelta(days=30))
@@ -1283,7 +1285,7 @@ def test_a_failed_source_write_is_sent_again_while_the_room_is_on_its_own_sensor
 
 def test_a_failed_setting_is_sent_again_in_a_room_without_sensors() -> None:
     cfg = replace(CFG, temp_sensors=())
-    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
     st, _ = room.handle(Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg))
     for _ in range(3):
         st, _ = room.handle(result("climate.a", HYSTERESIS, Failed("busy")), T0, st)
@@ -1304,7 +1306,7 @@ def test_a_failed_setting_is_sent_again_in_a_room_without_sensors() -> None:
 def test_nothing_is_sent_again_for_a_capability_the_room_does_not_manage(
     cfg: RoomConfig, capability: str
 ) -> None:
-    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
     st, _ = room.handle(
         Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )
@@ -1326,7 +1328,7 @@ def test_nothing_is_sent_again_for_a_capability_the_room_does_not_manage(
 
 # --- Every value that did not arrive is sent again, for ever --------------
 
-REFRESH = RoomParams.defaults().refresh
+REFRESH = DEFAULTS.refresh
 MODE = SetHvacMode("heat")
 SETPOINT = SetSetpoint(21.0)
 
@@ -1717,7 +1719,7 @@ def test_a_value_the_room_does_not_owe_is_forgotten_while_the_notice_stands() ->
 
 def test_notice_clears_when_the_last_given_up_value_is_dropped_by_a_read_back() -> None:
     cfg = replace(CFG, temp_sensors=())
-    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
     st, _ = room.handle(Start((), BOTH_AVAILABLE), T0, RoomState.initial(cfg))
     st, _ = room.handle(SetRoomSetpoint(21.0), T0, st)
     for _ in range(3):
@@ -1890,7 +1892,7 @@ def test_attempts_are_counted_per_capability() -> None:
 
 
 def test_backoff_clamps_to_its_last_entry() -> None:
-    params = replace(RoomParams.defaults(), max_attempts=6, backoff=(5.0, 15.0))
+    params = replace(DEFAULTS, max_attempts=6, backoff=(5.0, 15.0))
     room = RoomLogic(CFG, params, capability_of=capability_of)
     st, _ = started()
     delays: list[float] = []
@@ -2321,7 +2323,7 @@ def test_regaining_availability_in_a_room_without_sensors_only_applies_settings(
     None
 ):
     cfg = replace(CFG, temp_sensors=(), window_detection="off")
-    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
     st, _ = room.handle(
         Start((), {"climate.a": False, "climate.b": True}), T0, RoomState.initial(cfg)
     )
@@ -2606,7 +2608,7 @@ def test_a_trv_with_only_the_always_written_settings_counts_as_applied() -> None
     # Window detection and adaptive mode are left alone; the hysteresis and the
     # frost temperature are always written, so there is never "nothing" to apply.
     cfg = replace(CFG, window_detection="leave", adaptive_mode="leave")
-    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
     st, cmds = room.handle(
         Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )
@@ -2700,7 +2702,7 @@ READINGS = (reading("sensor.t1", 21.3), reading("sensor.t2", 20.0))
 
 
 def adaptive_logic(cfg: RoomConfig) -> RoomLogic:
-    return RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    return RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
 
 
 def start_room(cfg: RoomConfig) -> tuple[RoomLogic, RoomState, list[Command]]:

@@ -547,17 +547,17 @@ async def test_options_change_reloads(hass, entry) -> None:
     await start(hass, entry)
     before = entry.runtime_data
     subentry_id = next(iter(entry.subentries))
-    assert before.rooms[subentry_id].snapshot()["params"]["refresh"] == 1200.0
+    assert before.rooms[subentry_id].snapshot()["params"]["refresh"] == 1800.0
 
     hass.config_entries.async_update_entry(
-        entry, options={**FAST_OPTIONS, "refresh_minutes": 30}
+        entry, options={**FAST_OPTIONS, "refresh_minutes": 45}
     )
     await settle(hass)
 
     assert entry.state is ConfigEntryState.LOADED
     assert entry.runtime_data is not before
     new_room = entry.runtime_data.rooms[subentry_id]
-    assert new_room.snapshot()["params"]["refresh"] == 1800.0
+    assert new_room.snapshot()["params"]["refresh"] == 2700.0
     assert (
         hass.states.get("sensor.living_heating_state").attributes["source"]
         == "external"

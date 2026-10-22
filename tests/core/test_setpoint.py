@@ -13,7 +13,6 @@ from custom_components.easy_trv.core.model import (
     RestoreRoom,
     RetryDue,
     RoomMode,
-    RoomParams,
     RoomState,
     SensorChanged,
     SetHvacMode,
@@ -36,6 +35,7 @@ from custom_components.easy_trv.core.setpoint import clamp, operation, target
 from tests.core.test_room_logic import (
     BOTH_AVAILABLE,
     CFG,
+    DEFAULTS,
     T0,
     capability_of,
     executes,
@@ -785,7 +785,7 @@ def test_exhausted_writes_are_not_sent_to_a_thermostat_left_alone() -> None:
 
 def test_a_room_without_a_climate_does_not_resend_setpoint_or_mode() -> None:
     cfg = replace(CFG, setpoint_range=None)
-    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
     st, _ = room.handle(
         Start((reading("sensor.t1", 21.3),), BOTH_AVAILABLE), T0, RoomState.initial(cfg)
     )

@@ -13,7 +13,6 @@ from custom_components.easy_trv.core.model import (
     RaiseIssue,
     RestoreRoom,
     RoomMode,
-    RoomParams,
     RoomState,
     ScheduleKnobSettle,
     ScheduleRetry,
@@ -34,6 +33,7 @@ from custom_components.easy_trv.core.observe import is_echo
 from custom_components.easy_trv.core.room_logic import RoomLogic
 from tests.core.test_room_logic import (
     CFG,
+    DEFAULTS,
     T0,
     capability_of,
     executes,
@@ -364,7 +364,7 @@ def test_twelve_degrees_with_window_detection_is_a_window_phase() -> None:
 
 def test_twelve_degrees_is_a_knob_turn_without_window_detection() -> None:
     cfg = replace(CFG, window_detection="off")
-    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
     st = window_room()
     st, cmds = room.handle(reported(A, 12.0), AFTER, st)
     assert st.trvs[A].note is None
@@ -634,7 +634,7 @@ def test_observations_of_other_capabilities_and_without_climate_are_ignored() ->
     assert after == st
     assert of_type(cmds, ScheduleKnobSettle) == []
     cfg = replace(CFG, setpoint_range=None)
-    room = RoomLogic(cfg, RoomParams.defaults(), capability_of=capability_of)
+    room = RoomLogic(cfg, DEFAULTS, capability_of=capability_of)
     plain = RoomState.initial(cfg)
     after, cmds = room.handle(reported(A, 22.0), AFTER, plain)
     assert after == plain

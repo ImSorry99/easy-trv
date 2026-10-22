@@ -46,7 +46,7 @@ def test_defaults_are_derived_from_the_settings_module() -> None:
 
 def test_the_default_numbers_are_the_documented_ones() -> None:
     defaults = RoomParams.defaults()
-    assert defaults.refresh == timedelta(minutes=20)
+    assert defaults.refresh == timedelta(minutes=30)
     assert defaults.verify_delay == 10.0
     assert defaults.max_attempts == 3
     assert defaults.min_delta == 0.1

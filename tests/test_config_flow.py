@@ -940,7 +940,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_adaptive_mode": "Adaptive on",
         "global_frost_temperature": "5.0 °C",
         "global_hide_thermostat_entities": "Shown",
-        "global_refresh_minutes": "20 min",
+        "global_refresh_minutes": "30 min",
         "global_verify_delay_seconds": "10 s",
         "global_max_attempts": "3",
         "global_min_delta_kelvin": "0.1 K",
@@ -1002,7 +1002,7 @@ async def test_room_settings_placeholders_are_german_in_a_german_instance(
     assert placeholders["global_profile"] == "Auto"
     assert placeholders["global_frost_temperature"] == "5,0 °C"
     assert placeholders["global_min_delta_kelvin"] == "0,1 K"
-    assert placeholders["global_refresh_minutes"] == "20 min"
+    assert placeholders["global_refresh_minutes"] == "30 min"
     assert placeholders["global_sensor_timeout_minutes"] == "Aus"
 
 
@@ -1861,7 +1861,7 @@ def options_input(  # noqa: PLR0913
     """Return what the options form submits: six sections."""
     return {
         "writes": {
-            "refresh_minutes": 20,
+            "refresh_minutes": 30,
             "verify_delay_seconds": 10,
             "max_attempts": 3,
             "min_delta_kelvin": 0.1,
@@ -1978,7 +1978,7 @@ async def test_options_form_shows_the_saved_number_else_the_default(
     result = await hass.config_entries.options.async_init(entry.entry_id)
     # Nothing saved: the numbers and the selects show the built-in defaults.
     assert suggested_values(result, "writes") == {
-        "refresh_minutes": 20,
+        "refresh_minutes": 30,
         "verify_delay_seconds": 10,
         "max_attempts": 3,
         "min_delta_kelvin": 0.1,
@@ -2004,7 +2004,7 @@ async def test_options_form_shows_the_saved_number_else_the_default(
     }
     # Each number says what empty means.
     assert result["description_placeholders"] == {
-        "default_refresh_minutes": "20 min",
+        "default_refresh_minutes": "30 min",
         "default_verify_delay_seconds": "10 s",
         "default_max_attempts": "3",
         "default_min_delta_kelvin": "0.1 K",
@@ -2172,7 +2172,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
         result["flow_id"],
         options_input(
             writes={
-                "refresh_minutes": 30,
+                "refresh_minutes": 45,
                 "verify_delay_seconds": 5,
                 "max_attempts": 4,
                 "min_delta_kelvin": 0.3,
@@ -2189,7 +2189,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # Flat, as in Phase 1: the sections are only a layout.
     assert dict(entry.options) == {
-        "refresh_minutes": 30,
+        "refresh_minutes": 45,
         "verify_delay_seconds": 5,
         "max_attempts": 4,
         "min_delta_kelvin": 0.3,

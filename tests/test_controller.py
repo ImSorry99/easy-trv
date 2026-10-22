@@ -59,7 +59,7 @@ SETPOINT = 0x0012
 MODE = 0x001C
 RANGE = (4.0, 35.0, 0.5)
 CELSIUS = {"unit_of_measurement": "°C"}
-PARAMS = replace(RoomParams.defaults(), verify_delay=0.0)
+PARAMS = replace(RoomParams.defaults(), verify_delay=0.0, refresh=timedelta(minutes=20))
 # Enough loop iterations for the worker to run a queue of fake-gateway
 # operations (each one yields about once) to completion.
 SETTLE_ITERATIONS = 50
