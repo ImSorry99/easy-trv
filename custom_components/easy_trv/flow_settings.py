@@ -11,6 +11,7 @@ import voluptuous as vol
 from homeassistant.const import UnitOfTemperature, UnitOfTime
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -39,6 +40,7 @@ from custom_components.easy_trv.const import (
     CONF_PRESENCE_UNKNOWN,
     CONF_PROFILE,
     CONF_REFRESH_MINUTES,
+    CONF_RESET_SETTINGS,
     CONF_SENSOR_TIMEOUT,
     CONF_SETPOINT_MAX,
     CONF_SETPOINT_MIN,
@@ -346,8 +348,13 @@ def effective_settings(
     }
 
 
-def room_settings_schema(profiles: Mapping[str, Profile]) -> vol.Schema:
-    """Return the room's settings form: "global" or a value, empty = global."""
+def room_settings_schema(
+    profiles: Mapping[str, Profile], *, with_reset: bool = False
+) -> vol.Schema:
+    """Return the room's settings form: "global" or a value, empty = global.
+
+    ``with_reset`` ends it with the switch that sets everything to global.
+    """
     profile_options = [
         SelectOptionDict(value=SETTING_GLOBAL, label="Global"),
         SelectOptionDict(value=PROFILE_AUTO, label="Auto"),
@@ -370,14 +377,27 @@ def room_settings_schema(profiles: Mapping[str, Profile]) -> vol.Schema:
             schema[vol.Optional(key)] = _presence_selector()
         else:
             schema[vol.Optional(key)] = _number_selector(key)
+    if with_reset:
+        schema[vol.Optional(CONF_RESET_SETTINGS, default=False)] = BooleanSelector()
     return vol.Schema(schema)
 
 
 def room_settings(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Return what a room stores of its settings: the selects and filled numbers.
 
-    The room's own presence entity is kept only with ``presence: own``.
+    The room's own presence entity is kept only with ``presence: own``. The
+    reset switch sets every setting to global; where the room's presence comes
+    from is an assignment and stays.
     """
+    if user_input.get(CONF_RESET_SETTINGS):
+        user_input = {
+            **dict.fromkeys(ROOM_SELECT_KEYS, SETTING_GLOBAL),
+            **{
+                key: user_input[key]
+                for key in (CONF_PRESENCE, CONF_PRESENCE_ENTITY)
+                if key in user_input
+            },
+        }
     settings = {
         **{key: user_input[key] for key in ROOM_SELECT_KEYS},
         **stored_numbers(user_input, ROOM_NUMBER_KEYS),
@@ -423,9 +443,11 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
                 fields[vol.Optional(key)] = _number_selector(key)
         return section(vol.Schema(fields), {"collapsed": True})
 
-    return vol.Schema(
-        {vol.Required(name): group(keys) for name, keys in SECTIONS.items()}
-    )
+    form: dict[Any, Any] = {
+        vol.Required(name): group(keys) for name, keys in SECTIONS.items()
+    }
+    form[vol.Optional(CONF_RESET_SETTINGS, default=False)] = BooleanSelector()
+    return vol.Schema(form)
 
 
 def options_suggestions(current: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -455,9 +477,12 @@ def stored_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
     The selects, the filled numbers that differ from their built-in default and
     the outdoor sensor if there is one. A number left at its default is not
     stored, so it follows a later change of the default. The sections only lay
-    the form out; the options are stored flat.
+    the form out; the options are stored flat. The reset switch keeps only the
+    entities: every setting goes back to its built-in default.
     """
     flat = {key: value for name in SECTIONS for key, value in user_input[name].items()}
+    if user_input.get(CONF_RESET_SETTINGS):
+        return {key: flat[key] for key in _OPTION_ENTITIES if flat.get(key)}
     numbers = stored_numbers(flat, list(NUMBERS))
     options = {
         **{key: flat[key] for key in SELECT_VALUES},

@@ -1480,7 +1480,7 @@ async def test_reconfigure_shows_current_overrides(hass) -> None:
         result["flow_id"], entities_input(name="Living")
     )
     assert result["step_id"] == "settings"
-    assert list(fields(result)) == SETTINGS_FIELDS
+    assert list(fields(result)) == [*SETTINGS_FIELDS, "reset_settings"]
     assert suggested_values(result) == {
         "profile": "auto",
         "window_detection": "global",
@@ -1847,6 +1847,14 @@ def test_params_read_the_keys_the_options_flow_writes() -> None:
     assert RoomParams.from_settings(resolve_settings({}, {})) == RoomParams.defaults()
 
 
+SECTION_NAMES = [
+    "writes",
+    "thermostat",
+    "room_thermostat",
+    "windows_outdoor",
+    "presence",
+    "statistics",
+]
 WRITES = ["refresh_minutes", "verify_delay_seconds", "max_attempts", "min_delta_kelvin"]
 
 
@@ -1893,9 +1901,10 @@ async def test_options_form_is_grouped_in_five_sections(hass, entry) -> None:
         "windows_outdoor",
         "presence",
         "statistics",
+        "reset_settings",
     ]
-    for group in fields(result).values():
-        assert group.options == {"collapsed": True}
+    for name in SECTION_NAMES:
+        assert fields(result)[name].options == {"collapsed": True}
     assert list(section_fields(result, "writes")) == [
         *WRITES,
         "sensor_timeout_minutes",
@@ -2456,3 +2465,97 @@ async def test_room_keeps_its_own_presence_entity_only_with_own(
     data = next(iter(entry.subentries.values())).data
     assert data.get("presence_entity") == stored
     assert data["presence"] == submitted["presence"]
+
+
+# --- Reset to the defaults --------------------------------------------------
+
+
+async def test_options_reset_restores_the_defaults_and_keeps_the_entities(hass) -> None:
+    saved = make_entry(
+        hass,
+        [],
+        {
+            "refresh_minutes": 1,
+            "verify_delay_seconds": 2,
+            "max_attempts": 10,
+            "hysteresis": "0_2",
+            "outdoor_sensor": "sensor.outside",
+            "presence_entity": "person.a",
+        },
+    )
+    result = await hass.config_entries.options.async_init(saved.entry_id)
+    submitted = {
+        **options_input(
+            writes={
+                "refresh_minutes": 1,
+                "verify_delay_seconds": 2,
+                "max_attempts": 10,
+            },
+            thermostat={"hysteresis": "0_2"},
+            windows_outdoor={"outdoor_sensor": "sensor.outside"},
+            presence={"presence_entity": "person.a"},
+        ),
+        "reset_settings": True,
+    }
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], submitted
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert dict(saved.options) == {
+        "outdoor_sensor": "sensor.outside",
+        "presence_entity": "person.a",
+    }
+
+
+async def test_options_reset_switch_starts_off(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert defaults(result)["reset_settings"] is False
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_reset_sets_every_setting_to_global(hass) -> None:
+    entry = make_entry(
+        hass,
+        [
+            room_data(
+                refresh_minutes=45,
+                hysteresis="0_8",
+                adaptive_mode="off",
+                presence="own",
+                presence_entity="person.b",
+            )
+        ],
+        {},
+    )
+    sub = next(iter(entry.subentries.values()))
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living")
+    )
+    assert list(fields(result))[-1] == "reset_settings"
+    result = await room_flows(hass).async_configure(
+        result["flow_id"],
+        {
+            "refresh_minutes": 45,
+            "hysteresis": "0_8",
+            "adaptive_mode": "off",
+            "presence": "own",
+            "presence_entity": "person.b",
+            "reset_settings": True,
+        },
+    )
+    assert result["reason"] == "reconfigure_successful"
+    data = dict(entry.subentries[sub.subentry_id].data)
+    assert "refresh_minutes" not in data
+    assert "reset_settings" not in data
+    assert data["hysteresis"] == "global"
+    assert data["adaptive_mode"] == "global"
+    assert data["profile"] == "global"
+    # Where presence comes from is an assignment, not a setting: it stays.
+    assert (data["presence"], data["presence_entity"]) == ("own", "person.b")
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_a_new_room_has_no_reset_switch(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    assert "reset_settings" not in fields(result)

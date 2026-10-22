@@ -475,7 +475,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id=_STEP_SETTINGS,
             data_schema=self.add_suggested_values_to_schema(
-                room_settings_schema(profiles), suggested
+                room_settings_schema(profiles, with_reset=reconfiguring), suggested
             ),
             errors=errors,
             description_placeholders={

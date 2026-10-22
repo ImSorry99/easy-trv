@@ -105,7 +105,8 @@
             "presence_unknown": "Bei unbekannter Anwesenheit",
             "away_action": "Bei Abwesenheit",
             "away_setback_kelvin": "Absenkung (K)",
-            "statistics": "Statistik erfassen"
+            "statistics": "Statistik erfassen",
+            "reset_settings": "Alle Einstellungen dieses Raums auf Global zurücksetzen"
           },
           "data_description": {
             "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt. Global ist derzeit {global_profile}.",
@@ -134,7 +135,8 @@
             "presence_unknown": "Wie ein unbekannter oder nicht verfügbarer Zustand der Entität zählt. Global ist derzeit {global_presence_unknown}.",
             "away_action": "Absenken senkt die Zieltemperatur um die Absenkung, nie unter die Frostschutztemperatur. Aus schaltet die Thermostate aus wie bei offenem Fenster. Global ist derzeit {global_away_action}.",
             "away_setback_kelvin": "Um wie viel die Zieltemperatur bei Abwesenheit sinkt. 0,5 bis 10 K. Global ist derzeit {global_away_setback_kelvin}.",
-            "statistics": "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine Statistik-Sensoren an und entfernt vorhandene. Global ist derzeit {global_statistics}."
+            "statistics": "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine Statistik-Sensoren an und entfernt vorhandene. Global ist derzeit {global_statistics}.",
+            "reset_settings": "Beim Absenden folgen alle Einstellungen dieses Raums wieder den globalen Optionen, die Werte oben werden ignoriert. Woher der Raum seine Anwesenheit nimmt, bleibt."
           }
         }
       },
@@ -395,6 +397,12 @@
               "statistics": "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine Statistik-Sensoren an und entfernt vorhandene."
             }
           }
+        },
+        "data": {
+          "reset_settings": "Alle Einstellungen auf Standard zurücksetzen"
+        },
+        "data_description": {
+          "reset_settings": "Beim Absenden gehen alle Einstellungen auf ihren Standard zurück, die Werte oben werden ignoriert. Außentemperatur-Sensor und Anwesenheits-Entität bleiben."
         }
       }
     },

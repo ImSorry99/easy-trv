@@ -137,8 +137,10 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "area_id",
         *entity_fields,
     }
-    assert set(room["step"]["settings"]["data"]) == settings_fields
-    assert set(room["step"]["settings"]["data_description"]) == settings_fields
+    # The reset switch ends the settings of a room that is reconfigured.
+    reset = {"reset_settings"}
+    assert set(room["step"]["settings"]["data"]) == settings_fields | reset
+    assert set(room["step"]["settings"]["data_description"]) == settings_fields | reset
     assert set(room["step"]["from_area"]["data"]) == {"area_id"}
     assert set(room["step"]["custom"]["data"]) == {"name", "area_id"}
     # The optional area field says what it does.
@@ -146,7 +148,9 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert "area_id" in room["step"]["reconfigure"]["data_description"]
     assert set(room["step"]["user"]["menu_options"]) == {"from_area", "custom"}
     assert set(room["initiate_flow"]) == {"user", "reconfigure"}
-    options = data["options"]["step"]["init"]["sections"]
+    init = data["options"]["step"]["init"]
+    assert set(init["data"]) == set(init["data_description"]) == {"reset_settings"}
+    options = init["sections"]
     assert set(options) == {
         "writes",
         "thermostat",

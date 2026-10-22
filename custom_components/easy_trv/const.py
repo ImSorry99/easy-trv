@@ -57,6 +57,8 @@ CONF_OUTDOOR_CUTOFF: Final = "outdoor_cutoff"  # room-only: global / off
 CONF_OUTDOOR_CUTOFF_CELSIUS: Final = "outdoor_cutoff_celsius"
 CONF_WINDOW_OPEN_DELAY: Final = "window_open_delay_seconds"
 CONF_STATISTICS: Final = "statistics"
+# A switch at the end of the settings forms; never stored.
+CONF_RESET_SETTINGS: Final = "reset_settings"
 CONF_PRESENCE: Final = "presence"
 CONF_PRESENCE_ENTITY: Final = "presence_entity"
 CONF_PRESENCE_UNKNOWN: Final = "presence_unknown"

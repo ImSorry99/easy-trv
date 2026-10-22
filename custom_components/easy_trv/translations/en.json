@@ -105,7 +105,8 @@
             "presence_unknown": "When presence is unknown",
             "away_action": "While away",
             "away_setback_kelvin": "Setback (K)",
-            "statistics": "Collect statistics"
+            "statistics": "Collect statistics",
+            "reset_settings": "Reset all settings of this room to Global"
           },
           "data_description": {
             "profile": "Auto picks the first profile that matches all thermostats of the room. Global is currently {global_profile}.",
@@ -134,7 +135,8 @@
             "presence_unknown": "How an unknown or unavailable state of the entity counts. Global is currently {global_presence_unknown}.",
             "away_action": "Lower takes the target down by the setback, never below the frost protection temperature. Off switches the thermostats off like an open window. Global is currently {global_away_action}.",
             "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Global is currently {global_away_setback_kelvin}.",
-            "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones. Global is currently {global_statistics}."
+            "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones. Global is currently {global_statistics}.",
+            "reset_settings": "On submit every setting of this room follows the global options again and the values above are ignored. Where the room's presence comes from stays."
           }
         }
       },
@@ -395,6 +397,12 @@
               "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones."
             }
           }
+        },
+        "data": {
+          "reset_settings": "Reset all settings to their defaults"
+        },
+        "data_description": {
+          "reset_settings": "On submit every setting goes back to its built-in default and the values above are ignored. The outdoor temperature sensor and the presence entity stay."
         }
       }
     },

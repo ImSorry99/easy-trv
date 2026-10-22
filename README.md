@@ -53,6 +53,8 @@ Every setting exists in three layers, and the most specific one that is set wins
 2. **Global**: the integration's options (**Configure** on the integration page). They apply to all rooms. Every number field shows its value, the built-in default until you change it. A field left at its default or emptied is not stored and follows the built-in default. The sections of the form start collapsed.
 3. **Room**: the **Room settings** page of a room. Every choice there has the first option **Global**, and a number field left empty means global too. Only what you change is stored for the room, so a later change of the global value reaches every room that does not set its own.
 
+**Reset.** The last field of the options form, **Reset all settings to their defaults**, sets every global setting back to its built-in default when you submit; the outdoor temperature sensor and the presence entity stay. The room settings of a room you reconfigure end with **Reset all settings of this room to Global**; where the room's presence comes from stays.
+
 | Setting | Range | Built-in default | Meaning |
 |---|---|---|---|
 | Refresh interval | 1 to 120 minutes | 30 | The room temperature is written again at least this often, even if it has not changed. The TRVZB drops the external value after about two hours without a write. |

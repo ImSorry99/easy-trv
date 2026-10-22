@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- A reset switch at the end of the settings forms: **Reset all settings to their defaults** in the integration options (the outdoor temperature sensor and the presence entity stay) and **Reset all settings of this room to Global** in the settings of a room you reconfigure (where the room's presence comes from stays)
+
 ## [0.7.1] - 2026-10-22
 
 ### Fixed
