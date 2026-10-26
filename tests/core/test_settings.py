@@ -15,7 +15,7 @@ from custom_components.easy_trv.core.settings import (
 def test_defaults_when_nothing_is_set():
     s = resolve_settings({}, {})
     assert (s.refresh_minutes, s.verify_delay_seconds, s.max_attempts) == (30, 10, 3)
-    assert (s.min_delta_kelvin, s.sensor_timeout_minutes) == (0.1, 120)
+    assert (s.min_delta_kelvin, s.sensor_timeout_minutes) == (0.1, 0)
     assert (s.window_detection, s.hysteresis, s.adaptive_mode) == ("on", 0.4, "on")
     assert (s.frost_temperature, s.profile) == (5.0, "auto")
 

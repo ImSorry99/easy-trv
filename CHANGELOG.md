@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- The sensor timeout is off by default (was 120 minutes). Battery Zigbee temperature sensors report only on a change of about 0.2 °C and can stay silent for many hours while still available; with the old default the room fell back to the thermostat's internal sensor for hours. A sensor that is unavailable or has no value is still unusable. The timeout remains an option for sensors that report regularly
+
 ## [0.7.1] - 2026-10-22
 
 ### Fixed

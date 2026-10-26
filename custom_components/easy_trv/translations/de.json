@@ -118,7 +118,7 @@
             "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden. Global ist derzeit {global_verify_delay_seconds}.",
             "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10. Global ist derzeit {global_max_attempts}.",
             "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Global ist derzeit {global_min_delta_kelvin}.",
-            "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}.",
+            "sensor_timeout_minutes": "Ein stiller Sensor zählt, solange er verfügbar ist; Batteriesensoren melden oft nur bei einer Änderung. Das Timeout ist für Sensoren gedacht, die regelmäßig melden: Ein Sensor, der so lange nichts gemeldet hat, wird ignoriert. 0 = aus (Standard), sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}.",
             "setpoint_range": "Automatisch liest beim Einrichten des Raums die minimale und maximale Solltemperatur, die die Thermostate in Home Assistant zeigen (bei mehreren gilt der engste gemeinsame Bereich, sonst der Bereich des Profils). Manuell nimmt das Minimum und das Maximum unten. Global ist derzeit {global_setpoint_range}.",
             "setpoint_min": "Die niedrigste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_min}.",
             "setpoint_max": "Die höchste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_max}.",
@@ -312,7 +312,7 @@
               "verify_delay_seconds": "Wie lange nach einem Schreibvorgang gewartet wird, bevor der Wert zur Kontrolle vom Thermostat zurückgelesen wird. 2 bis 60 Sekunden. Leer = {default_verify_delay_seconds}.",
               "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10. Leer = {default_max_attempts}.",
               "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Leer = {default_min_delta_kelvin}.",
-              "sensor_timeout_minutes": "Ein Temperatursensor, der so lange nichts gemeldet hat, wird ignoriert. 0 schaltet das Timeout aus, sonst 10 bis 1440 Minuten. Leer = {default_sensor_timeout_minutes}."
+              "sensor_timeout_minutes": "Ein stiller Sensor zählt, solange er verfügbar ist; Batteriesensoren melden oft nur bei einer Änderung. Das Timeout ist für Sensoren gedacht, die regelmäßig melden: Ein Sensor, der so lange nichts gemeldet hat, wird ignoriert. 0 = aus (Standard), sonst 10 bis 1440 Minuten. Leer = {default_sensor_timeout_minutes}."
             }
           },
           "thermostat": {

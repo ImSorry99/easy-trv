@@ -11,7 +11,7 @@ def test_defaults_match_requirements() -> None:
     assert const.DEFAULT_VERIFY_DELAY == 10
     assert const.DEFAULT_MAX_ATTEMPTS == 3
     assert const.DEFAULT_MIN_DELTA == 0.1
-    assert const.DEFAULT_SENSOR_TIMEOUT == 120
+    assert const.DEFAULT_SENSOR_TIMEOUT == 0
     assert const.DEFAULT_HYSTERESIS == "0_4"
     assert const.DEFAULT_WINDOW_DETECTION == "on"
     assert const.DEFAULT_ADAPTIVE_MODE == "on"
