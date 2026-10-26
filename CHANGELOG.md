@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-26
+
 ### Changed
 
 - The sensor timeout is off by default (was 120 minutes). Battery Zigbee temperature sensors report only on a change of about 0.2 °C and can stay silent for many hours while still available; with the old default the room fell back to the thermostat's internal sensor for hours. A sensor that is unavailable or has no value is still unusable. The timeout remains an option for sensors that report regularly
@@ -173,7 +175,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/ImSorry99/easy-trv/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/ImSorry99/easy-trv/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ImSorry99/easy-trv/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/ImSorry99/easy-trv/compare/v0.6.0...v0.6.1
