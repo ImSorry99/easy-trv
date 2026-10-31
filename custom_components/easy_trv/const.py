@@ -95,7 +95,9 @@ DEFAULT_AWAY_SETBACK: Final = _settings.DEFAULT_AWAY_SETBACK
 
 # Timing
 DEBOUNCE_SECONDS: Final = 5.0
-OPERATION_TIMEOUT: Final = 20.0
+# A safety net only: zigpy itself waits up to 28 s (APS_REPLY_TIMEOUT_EXTENDED)
+# for an end device and tries 3 times, plus queueing at its concurrency limit.
+OPERATION_TIMEOUT: Final = 180.0
 BACKOFF_SECONDS: Final = (5.0, 15.0, 45.0)
 TICK_SECONDS: Final = 60
 # How long a window contact may stay silent before Repairs says so. Not a setting:

@@ -88,3 +88,8 @@ def test_presence_constants() -> None:
     assert const.CONF_AWAY_SETBACK == "away_setback_kelvin"
     assert (const.DEFAULT_AWAY_ACTION, const.DEFAULT_AWAY_SETBACK) == ("setback", 3.0)
     assert const.DEFAULT_PRESENCE_UNKNOWN == "away"
+
+
+def test_operation_timeout_leaves_room_for_zigpys_own_retries() -> None:
+    # zigpy: 3 tries of up to 28 s for an end device, plus queueing.
+    assert const.OPERATION_TIMEOUT == 180.0

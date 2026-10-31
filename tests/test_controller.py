@@ -899,8 +899,10 @@ async def test_timeout_is_a_failed_outcome(
     monkeypatch.setattr(gateway, "write", hang_on_a)
     controller = make_controller()
     await controller.async_start()
-    for _ in range(100):
-        await advance(hass, freezer, 5)
+    # Every write to climate.a hangs for the whole OPERATION_TIMEOUT, and the
+    # room's operations run one at a time: three rounds take about an hour.
+    for _ in range(150):
+        await advance(hass, freezer, 30, step=10)
         if health(controller)["climate.a"] == "error":
             break
     assert health(controller) == {"climate.a": "error", "climate.b": "ok"}
@@ -2769,7 +2771,7 @@ async def test_a_timeout_counts_as_a_failure(
     monkeypatch.setattr(gateway, "write", hang_on_a)
     room = make_controller()
     await room.async_start()
-    for _ in range(20):
+    for _ in range(60):
         await advance(hass, freezer, 5)
         if trv_stats(room, "climate.a").write_failures:
             break
