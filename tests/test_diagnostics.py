@@ -109,7 +109,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "verify_delay_seconds": 0,
         "max_attempts": 3,
         "min_delta_kelvin": 0.1,
-        "sensor_timeout_minutes": 120,
+        "sensor_timeout_minutes": 0,
         "window_detection": "on",
         "hysteresis": 0.4,
         "adaptive_mode": "on",

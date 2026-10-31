@@ -50,7 +50,7 @@ def test_the_default_numbers_are_the_documented_ones() -> None:
     assert defaults.verify_delay == 10.0
     assert defaults.max_attempts == 3
     assert defaults.min_delta == 0.1
-    assert defaults.sensor_timeout == timedelta(minutes=120)
+    assert defaults.sensor_timeout is None
 
 
 def test_settings_are_read_and_converted() -> None:
@@ -81,7 +81,7 @@ def test_missing_and_unknown_settings_fall_back_to_defaults() -> None:
     result = params({"refresh_minutes": 45, "unrelated": "x"})
     assert result.refresh == timedelta(minutes=45)
     assert result.verify_delay == RoomParams.defaults().verify_delay
-    assert result.sensor_timeout == timedelta(minutes=120)
+    assert result.sensor_timeout is None
 
 
 def test_timing_constants_stay_at_their_defaults() -> None:

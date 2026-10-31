@@ -119,7 +119,7 @@
             "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds. Global is currently {global_verify_delay_seconds}.",
             "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Global is currently {global_max_attempts}.",
             "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Global is currently {global_min_delta_kelvin}.",
-            "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}.",
+            "sensor_timeout_minutes": "A silent sensor still counts as long as it is available; battery sensors often report only on a change. The timeout is for sensors that report regularly: one that has not reported for this long is ignored. 0 = off (default), otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}.",
             "setpoint_range": "Automatic reads, when the room is set up, the minimum and maximum target temperature the thermostats show in Home Assistant (with several, the narrowest common range, else the range of the profile). Manual takes the minimum and maximum below. Global is currently {global_setpoint_range}.",
             "setpoint_min": "The lowest target temperature the room accepts. 4.0 to 35.0 °C and below the maximum. Only used with the setpoint range Manual. Global is currently {global_setpoint_min}.",
             "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Only used with the setpoint range Manual. Global is currently {global_setpoint_max}.",
@@ -314,7 +314,7 @@
               "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds. Empty = {default_verify_delay_seconds}.",
               "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Empty = {default_max_attempts}.",
               "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Empty = {default_min_delta_kelvin}.",
-              "sensor_timeout_minutes": "A temperature sensor that has not reported for this long is ignored. 0 switches the timeout off, otherwise 10 to 1440 minutes. Empty = {default_sensor_timeout_minutes}."
+              "sensor_timeout_minutes": "A silent sensor still counts as long as it is available; battery sensors often report only on a change. The timeout is for sensors that report regularly: one that has not reported for this long is ignored. 0 = off (default), otherwise 10 to 1440 minutes. Empty = {default_sensor_timeout_minutes}."
             }
           },
           "thermostat": {

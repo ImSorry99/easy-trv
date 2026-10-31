@@ -76,8 +76,13 @@ CFG = RoomConfig(
 )
 T0 = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
 BOTH_AVAILABLE = {"climate.a": True, "climate.b": True}
-# The tests are written around a refresh interval of 20 minutes.
-DEFAULTS = replace(RoomParams.defaults(), refresh=timedelta(minutes=20))
+# The tests are written around a refresh interval of 20 minutes and a sensor
+# timeout of 120 minutes (the timeout is off by default).
+DEFAULTS = replace(
+    RoomParams.defaults(),
+    refresh=timedelta(minutes=20),
+    sensor_timeout=timedelta(minutes=120),
+)
 
 
 def reading(eid: str, value: float | None, at: datetime = T0) -> SensorReading:
@@ -643,6 +648,33 @@ def test_sensor_timeout_loses_source_then_regains() -> None:
     assert st.active_sensor == "sensor.t1"
     assert st.last_written == 21.0
     assert debounces(cmds) == []
+
+
+def test_silent_sensor_stays_active_while_available_without_a_timeout() -> None:
+    default_logic = RoomLogic(CFG, RoomParams.defaults(), capability_of=capability_of)
+    assert RoomParams.defaults().sensor_timeout is None
+    st, _ = default_logic.handle(
+        Start((reading("sensor.t1", 21.3), reading("sensor.t2", 20.0)), BOTH_AVAILABLE),
+        T0,
+        RoomState.initial(CFG),
+    )
+    later = T0 + timedelta(hours=14)
+    st, cmds = default_logic.handle(Tick(), later, st)
+    assert st.source == Source.EXTERNAL
+    assert st.active_sensor == "sensor.t1"
+    assert SetSource("internal") not in [i for _, i in executes(cmds)]
+    # Once the sensor is unavailable (no value), the room falls back.
+    st, cmds = default_logic.handle(
+        SensorChanged(reading("sensor.t1", None, at=later)), later, st
+    )
+    assert st.source == Source.EXTERNAL
+    assert st.active_sensor == "sensor.t2"
+    st, cmds = default_logic.handle(
+        SensorChanged(reading("sensor.t2", None, at=later)), later, st
+    )
+    assert [i for _, i in executes(cmds)] == [SetSource("internal")] * 2
+    assert st.source == Source.INTERNAL
+    assert st.active_sensor is None
 
 
 def test_source_is_lost_once() -> None:

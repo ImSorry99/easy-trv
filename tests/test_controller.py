@@ -330,8 +330,11 @@ async def test_state_report_keeps_the_sensor_fresh(hass, freezer, controller) ->
 
 
 async def test_silent_sensors_time_out_to_internal_source(
-    hass, freezer, controller
+    hass, freezer, make_controller
 ) -> None:
+    controller = make_controller(
+        params=replace(PARAMS, sensor_timeout=timedelta(minutes=120))
+    )
     await controller.async_start()
     await settle(hass)
     await advance(hass, freezer, 130 * 60, step=10 * 60)

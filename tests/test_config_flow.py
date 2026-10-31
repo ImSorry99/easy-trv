@@ -944,7 +944,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_verify_delay_seconds": "10 s",
         "global_max_attempts": "3",
         "global_min_delta_kelvin": "0.1 K",
-        "global_sensor_timeout_minutes": "120 min",
+        "global_sensor_timeout_minutes": "Off",
         "global_setpoint_range": "Automatic (from the thermostat)",
         "global_setpoint_min": "5.0 °C",
         "global_setpoint_max": "30.0 °C",
@@ -1873,7 +1873,7 @@ def options_input(  # noqa: PLR0913
             "verify_delay_seconds": 10,
             "max_attempts": 3,
             "min_delta_kelvin": 0.1,
-            "sensor_timeout_minutes": 120,
+            "sensor_timeout_minutes": 0,
             **(writes or {}),
         },
         "thermostat": {
@@ -1991,7 +1991,7 @@ async def test_options_form_shows_the_saved_number_else_the_default(
         "verify_delay_seconds": 10,
         "max_attempts": 3,
         "min_delta_kelvin": 0.1,
-        "sensor_timeout_minutes": 120,
+        "sensor_timeout_minutes": 0,
     }
     assert suggested_values(result, "thermostat") == {"frost_temperature": 5.0}
     assert suggested_values(result, "room_thermostat") == {
@@ -2017,7 +2017,7 @@ async def test_options_form_shows_the_saved_number_else_the_default(
         "default_verify_delay_seconds": "10 s",
         "default_max_attempts": "3",
         "default_min_delta_kelvin": "0.1 K",
-        "default_sensor_timeout_minutes": "120 min",
+        "default_sensor_timeout_minutes": "Off",
         "default_frost_temperature": "5.0 °C",
         "default_setpoint_min": "5.0 °C",
         "default_setpoint_max": "30.0 °C",
@@ -2185,7 +2185,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
                 "verify_delay_seconds": 5,
                 "max_attempts": 4,
                 "min_delta_kelvin": 0.3,
-                "sensor_timeout_minutes": 0,
+                "sensor_timeout_minutes": 60,
             },
             thermostat={
                 "window_detection": "off",
@@ -2202,7 +2202,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
         "verify_delay_seconds": 5,
         "max_attempts": 4,
         "min_delta_kelvin": 0.3,
-        "sensor_timeout_minutes": 0,
+        "sensor_timeout_minutes": 60,
         "window_detection": "off",
         "hysteresis": "0_6",
         "adaptive_mode": "off",
@@ -2227,7 +2227,7 @@ async def test_options_flow_stores_thermostat_settings_flat(hass, entry) -> None
     assert type(entry.options["frost_temperature"]) is float
     settings = resolve_settings(entry.options, {})
     assert (settings.hysteresis, settings.adaptive_mode) == (0.6, "off")
-    assert RoomParams.from_settings(settings).sensor_timeout is None
+    assert RoomParams.from_settings(settings).sensor_timeout == timedelta(minutes=60)
 
 
 async def test_options_empty_number_falls_back_to_default(hass, entry) -> None:
@@ -2276,7 +2276,8 @@ async def test_options_flow_sensor_timeout_is_off_or_ten_to_1440(
     )
     if valid:
         assert result["type"] is FlowResultType.CREATE_ENTRY
-        assert entry.options["sensor_timeout_minutes"] == minutes
+        # Off is the default and therefore not stored.
+        assert entry.options.get("sensor_timeout_minutes", 0) == minutes
     else:
         assert result["type"] is FlowResultType.FORM
         assert result["errors"] == {"sensor_timeout_minutes": "timeout_range"}
