@@ -254,7 +254,7 @@
   "issues": {
     "trv_unreachable": {
       "title": "Thermostat {thermostat} in {room} is not responding",
-      "description": "Easy TRV has not been able to set \"{setting}\" on {thermostat} in {room} for more than {minutes} minutes. Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
     },
     "trv_firmware": {
       "title": "Thermostat {thermostat} in {room} lacks a firmware feature",

@@ -617,7 +617,7 @@ class RoomLogic:
         if capability in current.unsupported - current.not_in_profile:
             commands.append(ClearIssue("firmware", trv))
         still_failing = False
-        if self._reported(current):
+        if self._failing(current):
             updated, notice, still_failing = self._follow_notice(
                 state, trv, updated, capability
             )
@@ -672,7 +672,7 @@ class RoomLogic:
             issue_raised=False,
         )
         if not raised:
-            quiet = f"{trv} accepts writes again before it was reported"
+            quiet = f"{trv} owes nothing any more, it was never reported"
             return updated, [Log("debug", quiet)], False
         return (
             updated,
@@ -696,7 +696,7 @@ class RoomLogic:
         """
         commands: list[Command] = []
         for trv, known in before.trvs.items():
-            if not self._reported(known):
+            if not self._failing(known):
                 continue
             current = state.trvs[trv]
             updated = current
@@ -710,7 +710,7 @@ class RoomLogic:
                     given_up=updated.given_up - stale,
                     errors={k: v for k, v in updated.errors.items() if k not in stale},
                 )
-            if self._reported(updated):
+            if self._failing(updated):
                 updated, notice, going = self._follow_notice(state, trv, updated, None)
                 commands += notice
                 if not going and updated.health in (
@@ -749,7 +749,7 @@ class RoomLogic:
             return self._with_trv(state, trv, updated), [
                 ScheduleRetry(trv, capability, delay)
             ]
-        reported = self._reported(current)
+        failing = self._failing(current)
         updated = replace(
             updated,
             health=TrvHealth.ERROR,
@@ -765,15 +765,16 @@ class RoomLogic:
         if updated.failing_since is None:
             # The report waits from here; a return from away keeps the time.
             updated = replace(updated, failing_since=now)
-        if not reported:
-            # The first to give up owns the issue.
+        if not failing:
+            # The first to give up owns the issue it may get after the delay.
             updated = replace(updated, error_capability=capability)
         if isinstance(event.intent, SETTING_INTENTS):
             # The setting never arrived: apply it again on the next resync.
             updated = replace(updated, settings_applied=False)
         state = self._with_trv(state, trv, updated)
-        if reported:
-            # The notice stands: nothing new for a capability that fails again.
+        if failing:
+            # Already failing: the delay runs (or the notice stands), nothing
+            # new for a capability that fails again.
             return state, []
         note = Log(
             "debug",
@@ -814,8 +815,8 @@ class RoomLogic:
             FireEvent(EVENT_WRITE_FAILED, {**self._event_data(trv), **data}),
             Log(
                 "warning",
-                f"{self._cfg.name}: {trv} has not accepted {capability} "
-                f"for {minutes} minutes: {error}",
+                f"{self._cfg.name}: {trv} has been failing for {minutes} minutes, "
+                f"still missing {capability}: {error}",
             ),
         ]
 
@@ -857,8 +858,8 @@ class RoomLogic:
             self._unreachable(trv, capability, error),
             Log(
                 "warning",
-                f"{self._cfg.name}: {trv} still has not accepted {capability} "
-                f"for {self._report_minutes()} minutes: {error}",
+                f"{self._cfg.name}: {trv} is still failing, now missing "
+                f"{capability}: {error}",
             ),
         ]
 
@@ -1261,12 +1262,12 @@ class RoomLogic:
         return None
 
     @staticmethod
-    def _reported(trv_state: TrvState) -> bool:
-        """Return whether the thermostat's error was already reported.
+    def _failing(trv_state: TrvState) -> bool:
+        """Return whether the thermostat is failing, reported or not yet.
 
         ``last_error`` outlives the health, which falls back to unavailable or
-        ok while the thermostat is away, so it is the mark of an issue that is
-        still raised.
+        ok while the thermostat is away, so it is the mark of a failure that
+        has not ended. Whether it was reported is ``issue_raised``.
         """
         return trv_state.health is TrvHealth.ERROR or trv_state.last_error is not None
 

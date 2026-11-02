@@ -3099,7 +3099,8 @@ def test_the_hour_raises_the_notice_once() -> None:
         )
     ]
     assert [w.message for w in warnings(cmds)] == [
-        "Living: climate.a has not accepted room_temperature for 60 minutes: radio busy"
+        "Living: climate.a has been failing for 60 minutes, still missing "
+        "room_temperature: radio busy"
     ]
     assert of_type(cmds, FireEvent) == [
         FireEvent(

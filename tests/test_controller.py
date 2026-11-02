@@ -402,11 +402,12 @@ async def test_verify_delay_and_mismatch_retry(
     }
     assert issue(hass, "trv_unreachable_0022") is None
     assert [e.data["attribute"] for e in write_failed] == ["external_temperature"]
-    [record] = [r for r in caplog.records if "has not accepted" in r.getMessage()]
+    [record] = [r for r in caplog.records if "has been failing" in r.getMessage()]
     assert record.levelno == logging.WARNING
     # The core's message already names the room; the controller adds nothing.
     assert record.getMessage().startswith(
-        "Living: climate.a has not accepted external_temperature for 0 minutes"
+        "Living: climate.a has been failing for 0 minutes, still missing "
+        "external_temperature"
     )
     assert record.getMessage().count("Living:") == 1
 
