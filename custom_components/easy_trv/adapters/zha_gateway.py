@@ -90,6 +90,12 @@ class TrvGateway(Protocol):
         """Read attributes from the device, bypassing the attribute cache."""
         ...
 
+    def cached(
+        self, ieee: str, endpoint: int, cluster: int, attribute: int
+    ) -> int | None:
+        """Return the value zigpy last knew, without radio traffic; None if unknown."""
+        ...
+
     def subscribe(
         self,
         ieee: str,
@@ -314,6 +320,23 @@ class ZhaLibraryGateway:
                 msg = f"read failed for 0x{attr:04X}: not an integer: {success[attr]!r}"
                 raise GatewayError(msg) from err
         return result
+
+    def cached(
+        self, ieee: str, endpoint: int, cluster: int, attribute: int
+    ) -> int | None:
+        """Return the value in zigpy's attribute cache, without radio traffic.
+
+        zigpy fills the cache from reports, reads and successful writes and
+        keeps it in ZHA's database across restarts. ``None`` when the value is
+        unknown or the internal API fails.
+        """
+        try:
+            device = self._device(ieee)
+            value = device.async_get_cluster(endpoint, cluster).get(attribute)
+            return None if value is None else int(value)
+        # Internal API, deliberately broad: unknown means "write as usual".
+        except Exception:  # noqa: BLE001
+            return None
 
     def subscribe(
         self,

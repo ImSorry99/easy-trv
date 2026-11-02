@@ -3,6 +3,8 @@ import inspect
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+import zigpy.types as t
+import zigpy.zcl
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from zha.application.gateway import Gateway
@@ -520,6 +522,10 @@ def test_zha_api_matches_the_calls_the_adapter_makes() -> None:
     assert get_cluster[:3] == ["self", "endpoint_id", "cluster_id"]
     assert isinstance(Device.available, property)
     assert list(inspect.signature(Gateway.get_device).parameters) == ["self", "ieee"]
+    assert list(inspect.signature(zigpy.zcl.Cluster.get).parameters)[:2] == [
+        "self",
+        "key",
+    ]
 
 
 # --- subscribe ------------------------------------------------------------
@@ -945,3 +951,30 @@ async def test_fake_gateway_subscribe_unknown_device_raises() -> None:
     fake = FakeGateway()
     with pytest.raises(zha_gateway.GatewayError):
         fake.subscribe(IEEE, 1, THERMOSTAT, [LOCAL_TEMP_SETPOINT], _noop)
+
+
+# --- cached ---------------------------------------------------------------
+
+
+async def test_cached_reads_zigpys_cache_without_traffic(hass) -> None:
+    device, cluster = _device_with_cluster(({}, {}))
+    cluster.get.return_value = t.Bool.true  # a zigpy type, not an int
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        value = gw.cached(IEEE, 1, 0xFC11, 0x6000)
+    assert value == 1
+    assert type(value) is int
+    device.async_get_cluster.assert_called_with(1, 0xFC11)
+    cluster.get.assert_called_with(0x6000)
+    cluster.read_attributes.assert_not_called()
+
+
+async def test_cached_is_none_when_absent_or_broken(hass) -> None:
+    device, cluster = _device_with_cluster(({}, {}))
+    cluster.get.return_value = None
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        assert gw.cached(IEEE, 1, 0xFC11, 0x6000) is None
+        device.async_get_cluster.side_effect = KeyError(0xFC11)
+        assert gw.cached(IEEE, 1, 0xFC11, 0x6000) is None
+        assert gw.cached("not-an-ieee", 1, 0xFC11, 0x6000) is None

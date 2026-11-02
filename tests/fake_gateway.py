@@ -131,6 +131,17 @@ class FakeGateway:
                 raise GatewayError(msg)
         return result
 
+    def cached(
+        self, ieee: str, endpoint: int, cluster: int, attribute: int
+    ) -> int | None:
+        """Return the stored value: like zigpy, a successful write fills it.
+
+        An attribute the device lacks is never cached, as zigpy marks it.
+        """
+        if (ieee, attribute) in self.unsupported_write:
+            return None
+        return self.store.get((ieee, endpoint, cluster, attribute))
+
     def subscribe(
         self,
         ieee: str,

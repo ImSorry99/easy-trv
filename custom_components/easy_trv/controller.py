@@ -49,6 +49,7 @@ from custom_components.easy_trv.const import (
 from custom_components.easy_trv.core import statistics as room_stats
 from custom_components.easy_trv.core.model import (
     INTENT_NAMES,
+    SETTING_INTENTS,
     ClearIssue,
     Command,
     DebounceElapsed,
@@ -1275,6 +1276,15 @@ class RoomController:
             outcome = Failed(str(exc))
             self._log_not_sent(trv, capability, outcome)
             return OperationResult(trv, intent, capability, outcome)
+        if self._has_already(trv, intent, op):
+            _LOGGER.debug(
+                "%s: %s %s already 0x%X, not written",
+                self._config.name,
+                trv,
+                op.capability,
+                op.raw_value,
+            )
+            return OperationResult(trv, intent, op.capability, Ok())
         outcome = self._with_observed(
             op.capability, await self._write_and_verify(trv, op)
         )
@@ -1288,6 +1298,19 @@ class RoomController:
             _outcome_text(outcome),
         )
         return OperationResult(trv, intent, op.capability, outcome)
+
+    def _has_already(self, trv: str, intent: Intent, op: Operation) -> bool:
+        """Return whether zigpy knows the thermostat has the setting already.
+
+        Only settings: the source and the value are written because the
+        thermostat may have fallen back unnoticed, setpoint and mode because the
+        echo detection relies on the room's own writes.
+        """
+        if not isinstance(intent, SETTING_INTENTS):
+            return False
+        ieee = self._device_refs[trv].ieee
+        cached = self._gateway.cached(ieee, op.endpoint, op.cluster, op.attribute)
+        return cached is not None and cached in op.accept
 
     def _with_observed(self, capability: str, outcome: Outcome) -> Outcome:
         """Decode the value a mismatch read back, for the capabilities observed."""

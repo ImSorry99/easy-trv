@@ -3430,3 +3430,35 @@ async def test_a_failed_read_back_of_a_written_value_is_no_failure(
     assert health(controller)["climate.a"] == "ok"
     assert trv_stats(controller).write_failures == 0
     assert write_failed == []
+
+
+async def test_a_setting_the_thermostat_already_has_is_not_written(
+    hass, controller, gateway
+) -> None:
+    gateway.store[(IEEE_A, 1, 0xFC11, WINDOW)] = 1
+    await controller.async_start()
+    await settle(hass)
+    assert writes_to(gateway, IEEE_A, WINDOW) == []
+    assert writes_to(gateway, IEEE_B, WINDOW) == [1]
+    # Not sent, so not counted.
+    assert trv_stats(controller, "climate.a").writes == 4
+    assert trv_stats(controller, "climate.b").writes == 5
+    assert health(controller)["climate.a"] == "ok"
+
+
+async def test_a_setting_with_another_cached_value_is_written(
+    hass, controller, gateway
+) -> None:
+    gateway.store[(IEEE_A, 1, 0xFC11, WINDOW)] = 0
+    await controller.async_start()
+    await settle(hass)
+    assert writes_to(gateway, IEEE_A, WINDOW) == [1]
+
+
+async def test_the_source_is_written_even_when_cached(
+    hass, controller, gateway
+) -> None:
+    gateway.store[(IEEE_A, 1, 0xFC11, SOURCE)] = 1
+    await controller.async_start()
+    await settle(hass)
+    assert writes_to(gateway, IEEE_A, SOURCE) == [1]
