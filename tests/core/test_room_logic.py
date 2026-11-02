@@ -3048,6 +3048,13 @@ def given_up(
     return st, cmds
 
 
+def reported(st: RoomState, at: datetime) -> tuple[RoomState, list[Command]]:
+    """Tick at ``at``: the retry goes out and fails again; the next tick reports."""
+    st, _ = hour_logic().handle(Tick(), at, st)
+    st, _ = given_up(st, at)
+    return hour_logic().handle(Tick(), at + timedelta(minutes=1), st)
+
+
 def warnings(cmds: list[Command]) -> list[Log]:
     return [c for c in of_type(cmds, Log) if c.level == "warning"]
 
@@ -3077,7 +3084,7 @@ def test_a_tick_before_the_hour_says_nothing() -> None:
 
 def test_the_hour_raises_the_notice_once() -> None:
     st, _ = given_up(started()[0])
-    st, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=60), st)
+    st, cmds = reported(st, T0 + timedelta(minutes=60))
     assert of_type(cmds, RaiseIssue) == [
         RaiseIssue(
             "unreachable",
@@ -3108,9 +3115,36 @@ def test_the_hour_raises_the_notice_once() -> None:
     assert st.trvs["climate.a"].issue_raised
     assert cmds[-1].status == RoomStatus.ERROR
     assert thermostat_deviations(st) == {"climate.a": "error"}
-    st, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=61), st)
+    st, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=62), st)
     assert of_type(cmds, RaiseIssue) == []
     assert warnings(cmds) == []
+
+
+def test_the_report_waits_while_the_retry_is_on_its_way() -> None:
+    st, _ = given_up(started()[0])
+    at = T0 + timedelta(minutes=60)
+    st, cmds = hour_logic().handle(Tick(), at, st)
+    assert ("climate.a", TEMP) in executes(cmds)
+    assert of_type(cmds, RaiseIssue) == []
+    # The retry arrives: nothing was ever said.
+    st, cmds = hour_logic().handle(result("climate.a", TEMP, Ok()), at, st)
+    assert of_type(cmds, RaiseIssue) == []
+    assert of_type(cmds, ClearIssue) == []
+    assert st.trvs["climate.a"].failing_since is None
+
+
+def test_no_notice_for_a_thermostat_that_went_away_during_its_last_attempt() -> None:
+    st, _ = started()
+    for _ in range(2):
+        st, _ = hour_logic().handle(result("climate.a", TEMP, BUSY), T0, st)
+    away = TrvAvailabilityChanged("climate.a", available=False)
+    st, _ = hour_logic().handle(away, T0, st)
+    gone = Failed("device unavailable")
+    st, _ = hour_logic().handle(result("climate.a", TEMP, gone), T0, st)
+    st, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=62), st)
+    assert of_type(cmds, RaiseIssue) == []
+    assert warnings(cmds) == []
+    assert cmds[-1].status != RoomStatus.ERROR
 
 
 def test_recovery_before_the_hour_is_silent() -> None:
@@ -3127,7 +3161,8 @@ def test_recovery_before_the_hour_is_silent() -> None:
 
 def test_recovery_after_the_notice_clears_it_and_a_new_failure_waits_an_hour() -> None:
     st, _ = given_up(started()[0])
-    st, _ = hour_logic().handle(Tick(), T0 + timedelta(minutes=60), st)
+    st, _ = reported(st, T0 + timedelta(minutes=60))
+    assert st.trvs["climate.a"].issue_raised
     back = T0 + timedelta(minutes=90)
     st, cmds = hour_logic().handle(result("climate.a", TEMP, Ok()), back, st)
     assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
@@ -3140,7 +3175,7 @@ def test_recovery_after_the_notice_clears_it_and_a_new_failure_waits_an_hour() -
     assert of_type(cmds, RaiseIssue) == []
     st, cmds = hour_logic().handle(Tick(), again + timedelta(minutes=30), st)
     assert of_type(cmds, RaiseIssue) == []
-    st, cmds = hour_logic().handle(Tick(), again + timedelta(minutes=60), st)
+    st, cmds = reported(st, again + timedelta(minutes=60))
     assert len(of_type(cmds, RaiseIssue)) == 1
 
 
@@ -3154,7 +3189,7 @@ def test_a_failure_after_a_quiet_recovery_starts_a_fresh_hour() -> None:
     assert st.trvs["climate.a"].failing_since == again
     _, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=60), st)
     assert of_type(cmds, RaiseIssue) == []
-    _, cmds = hour_logic().handle(Tick(), again + timedelta(minutes=60), st)
+    _, cmds = reported(st, again + timedelta(minutes=60))
     assert len(of_type(cmds, RaiseIssue)) == 1
 
 
@@ -3171,7 +3206,7 @@ def test_no_notice_while_the_thermostat_is_away() -> None:
     st, _ = hour_logic().handle(back, back_at, st)
     st, cmds = given_up(st, back_at)
     assert of_type(cmds, RaiseIssue) == []
-    st, cmds = hour_logic().handle(Tick(), back_at + timedelta(minutes=60), st)
+    st, cmds = reported(st, back_at + timedelta(minutes=60))
     assert len(of_type(cmds, RaiseIssue)) == 1
 
 

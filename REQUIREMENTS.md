@@ -41,7 +41,7 @@ Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is der
 
 - **B1** Write → the thermostat's write response confirms it. For the room temperature, source, target and mode: wait (default 10 s) → read back → compare, for signals and knob turns; a failed read-back is no failure. Up to 3 attempts (configurable), backoff 5 / 15 / 45 s.
 - **B2** After the last failed attempt Easy TRV retries every refresh interval. Only when the thermostat has not accepted a value for 60 minutes: Repairs issue (warning) for that thermostat, bus event, heating state *fault*, one log warning; the issue clears by itself once every value the room still writes to that thermostat was verified, or once the room no longer writes the failing values (for example while the room is off).
-- **B3** A failing thermostat does not block other rooms. In its own room it can occupy the write queue for a few minutes per refresh interval (B4). Thermostats that HA reports as unavailable are skipped without an issue.
+- **B3** A failing thermostat does not block other rooms. In its own room it can occupy the write queue per refresh interval for up to about 85 seconds per attempt (zigpy's three tries of 28 s), so with several values owed for many minutes (B4). Thermostats that HA reports as unavailable are skipped without an issue.
 - **B4** Writes per room are serialized. Zigbee is never flooded.
 
 ## Visibility

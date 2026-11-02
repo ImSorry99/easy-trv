@@ -601,7 +601,8 @@ async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
     await start(hass, entry)
     await advance(hass, freezer, 25)
     assert hass.states.get("sensor.living_heating_state").state == "heating"
-    await advance(hass, freezer, 3600, step=60)
+    # The retry due at the hour must fail as well before the report.
+    await advance(hass, freezer, 3900, step=60)
     issues_registry = ir.async_get(hass)
     assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is not None
     assert hass.states.get("sensor.living_heating_state").state == "fault"

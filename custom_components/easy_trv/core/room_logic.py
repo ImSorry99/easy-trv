@@ -185,7 +185,22 @@ class RoomLogic:
         ]
         state = self._supersede_pending(state, commands)
         state = self._mark_resent(state, commands)
-        return state, [*commands, self._status(state, now)]
+        state, reports = self._reports_due(event, state, now)
+        return state, [*commands, *reports, self._status(state, now)]
+
+    def _reports_due(self, event: Event, state: RoomState, now: datetime) -> _Step:
+        """On a tick, report every thermostat that has failed for long enough.
+
+        It runs after the tick settled what is owed and marked what went out
+        again, so a write still on its way holds the report back.
+        """
+        commands: list[Command] = []
+        if not isinstance(event, Tick):
+            return state, commands
+        for trv in self._cfg.trvs:
+            state, report = self._report_due(state, trv.entity_id, now)
+            commands += report
+        return state, commands
 
     # --- Event handlers --------------------------------------------------
 
@@ -399,9 +414,6 @@ class RoomLogic:
             self._cfg, state, now, self._active_pair(state, now)
         )
         state, commands = self._on_tick_sensors(now, state)
-        for trv in self._cfg.trvs:
-            state, report = self._report_due(state, trv.entity_id, now)
-            commands += report
         return state, [*phase, *holds, *commands]
 
     def _on_tick_sensors(self, now: datetime, state: RoomState) -> _Step:
@@ -775,11 +787,14 @@ class RoomLogic:
         """Report a thermostat whose writes have failed for ``report_after``.
 
         It is reported once: Repairs issue, bus event, one warning. Until then
-        it fails quietly while the retries run.
+        it fails quietly while the retries run. Never while Home Assistant
+        shows it unavailable, and not while a write of the capability is still
+        on its way: its result decides.
         """
         current = state.trvs[trv]
         if (
             current.health is not TrvHealth.ERROR
+            or not current.available
             or current.issue_raised
             or current.failing_since is None
             or now - current.failing_since < self._params.report_after
@@ -788,6 +803,8 @@ class RoomLogic:
         ):
             return state, []
         capability = current.error_capability
+        if self._in_flight(current, capability):
+            return state, []
         error = current.errors.get(capability) or current.last_error or "unknown"
         minutes = self._report_minutes()
         state = self._with_trv(state, trv, replace(current, issue_raised=True))
