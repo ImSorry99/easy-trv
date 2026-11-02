@@ -132,6 +132,8 @@ async def test_state_sensor_reports_a_fault_after_failed_retries(
 
     hass.states.async_set("sensor.t1", "22.0", {"unit_of_measurement": "°C"})
     await advance(hass, freezer, 70)
+    # A thermostat counts as failing only after an hour.
+    await advance(hass, freezer, 3600, step=60)
 
     state = hass.states.get(STATE_SENSOR)
     assert state.state == "fault"
@@ -505,6 +507,8 @@ async def test_hint_names_a_thermostat_in_error(
 
     hass.states.async_set("sensor.t1", "22.0", {"unit_of_measurement": "°C"})
     await advance(hass, freezer, 70)
+    # A thermostat counts as failing only after an hour.
+    await advance(hass, freezer, 3600, step=60)
 
     assert hass.states.get(STATE_SENSOR).state == "fault"
     assert hint(hass) == "Sofa valve: error"
@@ -607,6 +611,8 @@ async def test_hint_joins_the_reasons_in_priority_order(
     )
     hass.states.async_set("sensor.t1", "22.0", {"unit_of_measurement": "°C"})
     await advance(hass, freezer, 70)
+    # A thermostat counts as failing only after an hour.
+    await advance(hass, freezer, 3600, step=60)
 
     state = hass.states.get(STATE_SENSOR)
     assert state.state == "fault"

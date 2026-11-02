@@ -660,8 +660,8 @@ class RoomLogic:
             issue_raised=False,
         )
         if not raised:
-            note = f"{trv} accepts writes again before it was reported"
-            return updated, [Log("debug", note)], False
+            quiet = f"{trv} accepts writes again before it was reported"
+            return updated, [Log("debug", quiet)], False
         return (
             updated,
             [

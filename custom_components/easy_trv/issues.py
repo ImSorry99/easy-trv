@@ -93,23 +93,23 @@ def raise_unreachable(  # noqa: PLR0913 - one argument per placeholder of the te
     room: str,
     setting: str,
     thermostat: str,
-    attempts: str,
+    minutes: str,
     error: str,
 ) -> None:
-    """Report a thermostat that keeps failing to accept writes.
+    """Report a thermostat whose writes have failed for ``minutes`` minutes.
 
     ``setting`` and ``thermostat`` are plain-language names, not keys.
     """
     _create(
         hass,
         issue_id_unreachable(ieee),
-        ir.IssueSeverity.ERROR,
+        ir.IssueSeverity.WARNING,
         "trv_unreachable",
         {
             "room": room,
             "setting": setting,
             "thermostat": thermostat,
-            "attempts": attempts,
+            "minutes": minutes,
             "error": error,
         },
     )

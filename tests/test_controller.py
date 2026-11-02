@@ -59,7 +59,14 @@ SETPOINT = 0x0012
 MODE = 0x001C
 RANGE = (4.0, 35.0, 0.5)
 CELSIUS = {"unit_of_measurement": "°C"}
-PARAMS = replace(RoomParams.defaults(), verify_delay=0.0, refresh=timedelta(minutes=20))
+# A failing thermostat is reported at the give-up itself, as before 0.8; the
+# hour is tested with its own parameters.
+PARAMS = replace(
+    RoomParams.defaults(),
+    verify_delay=0.0,
+    refresh=timedelta(minutes=20),
+    report_after=timedelta(0),
+)
 # Enough loop iterations for the worker to run a queue of fake-gateway
 # operations (each one yields about once) to completion.
 SETTLE_ITERATIONS = 50
@@ -384,22 +391,22 @@ async def test_verify_delay_and_mismatch_retry(
     )
     raised = issue(hass, "trv_unreachable_0011")
     assert raised is not None
-    assert raised.severity == IssueSeverity.ERROR
+    assert raised.severity == IssueSeverity.WARNING
     assert raised.translation_key == "trv_unreachable"
     assert raised.translation_placeholders == {
         "room": "Living",
         "setting": "Room temperature",
         "thermostat": "climate.a",
-        "attempts": "3",
+        "minutes": "0",
         "error": "mismatch: expected [2130] got 2000",
     }
     assert issue(hass, "trv_unreachable_0022") is None
     assert [e.data["attribute"] for e in write_failed] == ["external_temperature"]
-    [record] = [r for r in caplog.records if "did not accept" in r.getMessage()]
+    [record] = [r for r in caplog.records if "has not accepted" in r.getMessage()]
     assert record.levelno == logging.WARNING
     # The core's message already names the room; the controller adds nothing.
     assert record.getMessage().startswith(
-        "Living: climate.a did not accept external_temperature after 3 attempts"
+        "Living: climate.a has not accepted external_temperature for 0 minutes"
     )
     assert record.getMessage().count("Living:") == 1
 
@@ -429,7 +436,7 @@ async def test_unreachable_issue_names_setting_and_thermostat(
         "room": "Living",
         "setting": "Thermostat's open-window detection",
         "thermostat": "Living TRV",
-        "attempts": "3",
+        "minutes": "0",
         "error": "radio busy",
     }
 
@@ -506,7 +513,7 @@ async def test_start_clears_stale_thermostat_issues(hass, controller, gateway) -
             room="Living",
             setting="x",
             thermostat="y",
-            attempts="3",
+            minutes="60",
             error="z",
         )
         issues.raise_firmware(
@@ -3462,3 +3469,23 @@ async def test_the_source_is_written_even_when_cached(
     await controller.async_start()
     await settle(hass)
     assert writes_to(gateway, IEEE_A, SOURCE) == [1]
+
+
+async def test_a_thermostat_is_reported_after_an_hour(
+    hass, freezer, make_controller, gateway
+) -> None:
+    controller = make_controller(
+        params=replace(PARAMS, report_after=timedelta(minutes=60))
+    )
+    gateway.read_override[(IEEE_A, VALUE)] = 2000  # a mismatch on every write
+    await controller.async_start()
+    await advance(hass, freezer, 120)
+    assert issue(hass, "trv_unreachable_0011") is None
+    assert controller.status == RoomStatus.OK
+    assert health(controller)["climate.a"] == "ok"
+    await advance(hass, freezer, 60 * 60, step=60)
+    raised = issue(hass, "trv_unreachable_0011")
+    assert raised is not None
+    assert raised.severity == IssueSeverity.WARNING
+    assert raised.translation_placeholders["minutes"] == "60"
+    assert controller.status == RoomStatus.ERROR

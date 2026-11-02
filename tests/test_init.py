@@ -596,10 +596,12 @@ async def test_adding_a_room_reloads_and_adds_its_state_sensor(
 async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
     hass, freezer, entry, fake_gateway
 ) -> None:
-    # The thermostat never confirms the value: three attempts, then an error.
+    # The thermostat never confirms the value: it is reported after an hour.
     fake_gateway.read_override[("00:11", VALUE)] = 2000
     await start(hass, entry)
     await advance(hass, freezer, 25)
+    assert hass.states.get("sensor.living_heating_state").state == "heating"
+    await advance(hass, freezer, 3600, step=60)
     issues_registry = ir.async_get(hass)
     assert issues_registry.async_get_issue(DOMAIN, "trv_unreachable_0011") is not None
     assert hass.states.get("sensor.living_heating_state").state == "fault"
@@ -617,7 +619,7 @@ async def test_reload_clears_the_unreachable_issue_of_a_recovered_thermostat(
 async def test_setup_removes_issues_of_thermostats_in_no_room(hass, entry) -> None:
     for ieee in ("00:99", "00:11"):
         issues.raise_unreachable(
-            hass, ieee, room="Old", setting="x", thermostat="y", attempts="3", error="z"
+            hass, ieee, room="Old", setting="x", thermostat="y", minutes="60", error="z"
         )
         issues.raise_firmware(
             hass,

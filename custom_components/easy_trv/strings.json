@@ -117,7 +117,7 @@
             "hide_thermostat_entities": "Hides the climate entity of the TRVs and the settings that Easy TRV controls. They keep working but no longer appear on automatic dashboards. Turning this off shows them again. Global is currently {global_hide_thermostat_entities}.",
             "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Global is currently {global_refresh_minutes}.",
             "verify_delay_seconds": "How long to wait after writing the room temperature, the source, the target or the mode before reading it back (fail-safe, schedule, knob turns). Settings are not read back. 2 to 60 seconds. Global is currently {global_verify_delay_seconds}.",
-            "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Global is currently {global_max_attempts}.",
+            "max_attempts": "How often a failed write is tried in quick succession before Easy TRV retries it once per refresh interval. A thermostat is reported only when its writes keep failing for an hour. 1 to 10. Global is currently {global_max_attempts}.",
             "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Global is currently {global_min_delta_kelvin}.",
             "sensor_timeout_minutes": "A silent sensor still counts as long as it is available; battery sensors often report only on a change. The timeout is for sensors that report regularly: one that has not reported for this long is ignored. 0 = off (default), otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}.",
             "setpoint_range": "Automatic reads, when the room is set up, the minimum and maximum target temperature the thermostats show in Home Assistant (with several, the narrowest common range, else the range of the profile). Manual takes the minimum and maximum below. Global is currently {global_setpoint_range}.",
@@ -254,7 +254,7 @@
   "issues": {
     "trv_unreachable": {
       "title": "Thermostat {thermostat} in {room} is not responding",
-      "description": "Easy TRV could not set \"{setting}\" on {thermostat} in {room} after {attempts} attempts. Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+      "description": "Easy TRV has not been able to set \"{setting}\" on {thermostat} in {room} for more than {minutes} minutes. Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
     },
     "trv_firmware": {
       "title": "Thermostat {thermostat} in {room} lacks a firmware feature",
@@ -312,7 +312,7 @@
             "data_description": {
               "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Empty = {default_refresh_minutes}.",
               "verify_delay_seconds": "How long to wait after writing the room temperature, the source, the target or the mode before reading it back (fail-safe, schedule, knob turns). Settings are not read back. 2 to 60 seconds. Empty = {default_verify_delay_seconds}.",
-              "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Empty = {default_max_attempts}.",
+              "max_attempts": "How often a failed write is tried in quick succession before Easy TRV retries it once per refresh interval. A thermostat is reported only when its writes keep failing for an hour. 1 to 10. Empty = {default_max_attempts}.",
               "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Empty = {default_min_delta_kelvin}.",
               "sensor_timeout_minutes": "A silent sensor still counts as long as it is available; battery sensors often report only on a change. The timeout is for sensors that report regularly: one that has not reported for this long is ignored. 0 = off (default), otherwise 10 to 1440 minutes. Empty = {default_sensor_timeout_minutes}."
             }

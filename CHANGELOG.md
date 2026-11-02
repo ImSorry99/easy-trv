@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- The Repairs notice "Thermostat … is not responding" came again and again, although a single Zigbee write that does not get through is normal. A thermostat is now reported only when it has not accepted a value for 60 minutes; until then Easy TRV keeps retrying quietly. The notice is a warning instead of an error and says how long the thermostat has been failing; the `easy_trv_write_failed` event, the heating state *fault* and the log warning follow the same hour, and the event carries `minutes` instead of `attempts`
+- Easy TRV cut every write and read off after 20 seconds, before zigpy had finished its own waiting (up to 28 seconds for a battery device) and its two retries with a new route. The limit is now 180 seconds, a safety net only
+- The thermostat's answer to a write now confirms it. A read-back that fails no longer counts as a failed write, and the four settings (open-window detection, adaptive mode, hysteresis, frost protection) are not read back at all, which halves the traffic for them
+- Every start, and every saved room or settings change, wrote every setting to every thermostat again. A setting the thermostat already has, as zigpy last knew it, is now skipped
+
 ### Added
 
 - A reset switch at the end of the settings forms: **Reset all settings to their defaults** in the integration options (the outdoor temperature sensor and the presence entity stay) and **Reset all settings of this room to Global** in the settings of a room you reconfigure (where the room's presence comes from stays)

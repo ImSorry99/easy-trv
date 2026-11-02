@@ -1136,7 +1136,7 @@ class RoomController:
                     room=self._config.name,
                     setting=self._setting_name(found["attribute"]),
                     thermostat=thermostat,
-                    attempts=found["attempts"],
+                    minutes=found["minutes"],
                     error=found["error"],
                 )
             case "schedule_thermostat_off":

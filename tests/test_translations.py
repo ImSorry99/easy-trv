@@ -336,7 +336,7 @@ def test_thermostat_issues_name_the_setting_and_the_thermostat(path: Path) -> No
             "room",
             "setting",
             "thermostat",
-            "attempts",
+            "minutes",
             "error",
         },
         "trv_firmware": {"room", "setting", "thermostat", "required", "current"},

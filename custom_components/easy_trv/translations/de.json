@@ -117,7 +117,7 @@
             "hide_thermostat_entities": "Blendet die Klima-Entität der TRVs und die Einstellungen aus, die Easy TRV steuert. Sie arbeiten weiter, stehen aber nicht mehr auf automatischen Dashboards. Ausschalten blendet sie wieder ein. Global ist derzeit {global_hide_thermostat_entities}.",
             "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 1 bis 120 Minuten. Global ist derzeit {global_refresh_minutes}.",
             "verify_delay_seconds": "Wie lange nach dem Schreiben von Raumtemperatur, Quelle, Soll oder Modus gewartet wird, bevor der Wert zurückgelesen wird (Fail-safe, Wochenplan, Drehen am Knopf). Einstellungen werden nicht zurückgelesen. 2 bis 60 Sekunden. Global ist derzeit {global_verify_delay_seconds}.",
-            "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10. Global ist derzeit {global_max_attempts}.",
+            "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang kurz hintereinander wiederholt wird, bevor Easy TRV es einmal pro Auffrischungsintervall erneut versucht. Gemeldet wird ein Thermostat erst, wenn seine Schreibvorgänge eine Stunde lang fehlschlagen. 1 bis 10. Global ist derzeit {global_max_attempts}.",
             "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Global ist derzeit {global_min_delta_kelvin}.",
             "sensor_timeout_minutes": "Ein stiller Sensor zählt, solange er verfügbar ist; Batteriesensoren melden oft nur bei einer Änderung. Das Timeout ist für Sensoren gedacht, die regelmäßig melden: Ein Sensor, der so lange nichts gemeldet hat, wird ignoriert. 0 = aus (Standard), sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}.",
             "setpoint_range": "Automatisch liest beim Einrichten des Raums die minimale und maximale Solltemperatur, die die Thermostate in Home Assistant zeigen (bei mehreren gilt der engste gemeinsame Bereich, sonst der Bereich des Profils). Manuell nimmt das Minimum und das Maximum unten. Global ist derzeit {global_setpoint_range}.",
@@ -254,7 +254,7 @@
   "issues": {
     "trv_unreachable": {
       "title": "Thermostat {thermostat} in {room} antwortet nicht",
-      "description": "Easy TRV konnte „{setting}“ an {thermostat} in {room} auch nach {attempts} Versuchen nicht setzen. Letzter Fehler: {error}\n\nPrüfe die Batterie des Thermostats und sein Zigbee-Signal (Entfernung zum nächsten Router oder Koordinator). Antwortet es weiterhin nicht, koppele es neu mit ZHA.\n\nDas Problem löst sich von selbst, sobald ein Schreibvorgang von „{setting}“ auf das Thermostat bestätigt wurde. Easy TRV versucht es bei jedem Auffrischungsintervall erneut."
+      "description": "Easy TRV kann „{setting}“ an {thermostat} in {room} seit über {minutes} Minuten nicht setzen. Letzter Fehler: {error}\n\nPrüfe die Batterie des Thermostats und sein Zigbee-Signal (Entfernung zum nächsten Router oder Koordinator). Antwortet es weiterhin nicht, koppele es neu mit ZHA.\n\nDas Problem löst sich von selbst, sobald ein Schreibvorgang von „{setting}“ auf das Thermostat bestätigt wurde. Easy TRV versucht es bei jedem Auffrischungsintervall erneut."
     },
     "trv_firmware": {
       "title": "Dem Thermostat {thermostat} in {room} fehlt eine Firmware-Funktion",
@@ -312,7 +312,7 @@
             "data_description": {
               "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 1 bis 120 Minuten. Leer = {default_refresh_minutes}.",
               "verify_delay_seconds": "Wie lange nach dem Schreiben von Raumtemperatur, Quelle, Soll oder Modus gewartet wird, bevor der Wert zurückgelesen wird (Fail-safe, Wochenplan, Drehen am Knopf). Einstellungen werden nicht zurückgelesen. 2 bis 60 Sekunden. Leer = {default_verify_delay_seconds}.",
-              "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang wiederholt wird, bevor das Thermostat als nicht antwortend gemeldet wird. 1 bis 10. Leer = {default_max_attempts}.",
+              "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang kurz hintereinander wiederholt wird, bevor Easy TRV es einmal pro Auffrischungsintervall erneut versucht. Gemeldet wird ein Thermostat erst, wenn seine Schreibvorgänge eine Stunde lang fehlschlagen. 1 bis 10. Leer = {default_max_attempts}.",
               "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Leer = {default_min_delta_kelvin}.",
               "sensor_timeout_minutes": "Ein stiller Sensor zählt, solange er verfügbar ist; Batteriesensoren melden oft nur bei einer Änderung. Das Timeout ist für Sensoren gedacht, die regelmäßig melden: Ein Sensor, der so lange nichts gemeldet hat, wird ignoriert. 0 = aus (Standard), sonst 10 bis 1440 Minuten. Leer = {default_sensor_timeout_minutes}."
             }
