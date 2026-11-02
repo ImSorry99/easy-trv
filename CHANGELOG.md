@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-02
+
 ### Fixed
 
 - The Repairs notice "Thermostat … is not responding" came again and again, although a single Zigbee write that does not get through is normal. A thermostat is now reported only when its writes have been failing for 60 minutes; until then Easy TRV keeps retrying quietly. The notice is a warning instead of an error and says how long the thermostat has been failing; the `easy_trv_write_failed` event, the heating state *fault* and the log warning follow the same hour, and the event carries `minutes` instead of `attempts`; `easy_trv_recovered` fires only for a thermostat that was reported
@@ -186,7 +188,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/ImSorry99/easy-trv/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/ImSorry99/easy-trv/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/ImSorry99/easy-trv/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ImSorry99/easy-trv/compare/v0.6.1...v0.7.0
