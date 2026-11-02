@@ -8,7 +8,7 @@ Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is der
 - **P2 Profiles, not hard-coded devices.** A thermostat is driven through a *profile*. A profile states which device and minimum firmware it fits, what the device can do natively, and how Easy TRV talks to it. Phase 1 ships exactly one profile: *Sonoff TRVZB native*. If a native path turns out not to work well, a second profile may drive the same device differently. The native profile is always the first choice.
 - **P2a Profiles are data, shipped and tested.** Built-in profiles are declarative files, tested on real hardware with a stated firmware. Users do not click a device together; they take a shipped profile. Anyone can copy a shipped profile into their HA config folder, adapt it, and select it. Shipped profiles are never edited in place.
 - **P3 Lean.** Minimal entities: one diagnostic heating-state sensor per room (state with reasons and a plain-text hint), the diagnostic statistics sensors of V4 and one thin pass-through `climate` entity per room. No regulating climate entity, no entity per setting.
-- **P4 Verified, not assumed.** Every write is read back. A write that does not arrive becomes visible.
+- **P4 Verified, not assumed.** Every write is confirmed by the thermostat's answer; where a read-back tells more (fail-safe, schedule, a knob turned meanwhile), the value is read back as well. A write that does not arrive becomes visible.
 - **P5 Reuse.** Prefer HA and ZHA built-ins (availability, areas, Repairs, selectors, device registry) over own mechanisms.
 
 ## Rooms
@@ -39,7 +39,7 @@ Owner: @ImSorry99. Living document. The technical design in `docs/specs/` is der
 
 ## Robustness
 
-- **B1** Write → wait (default 10 s) → read back → compare. Up to 3 attempts (configurable), backoff 5 / 15 / 45 s.
+- **B1** Write → the thermostat's write response confirms it. For the room temperature, source, target and mode: wait (default 10 s) → read back → compare, for signals and knob turns; a failed read-back is no failure. Up to 3 attempts (configurable), backoff 5 / 15 / 45 s.
 - **B2** After the last failed attempt: Repairs issue for that thermostat, bus event, heating state *fault*, one log warning. Easy TRV keeps retrying every refresh interval; the issue clears by itself once every value the room still writes to that thermostat was verified, or once the room no longer writes the failing values (for example while the room is off).
 - **B3** A failing thermostat does not block other rooms. In its own room it can occupy the write queue for a few minutes per refresh interval (B4). Thermostats that HA reports as unavailable are skipped without an issue.
 - **B4** Writes per room are serialized. Zigbee is never flooded.

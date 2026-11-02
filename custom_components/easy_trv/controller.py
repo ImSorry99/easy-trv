@@ -1311,11 +1311,22 @@ class RoomController:
             _outcome_text(outcome),
         )
 
-    async def _write_and_verify(self, trv: str, op: Operation) -> Outcome:
-        """Write the value, wait, read it back and judge the read-back.
+    def _device_lacks(self, trv: str, op: Operation) -> Unsupported:
+        """Return the outcome of a device that lacks the attribute.
 
-        Counts the write when the request is sent, and a failed outcome of a
-        sent write; nothing that stops before the request is counted.
+        No retry will help. What the firmware needs is not known, only what is
+        installed.
+        """
+        installed = _fmt_version(self._firmware[trv])
+        return Unsupported(op.capability, "unknown", installed, reason="device")
+
+    async def _write_and_verify(self, trv: str, op: Operation) -> Outcome:
+        """Write the value; where a read-back tells more, wait and read it back.
+
+        The thermostat's SUCCESS answer to the write verifies it. A read-back
+        that fails is no failure of the write. Counts the write when the request
+        is sent, and a failed outcome of a sent write; nothing that stops before
+        the request is counted.
         """
         ieee = self._device_refs[trv].ieee
         sent = False
@@ -1328,16 +1339,8 @@ class RoomController:
                 await self._gateway.write(
                     ieee, op.endpoint, op.cluster, op.attribute, op.raw_value
                 )
-            await asyncio.sleep(self._params.verify_delay)
-            async with asyncio.timeout(OPERATION_TIMEOUT):
-                values = await self._gateway.read(
-                    ieee, op.endpoint, op.cluster, [op.attribute, *op.also_read]
-                )
         except UnsupportedAttribute:
-            # The device lacks the attribute: no retry will help. What the
-            # firmware needs is not known, only what is installed.
-            installed = _fmt_version(self._firmware[trv])
-            return Unsupported(op.capability, "unknown", installed, reason="device")
+            return self._device_lacks(trv, op)
         except (GatewayError, TimeoutError) as err:
             if sent:
                 self._trv_counts[trv]["write_failures"] += 1
@@ -1347,6 +1350,32 @@ class RoomController:
             if sent:
                 self._trv_counts[trv]["write_failures"] += 1
             raise
+        if not op.readback:
+            return Ok()
+        return await self._read_back(trv, ieee, op)
+
+    async def _read_back(self, trv: str, ieee: str, op: Operation) -> Outcome:
+        """Wait the verify delay, read the value back and judge the read-back.
+
+        The write was confirmed already: a read that fails is no failure.
+        """
+        await asyncio.sleep(self._params.verify_delay)
+        try:
+            async with asyncio.timeout(OPERATION_TIMEOUT):
+                values = await self._gateway.read(
+                    ieee, op.endpoint, op.cluster, [op.attribute, *op.also_read]
+                )
+        except UnsupportedAttribute:
+            return self._device_lacks(trv, op)
+        except (GatewayError, TimeoutError) as err:
+            _LOGGER.debug(
+                "%s: %s read-back of %s failed, the write was confirmed: %s",
+                self._config.name,
+                trv,
+                op.capability,
+                str(err) or type(err).__name__,
+            )
+            return Ok()
         outcome = _judge(op, values)
         if isinstance(outcome, Mismatch):
             self._trv_counts[trv]["write_failures"] += 1

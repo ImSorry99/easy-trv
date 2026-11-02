@@ -331,3 +331,24 @@ def test_an_entity_reference_is_hashable_and_compared_by_value() -> None:
     assert {engine.EntityRef("number", "a"), engine.EntityRef("number", "a")} == {
         engine.EntityRef("number", "a")
     }
+
+
+@pytest.mark.parametrize(
+    ("intent", "readback"),
+    [
+        (SetWindowDetection(enabled=True), False),
+        (SetHysteresis(0.4), False),
+        (SetAdaptiveMode(enabled=True), False),
+        (SetFrostTemperature(5.0), False),
+        (SetRoomTemperature(21.0), True),  # also_read: the fail-safe flag
+        (SetSource("external"), True),  # signals
+        (SetSetpoint(21.0), True),  # observed
+        (SetHvacMode("heat"), True),  # observed, and the schedule signal
+    ],
+)
+def test_only_operations_whose_read_back_tells_more_read_back(
+    trvzb: engine.Profile,
+    intent: Any,
+    readback: bool,  # noqa: FBT001 - a parametrized value
+) -> None:
+    assert trvzb.plan(intent, (1, 4, 4)).readback is readback

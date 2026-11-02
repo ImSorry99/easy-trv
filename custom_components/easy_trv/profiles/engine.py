@@ -90,6 +90,9 @@ class Operation:
     signals: Mapping[int, str]
     also_read: tuple[int, ...]
     extra_signals: Mapping[int, Mapping[int, str]]
+    # Whether a read-back can tell more than the write response (a signal, a
+    # value read along, an observed value). Otherwise the response verifies.
+    readback: bool = True
 
 
 @dataclass(frozen=True)
@@ -376,6 +379,7 @@ class Profile:
             signals=spec.signals,
             also_read=spec.also_read,
             extra_signals=self._extra_signals(spec),
+            readback=spec.observe or bool(spec.signals) or bool(spec.also_read),
         )
 
     def decode(self, capability: str, raw: int) -> float | str | None:

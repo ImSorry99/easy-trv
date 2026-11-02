@@ -351,13 +351,14 @@ async def test_operations_run_one_at_a_time(
 ) -> None:
     await controller_with_delay.async_start()
     await settle(hass)
-    # The first write is out and waits for its verify delay: nothing else runs.
-    assert gateway.calls == ["write"]
+    # The settings need no read-back; the source write is out and waits for
+    # its verify delay: nothing else runs.
+    assert gateway.calls == ["write"] * 7
     await advance(hass, freezer, 10)
-    assert gateway.calls == ["write", "read", "write"]
+    assert gateway.calls == ["write"] * 7 + ["read", "write"]
     await advance(hass, freezer, 100)
-    # Every write is read back before the next operation starts.
-    assert gateway.calls == ["write", "read"] * 10
+    # Every read-back finishes before the next operation starts.
+    assert gateway.calls == ["write"] * 6 + ["write", "read"] * 4
     assert controller_with_delay.status == RoomStatus.OK
 
 
@@ -368,7 +369,7 @@ async def test_verify_delay_and_mismatch_retry(
     gateway.read_override[(IEEE_A, VALUE)] = 2000
     await controller_with_delay.async_start()
     await settle(hass)
-    assert len(gateway.writes) == 1
+    assert len(gateway.writes) == 7
     assert gateway.reads == []
     for _ in range(40):
         await advance(hass, freezer, 5)
@@ -418,7 +419,7 @@ async def test_unreachable_issue_names_setting_and_thermostat(
     )
     assert entity.entity_id == "climate.a"
     hass.states.async_set("climate.a", "heat")
-    gateway.read_override[(IEEE_A, WINDOW)] = 0
+    gateway.broken_write[(IEEE_A, WINDOW)] = "radio busy"
     controller = make_controller()
     await controller.async_start()
     await advance(hass, freezer, 25)
@@ -429,14 +430,14 @@ async def test_unreachable_issue_names_setting_and_thermostat(
         "setting": "Thermostat's open-window detection",
         "thermostat": "Living TRV",
         "attempts": "3",
-        "error": "mismatch: expected [1] got 0",
+        "error": "radio busy",
     }
 
 
 async def test_labels_fall_back_to_keys_and_entity_ids(
     hass, freezer, make_controller, gateway
 ) -> None:
-    gateway.read_override[(IEEE_A, WINDOW)] = 0
+    gateway.broken_write[(IEEE_A, WINDOW)] = "radio busy"
     controller = make_controller(labels={})
     await controller.async_start()
     await advance(hass, freezer, 25)
@@ -829,7 +830,7 @@ async def test_unsupported_functions_leave_out_what_the_profile_never_had(
 async def test_a_failed_setting_is_sent_again_and_the_issue_resolves_itself(
     hass, freezer, make_controller, gateway
 ) -> None:
-    gateway.read_override[(IEEE_A, HYSTERESIS)] = 0
+    gateway.broken_write[(IEEE_A, HYSTERESIS)] = "radio busy"
     controller = make_controller()
     await controller.async_start()
     await advance(hass, freezer, 25)
@@ -840,7 +841,7 @@ async def test_a_failed_setting_is_sent_again_and_the_issue_resolves_itself(
 
     # The thermostat accepts the setting again; nothing but the refresh interval
     # makes Easy TRV try it once more.
-    del gateway.read_override[(IEEE_A, HYSTERESIS)]
+    del gateway.broken_write[(IEEE_A, HYSTERESIS)]
     recovered = async_capture_events(hass, EVENT_RECOVERED)
     await advance(hass, freezer, 1260, step=60)
 
@@ -1058,10 +1059,10 @@ async def test_stop_cancels_an_operation_in_flight(
 ) -> None:
     await controller_with_delay.async_start()
     await settle(hass)
-    assert len(gateway.writes) == 1
+    assert len(gateway.writes) == 7
     await controller_with_delay.async_stop()
     await advance(hass, freezer, 100)
-    assert len(gateway.writes) == 1
+    assert len(gateway.writes) == 7
     assert gateway.reads == []
 
 
@@ -2716,7 +2717,8 @@ async def test_every_sent_write_counts_once_and_read_backs_do_not(
     assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 0, 0)
     assert trv_stats(controller, "climate.b") == ThermostatStatistics(5, 0, 0)
     assert sent_to(gateway, IEEE_A) == 5
-    assert len(gateway.reads) == 10
+    # Only the source and the value are read back.
+    assert len(gateway.reads) == 4
 
 
 async def test_every_attempt_of_a_retried_write_counts(
@@ -2737,15 +2739,6 @@ async def test_a_write_the_gateway_rejects_counts_as_write_and_failure(
     hass, controller, gateway
 ) -> None:
     gateway.fail_write[(IEEE_A, VALUE)] = "radio busy"
-    await controller.async_start()
-    await settle(hass)
-    assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 1, 0)
-
-
-async def test_a_failed_read_back_counts_as_a_failure(
-    hass, controller, gateway
-) -> None:
-    gateway.fail_read[(IEEE_A, VALUE)] = "radio busy"
     await controller.async_start()
     await settle(hass)
     assert trv_stats(controller, "climate.a") == ThermostatStatistics(5, 1, 0)
@@ -3414,3 +3407,26 @@ async def test_override_restored_then_cleared_by_home(hass, climate_presence) ->
     hass.states.async_set(PERSON, "home")
     await settle(hass)
     assert climate_presence.away_override is False
+
+
+async def test_a_setting_is_verified_by_the_write_response_alone(
+    hass, controller, gateway
+) -> None:
+    await controller.async_start()
+    await settle(hass)
+    assert writes_to(gateway, IEEE_A, WINDOW) == [1]
+    assert all(WINDOW not in attributes for (*_, attributes) in gateway.reads)
+    assert health(controller)["climate.a"] == "ok"
+
+
+async def test_a_failed_read_back_of_a_written_value_is_no_failure(
+    hass, freezer, controller, gateway
+) -> None:
+    write_failed = async_capture_events(hass, EVENT_WRITE_FAILED)
+    gateway.fail_read[(IEEE_A, VALUE)] = "timeout"
+    await controller.async_start()
+    await advance(hass, freezer, 120)
+    assert writes_to(gateway, IEEE_A, VALUE) == [2130]
+    assert health(controller)["climate.a"] == "ok"
+    assert trv_stats(controller).write_failures == 0
+    assert write_failed == []

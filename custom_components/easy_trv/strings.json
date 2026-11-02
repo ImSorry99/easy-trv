@@ -116,7 +116,7 @@
             "frost_temperature": "The temperature the thermostat keeps as frost protection. 4.0 to 16.0 °C. Global is currently {global_frost_temperature}.",
             "hide_thermostat_entities": "Hides the climate entity of the TRVs and the settings that Easy TRV controls. They keep working but no longer appear on automatic dashboards. Turning this off shows them again. Global is currently {global_hide_thermostat_entities}.",
             "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Global is currently {global_refresh_minutes}.",
-            "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds. Global is currently {global_verify_delay_seconds}.",
+            "verify_delay_seconds": "How long to wait after writing the room temperature, the source, the target or the mode before reading it back (fail-safe, schedule, knob turns). Settings are not read back. 2 to 60 seconds. Global is currently {global_verify_delay_seconds}.",
             "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Global is currently {global_max_attempts}.",
             "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Global is currently {global_min_delta_kelvin}.",
             "sensor_timeout_minutes": "A silent sensor still counts as long as it is available; battery sensors often report only on a change. The timeout is for sensors that report regularly: one that has not reported for this long is ignored. 0 = off (default), otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}.",
@@ -311,7 +311,7 @@
             },
             "data_description": {
               "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Empty = {default_refresh_minutes}.",
-              "verify_delay_seconds": "How long to wait after a write before the value is read back from the thermostat to verify it. 2 to 60 seconds. Empty = {default_verify_delay_seconds}.",
+              "verify_delay_seconds": "How long to wait after writing the room temperature, the source, the target or the mode before reading it back (fail-safe, schedule, knob turns). Settings are not read back. 2 to 60 seconds. Empty = {default_verify_delay_seconds}.",
               "max_attempts": "How often a failed write is tried before the thermostat is reported as not responding. 1 to 10. Empty = {default_max_attempts}.",
               "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Empty = {default_min_delta_kelvin}.",
               "sensor_timeout_minutes": "A silent sensor still counts as long as it is available; battery sensors often report only on a change. The timeout is for sensors that report regularly: one that has not reported for this long is ignored. 0 = off (default), otherwise 10 to 1440 minutes. Empty = {default_sensor_timeout_minutes}."
