@@ -17,6 +17,7 @@ from custom_components.easy_trv.core.model import (
     Source,
     TrvHealth,
     TrvState,
+    visible_health,
 )
 from custom_components.easy_trv.core.setpoint import away_held, lowered, target
 from custom_components.easy_trv.core.setpoint import operation as room_operation
@@ -101,12 +102,16 @@ def _restrictions(trv: TrvState) -> set[str]:
 
 
 def _deviation(trv: TrvState) -> str | None:
-    """Return the first reason the thermostat deviates, or None if it does not."""
-    if trv.health is TrvHealth.ERROR:
+    """Return the first reason the thermostat deviates, or None if it does not.
+
+    An error counts only once it was reported (see ``visible_health``).
+    """
+    health = visible_health(trv)
+    if health is TrvHealth.ERROR:
         return "error"
-    if trv.health is TrvHealth.UNAVAILABLE:
+    if health is TrvHealth.UNAVAILABLE:
         return "unavailable"
-    if trv.health is TrvHealth.UNSUPPORTED:
+    if health is TrvHealth.UNSUPPORTED:
         return "unsupported"
     if trv.note is Note.SCHEDULE:
         return "schedule"

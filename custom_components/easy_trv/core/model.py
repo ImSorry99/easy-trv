@@ -174,6 +174,9 @@ class RoomParams:
     sensor_timeout: timedelta | None
     debounce: float = 5.0
     backoff: tuple[float, ...] = (5.0, 15.0, 45.0)
+    # How long a thermostat fails quietly before it is reported (Repairs,
+    # warning, event, fault). Zero reports it at the give-up itself.
+    report_after: timedelta = timedelta(minutes=60)
 
     @classmethod
     def from_settings(cls, settings: RoomSettings) -> RoomParams:
@@ -271,6 +274,11 @@ class TrvState:
     # still outstanding: it is not known yet whether it fails once more.
     resent: frozenset[str] = frozenset()
     last_error_retry: datetime | None = None
+    # When the thermostat went into error; cleared when nothing is owed any
+    # more. The report waits ``RoomParams.report_after`` from here.
+    failing_since: datetime | None = None
+    # The thermostat was reported: Repairs issue, warning, event, fault.
+    issue_raised: bool = False
     failsafe_seen_at: datetime | None = None
     unsupported: frozenset[str] = frozenset()
     # The part of ``unsupported`` the profile does not declare at all: those
@@ -299,6 +307,22 @@ class TrvState:
     # Switched off by a hold while it ran its own schedule: the room leaves it
     # off after the hold (it never writes ``auto``) until it reports auto or heat.
     left_off: bool = False
+
+
+def baseline_health(trv: TrvState) -> TrvHealth:
+    """Return the health of a thermostat that has no error of its own."""
+    if not trv.available:
+        return TrvHealth.UNAVAILABLE
+    if trv.unsupported - trv.not_in_profile:
+        return TrvHealth.UNSUPPORTED
+    return TrvHealth.OK
+
+
+def visible_health(trv: TrvState) -> TrvHealth:
+    """Return the health the room shows: an error only once it was reported."""
+    if trv.health is TrvHealth.ERROR and not trv.issue_raised:
+        return baseline_health(trv)
+    return trv.health
 
 
 @dataclass(frozen=True)

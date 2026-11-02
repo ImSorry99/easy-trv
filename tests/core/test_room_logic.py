@@ -52,8 +52,10 @@ from custom_components.easy_trv.core.model import (
     TrvConfig,
     TrvHealth,
     Unsupported,
+    visible_health,
 )
 from custom_components.easy_trv.core.room_logic import RoomLogic
+from custom_components.easy_trv.core.room_state import thermostat_deviations
 
 CFG = RoomConfig(
     "room1",
@@ -78,10 +80,13 @@ T0 = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
 BOTH_AVAILABLE = {"climate.a": True, "climate.b": True}
 # The tests are written around a refresh interval of 20 minutes and a sensor
 # timeout of 120 minutes (the timeout is off by default).
+# A failing thermostat is reported at the give-up itself, as before 0.8; the
+# report delay is tested with ``HOUR``.
 DEFAULTS = replace(
     RoomParams.defaults(),
     refresh=timedelta(minutes=20),
     sensor_timeout=timedelta(minutes=120),
+    report_after=timedelta(0),
 )
 
 
@@ -776,6 +781,7 @@ def test_status_error_wins_and_reports_first_error_text() -> None:
         st,
         "climate.b",
         health=TrvHealth.ERROR,
+        issue_raised=True,
         last_error="boom",
         error_capability="room_temperature",
         given_up=frozenset({"room_temperature"}),
@@ -868,7 +874,7 @@ def test_failed_write_retries_with_backoff_then_raises_issue() -> None:
     assert any(
         isinstance(c, RaiseIssue)
         and c.kind == "unreachable"
-        and c.placeholders["attempts"] == "3"
+        and c.placeholders["minutes"] == "0"
         for c in cmds
     )
     assert any(isinstance(c, FireEvent) and c.name == EVENT_WRITE_FAILED for c in cmds)
@@ -1486,7 +1492,7 @@ def test_issue_stays_until_all_capabilities_arrive() -> None:
                 "room": "Living",
                 "trv": "climate.a",
                 "attribute": "hysteresis",
-                "attempts": "3",
+                "minutes": "0",
                 "error": "timeout",
             },
         )
@@ -1666,7 +1672,7 @@ def test_moved_notice_cites_the_capabilitys_own_error() -> None:
     [issue] = of_type(cmds, RaiseIssue)
     assert issue.placeholders["attribute"] == "frost_temperature"
     assert issue.placeholders["error"] == "timeout"
-    assert issue.placeholders["attempts"] == "3"
+    assert issue.placeholders["minutes"] == "0"
     assert st.trvs["climate.a"].last_error == "timeout"
     [warning] = [c for c in of_type(cmds, Log) if c.level == "warning"]
     assert "timeout" in warning.message
@@ -1950,7 +1956,7 @@ def test_exhausted_attempts_report_issue_event_and_log() -> None:
                 "room": "Living",
                 "trv": "climate.a",
                 "attribute": "room_temperature",
-                "attempts": "3",
+                "minutes": "0",
                 "error": "timeout",
             },
         )
@@ -1961,12 +1967,12 @@ def test_exhausted_attempts_report_issue_event_and_log() -> None:
             {
                 **event_data("climate.a", "00:11"),
                 "attribute": "room_temperature",
-                "attempts": 3,
+                "minutes": 0,
                 "error": "timeout",
             },
         )
     ]
-    assert [c.level for c in of_type(cmds, Log)] == ["warning"]
+    assert [c.level for c in of_type(cmds, Log) if c.level != "debug"] == ["warning"]
     assert of_type(cmds, ScheduleRetry) == []
     trv = st.trvs["climate.a"]
     assert trv.pending_retry == {}
@@ -2549,7 +2555,7 @@ def test_a_persistent_failsafe_is_bounded_with_the_shipped_profile_sequence() ->
                 "room": "Living",
                 "trv": "climate.a",
                 "attribute": "source",
-                "attempts": "3",
+                "minutes": "0",
                 "error": "signal: failsafe",
             },
         )
@@ -3019,3 +3025,163 @@ def test_a_retry_that_sends_nothing_forgets_its_attempts() -> None:
     st, cmds = logic().handle(result("climate.a", SETPOINT, Failed("busy")), T0, st)
     assert of_type(cmds, ScheduleRetry) == [ScheduleRetry("climate.a", "setpoint", 5.0)]
     assert not any(isinstance(c, (RaiseIssue, FireEvent)) for c in cmds)
+
+
+# --- Report after an hour --------------------------------------------------
+
+# No sensor timeout: the room keeps its external source for hours.
+HOUR = replace(DEFAULTS, report_after=timedelta(minutes=60), sensor_timeout=None)
+BUSY = Failed("radio busy")
+
+
+def hour_logic() -> RoomLogic:
+    return RoomLogic(CFG, HOUR, capability_of=capability_of)
+
+
+def given_up(
+    st: RoomState, at: datetime = T0, intent: Intent = TEMP
+) -> tuple[RoomState, list[Command]]:
+    """Fail ``intent`` on climate.a three times at ``at``."""
+    cmds: list[Command] = []
+    for _ in range(3):
+        st, cmds = hour_logic().handle(result("climate.a", intent, BUSY), at, st)
+    return st, cmds
+
+
+def warnings(cmds: list[Command]) -> list[Log]:
+    return [c for c in of_type(cmds, Log) if c.level == "warning"]
+
+
+def test_a_give_up_is_quiet_before_the_hour() -> None:
+    st, cmds = given_up(started()[0])
+    assert of_type(cmds, RaiseIssue) == []
+    assert of_type(cmds, FireEvent) == []
+    assert warnings(cmds) == []
+    trv = st.trvs["climate.a"]
+    assert trv.health is TrvHealth.ERROR
+    assert trv.failing_since == T0
+    assert not trv.issue_raised
+    assert visible_health(trv) is TrvHealth.OK
+    assert cmds[-1].status == RoomStatus.OK
+    assert cmds[-1].attributes["trv_health"] == {"climate.a": "ok", "climate.b": "ok"}
+    assert cmds[-1].attributes["last_error"] is None
+    assert thermostat_deviations(st) == {}
+
+
+def test_a_tick_before_the_hour_says_nothing() -> None:
+    st, _ = given_up(started()[0])
+    _, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=59), st)
+    assert of_type(cmds, RaiseIssue) == []
+    assert warnings(cmds) == []
+
+
+def test_the_hour_raises_the_notice_once() -> None:
+    st, _ = given_up(started()[0])
+    st, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=60), st)
+    assert of_type(cmds, RaiseIssue) == [
+        RaiseIssue(
+            "unreachable",
+            "climate.a",
+            {
+                "room": "Living",
+                "trv": "climate.a",
+                "attribute": "room_temperature",
+                "minutes": "60",
+                "error": "radio busy",
+            },
+        )
+    ]
+    assert [w.message for w in warnings(cmds)] == [
+        "Living: climate.a has not accepted room_temperature for 60 minutes: radio busy"
+    ]
+    assert of_type(cmds, FireEvent) == [
+        FireEvent(
+            EVENT_WRITE_FAILED,
+            {
+                **event_data("climate.a", "00:11"),
+                "attribute": "room_temperature",
+                "minutes": 60,
+                "error": "radio busy",
+            },
+        )
+    ]
+    assert st.trvs["climate.a"].issue_raised
+    assert cmds[-1].status == RoomStatus.ERROR
+    assert thermostat_deviations(st) == {"climate.a": "error"}
+    st, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=61), st)
+    assert of_type(cmds, RaiseIssue) == []
+    assert warnings(cmds) == []
+
+
+def test_recovery_before_the_hour_is_silent() -> None:
+    st, _ = given_up(started()[0])
+    later = T0 + timedelta(minutes=30)
+    st, cmds = hour_logic().handle(result("climate.a", TEMP, Ok()), later, st)
+    assert of_type(cmds, ClearIssue) == []
+    assert of_type(cmds, FireEvent) == []
+    assert [c.level for c in of_type(cmds, Log)] == ["debug"]
+    trv = st.trvs["climate.a"]
+    assert trv.failing_since is None
+    assert trv.health is TrvHealth.OK
+
+
+def test_recovery_after_the_notice_clears_it_and_a_new_failure_waits_an_hour() -> None:
+    st, _ = given_up(started()[0])
+    st, _ = hour_logic().handle(Tick(), T0 + timedelta(minutes=60), st)
+    back = T0 + timedelta(minutes=90)
+    st, cmds = hour_logic().handle(result("climate.a", TEMP, Ok()), back, st)
+    assert of_type(cmds, ClearIssue) == [ClearIssue("unreachable", "climate.a")]
+    assert [c.name for c in of_type(cmds, FireEvent)] == [EVENT_RECOVERED]
+    trv = st.trvs["climate.a"]
+    assert (trv.failing_since, trv.issue_raised) == (None, False)
+
+    again = T0 + timedelta(minutes=120)
+    st, cmds = given_up(st, again)
+    assert of_type(cmds, RaiseIssue) == []
+    st, cmds = hour_logic().handle(Tick(), again + timedelta(minutes=30), st)
+    assert of_type(cmds, RaiseIssue) == []
+    st, cmds = hour_logic().handle(Tick(), again + timedelta(minutes=60), st)
+    assert len(of_type(cmds, RaiseIssue)) == 1
+
+
+def test_a_failure_after_a_quiet_recovery_starts_a_fresh_hour() -> None:
+    st, _ = given_up(started()[0])
+    st, _ = hour_logic().handle(
+        result("climate.a", TEMP, Ok()), T0 + timedelta(minutes=30), st
+    )
+    again = T0 + timedelta(minutes=40)
+    st, _ = given_up(st, again)
+    assert st.trvs["climate.a"].failing_since == again
+    _, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=60), st)
+    assert of_type(cmds, RaiseIssue) == []
+    _, cmds = hour_logic().handle(Tick(), again + timedelta(minutes=60), st)
+    assert len(of_type(cmds, RaiseIssue)) == 1
+
+
+def test_no_notice_while_the_thermostat_is_away() -> None:
+    st, _ = given_up(started()[0])
+    away = TrvAvailabilityChanged("climate.a", available=False)
+    st, _ = hour_logic().handle(away, T0 + timedelta(minutes=10), st)
+    st, cmds = hour_logic().handle(Tick(), T0 + timedelta(minutes=70), st)
+    assert of_type(cmds, RaiseIssue) == []
+    assert warnings(cmds) == []
+
+    back_at = T0 + timedelta(minutes=80)
+    back = TrvAvailabilityChanged("climate.a", available=True)
+    st, _ = hour_logic().handle(back, back_at, st)
+    st, cmds = given_up(st, back_at)
+    assert of_type(cmds, RaiseIssue) == []
+    st, cmds = hour_logic().handle(Tick(), back_at + timedelta(minutes=60), st)
+    assert len(of_type(cmds, RaiseIssue)) == 1
+
+
+def test_the_issue_moving_on_is_quiet_before_the_hour() -> None:
+    st, _ = given_up(started()[0])
+    st, _ = given_up(st, intent=FROST)
+    st, cmds = hour_logic().handle(
+        result("climate.a", TEMP, Ok()), T0 + timedelta(minutes=10), st
+    )
+    assert of_type(cmds, RaiseIssue) == []
+    assert warnings(cmds) == []
+    assert st.trvs["climate.a"].error_capability == "frost_temperature"
+    assert st.trvs["climate.a"].failing_since == T0

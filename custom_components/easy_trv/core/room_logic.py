@@ -66,6 +66,8 @@ from custom_components.easy_trv.core.model import (
     TrvState,
     Unsupported,
     WindowChanged,
+    baseline_health,
+    visible_health,
 )
 from custom_components.easy_trv.core.room_state import failsafe_recent, internal_source
 from custom_components.easy_trv.core.values import is_in_range, round_tenth
@@ -397,6 +399,9 @@ class RoomLogic:
             self._cfg, state, now, self._active_pair(state, now)
         )
         state, commands = self._on_tick_sensors(now, state)
+        for trv in self._cfg.trvs:
+            state, report = self._report_due(state, trv.entity_id, now)
+            commands += report
         return state, [*phase, *holds, *commands]
 
     def _on_tick_sensors(self, now: datetime, state: RoomState) -> _Step:
@@ -646,7 +651,17 @@ class RoomLogic:
                 last_error=updated.errors.get(next_capability, updated.last_error),
             )
             return updated, self._still_failing(trv, updated, next_capability), True
-        updated = replace(updated, last_error=None, error_capability=None)
+        raised = updated.issue_raised
+        updated = replace(
+            updated,
+            last_error=None,
+            error_capability=None,
+            failing_since=None,
+            issue_raised=False,
+        )
+        if not raised:
+            note = f"{trv} accepts writes again before it was reported"
+            return updated, [Log("debug", note)], False
         return (
             updated,
             [
@@ -735,6 +750,9 @@ class RoomLogic:
             # did not arrive starts now. Failures while it is in error leave the
             # clock alone, it counts from the last time they were sent.
             updated = replace(updated, last_error_retry=now)
+        if updated.failing_since is None:
+            # The report waits from here; a return from away keeps the time.
+            updated = replace(updated, failing_since=now)
         if not reported:
             # The first to give up owns the issue.
             updated = replace(updated, error_capability=capability)
@@ -745,20 +763,50 @@ class RoomLogic:
         if reported:
             # The notice stands: nothing new for a capability that fails again.
             return state, []
-        data = {"attribute": capability, "attempts": attempts, "error": error}
+        note = Log(
+            "debug",
+            f"{self._cfg.name}: {trv} did not accept {capability} after "
+            f"{attempts} attempts, retrying every refresh: {error}",
+        )
+        state, report = self._report_due(state, trv, now)
+        return state, [note, *report]
+
+    def _report_due(self, state: RoomState, trv: str, now: datetime) -> _Step:
+        """Report a thermostat whose writes have failed for ``report_after``.
+
+        It is reported once: Repairs issue, bus event, one warning. Until then
+        it fails quietly while the retries run.
+        """
+        current = state.trvs[trv]
+        if (
+            current.health is not TrvHealth.ERROR
+            or current.issue_raised
+            or current.failing_since is None
+            or now - current.failing_since < self._params.report_after
+            or current.error_capability is None
+            or not self._owed(state, current)
+        ):
+            return state, []
+        capability = current.error_capability
+        error = current.errors.get(capability) or current.last_error or "unknown"
+        minutes = self._report_minutes()
+        state = self._with_trv(state, trv, replace(current, issue_raised=True))
+        data = {"attribute": capability, "minutes": minutes, "error": error}
         return state, [
-            self._unreachable(trv, capability, attempts, error),
+            self._unreachable(trv, capability, error),
             FireEvent(EVENT_WRITE_FAILED, {**self._event_data(trv), **data}),
             Log(
                 "warning",
-                f"{self._cfg.name}: {trv} did not accept {capability} "
-                f"after {attempts} attempts: {error}",
+                f"{self._cfg.name}: {trv} has not accepted {capability} "
+                f"for {minutes} minutes: {error}",
             ),
         ]
 
-    def _unreachable(
-        self, trv: str, capability: str, attempts: int, error: str
-    ) -> RaiseIssue:
+    def _report_minutes(self) -> int:
+        """Return the report delay in whole minutes."""
+        return int(self._params.report_after.total_seconds() // 60)
+
+    def _unreachable(self, trv: str, capability: str, error: str) -> RaiseIssue:
         """Return the Repairs issue for a capability the thermostat did not take."""
         return RaiseIssue(
             "unreachable",
@@ -767,7 +815,7 @@ class RoomLogic:
                 "room": self._cfg.name,
                 "trv": trv,
                 "attribute": capability,
-                "attempts": str(attempts),
+                "minutes": str(self._report_minutes()),
                 "error": error,
             },
         )
@@ -777,24 +825,23 @@ class RoomLogic:
     ) -> list[Command]:
         """Move the issue on to a capability that has not arrived either.
 
-        It cites the attempts that were used up and the error of that capability
-        itself. A capability that is being written again has not failed since:
-        the issue moves to it, but nothing is said yet about it failing.
+        Only a thermostat that was reported says so: the issue cites the error
+        of that capability itself. A capability that is being written again has
+        not failed since: the issue moves to it, but nothing is said yet about
+        it failing. Before the report the move is silent.
         """
-        attempts = max(trv_state.attempts.get(capability, 0), self._params.max_attempts)
+        if not trv_state.issue_raised:
+            return []
         error = trv_state.errors.get(capability) or trv_state.last_error or "unknown"
         if self._in_flight(trv_state, capability):
             note = f"{trv}: {capability} is on its way, the issue waits for it"
-            return [
-                self._unreachable(trv, capability, attempts, error),
-                Log("debug", note),
-            ]
+            return [self._unreachable(trv, capability, error), Log("debug", note)]
         return [
-            self._unreachable(trv, capability, attempts, error),
+            self._unreachable(trv, capability, error),
             Log(
                 "warning",
-                f"{self._cfg.name}: {trv} still did not accept {capability} "
-                f"after {attempts} attempts: {error}",
+                f"{self._cfg.name}: {trv} still has not accepted {capability} "
+                f"for {self._report_minutes()} minutes: {error}",
             ),
         ]
 
@@ -1296,11 +1343,7 @@ class RoomLogic:
     @staticmethod
     def _baseline(trv_state: TrvState) -> TrvHealth:
         """Return the health of a thermostat that has no error of its own."""
-        if not trv_state.available:
-            return TrvHealth.UNAVAILABLE
-        if trv_state.unsupported - trv_state.not_in_profile:
-            return TrvHealth.UNSUPPORTED
-        return TrvHealth.OK
+        return baseline_health(trv_state)
 
     @staticmethod
     def _error_text(outcome: Failed | Mismatch | Signal) -> str:
@@ -1349,7 +1392,7 @@ class RoomLogic:
 
     def _status(self, state: RoomState, now: datetime) -> SetStatus:
         """Derive the room status and its attributes from the state."""
-        healths = [trv.health for trv in state.trvs.values()]
+        healths = [visible_health(trv) for trv in state.trvs.values()]
         if TrvHealth.ERROR in healths:
             status = RoomStatus.ERROR
         elif (
@@ -1365,7 +1408,7 @@ class RoomLogic:
             (
                 trv.last_error
                 for trv in state.trvs.values()
-                if trv.last_error is not None
+                if trv.last_error is not None and trv.issue_raised
             ),
             None,
         )
@@ -1375,7 +1418,8 @@ class RoomLogic:
                 "active_sensor": state.active_sensor,
                 "source": state.source.value,
                 "trv_health": {
-                    entity_id: trv.health.value for entity_id, trv in state.trvs.items()
+                    entity_id: visible_health(trv).value
+                    for entity_id, trv in state.trvs.items()
                 },
                 "last_error": last_error,
             },

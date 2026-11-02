@@ -246,7 +246,11 @@ def test_restricted_from_each_deviation(
 )
 def test_fault_and_note_both_in_reasons(note: Note, expected: HeatingState) -> None:
     st = with_trv(
-        RoomState.initial(CFG), "climate.a", health=TrvHealth.ERROR, note=note
+        RoomState.initial(CFG),
+        "climate.a",
+        health=TrvHealth.ERROR,
+        issue_raised=True,
+        note=note,
     )
     assert heating_state(room_facts(st)) == (
         HeatingState.FAULT,
@@ -256,7 +260,9 @@ def test_fault_and_note_both_in_reasons(note: Note, expected: HeatingState) -> N
 
 def test_fault_and_schedule_note_both_in_reasons() -> None:
     st = RoomState.initial(CFG)
-    st = with_trv(st, "climate.a", health=TrvHealth.ERROR, note=Note.SCHEDULE)
+    st = with_trv(
+        st, "climate.a", health=TrvHealth.ERROR, issue_raised=True, note=Note.SCHEDULE
+    )
     st = with_trv(st, "climate.b", health=TrvHealth.OK)
     facts_ = room_facts(st)
     assert facts_.deviations == {"climate.a": "error"}
@@ -268,7 +274,9 @@ def test_fault_and_schedule_note_both_in_reasons() -> None:
 
 
 def test_fault_alone_does_not_restrict() -> None:
-    st = with_trv(RoomState.initial(CFG), "climate.a", health=TrvHealth.ERROR)
+    st = with_trv(
+        RoomState.initial(CFG), "climate.a", health=TrvHealth.ERROR, issue_raised=True
+    )
     assert room_facts(st).thermostat_reasons == frozenset()
     assert heating_state(room_facts(st)) == (
         HeatingState.FAULT,
@@ -281,6 +289,7 @@ def test_a_thermostat_in_error_that_lacks_a_function_is_restricted_too() -> None
         RoomState.initial(CFG),
         "climate.a",
         health=TrvHealth.ERROR,
+        issue_raised=True,
         unsupported=frozenset({"hysteresis"}),
     )
     facts_ = room_facts(st)
@@ -431,7 +440,9 @@ def test_enum_order() -> None:
 
 def test_thermostat_deviations_order() -> None:
     st = RoomState.initial(CFG)
-    st = with_trv(st, "climate.a", health=TrvHealth.ERROR, note=Note.SCHEDULE)
+    st = with_trv(
+        st, "climate.a", health=TrvHealth.ERROR, issue_raised=True, note=Note.SCHEDULE
+    )
     st = with_trv(st, "climate.b", health=TrvHealth.OK, note=Note.WINDOW_PHASE)
     assert thermostat_deviations(st) == {
         "climate.a": "error",
@@ -452,8 +463,17 @@ def test_thermostat_deviations_order() -> None:
 def test_thermostat_deviation_reasons(
     health: TrvHealth, note: Note | None, expected: str
 ) -> None:
-    st = with_trv(RoomState.initial(CFG), "climate.a", health=health, note=note)
+    st = with_trv(
+        RoomState.initial(CFG), "climate.a", health=health, note=note, issue_raised=True
+    )
     assert thermostat_deviations(st) == {"climate.a": expected}
+
+
+def test_an_error_not_reported_yet_is_no_deviation() -> None:
+    st = with_trv(RoomState.initial(CFG), "climate.a", health=TrvHealth.ERROR)
+    assert thermostat_deviations(st) == {}
+    st = with_trv(st, "climate.a", available=False)
+    assert thermostat_deviations(st) == {"climate.a": "unavailable"}
 
 
 def test_healthy_thermostat_is_absent() -> None:
