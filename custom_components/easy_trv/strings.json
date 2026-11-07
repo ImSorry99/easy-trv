@@ -378,13 +378,15 @@
               "presence_entity": "Presence entity",
               "presence_unknown": "When presence is unknown",
               "away_action": "While away",
-              "away_setback_kelvin": "Setback (K)"
+              "away_setback_kelvin": "Setback (K)",
+              "away_delay_minutes": "Delay before away counts (minutes)"
             },
             "data_description": {
               "presence_entity": "A person, a device tracker, a zone (for example zone.home), a group, a binary sensor or an input boolean. Home means: person or tracker home, zone with at least one person, group home or on, switch or sensor on. Empty = no presence.",
               "presence_unknown": "How an unknown or unavailable state of the entity counts. Default: away.",
               "away_action": "Lower takes the target down by the setback, never below the frost protection temperature. Off switches the thermostats off like an open window. A new target while away holds until someone is home.",
-              "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Empty = {default_away_setback_kelvin}."
+              "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Empty = {default_away_setback_kelvin}.",
+              "away_delay_minutes": "How long presence must read away without a break before away counts; home counts at once. 0 to 120 minutes, 0 = at once. Empty = {default_away_delay_minutes}."
             }
           },
           "statistics": {

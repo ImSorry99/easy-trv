@@ -378,13 +378,15 @@
               "presence_entity": "Anwesenheits-Entität",
               "presence_unknown": "Bei unbekannter Anwesenheit",
               "away_action": "Bei Abwesenheit",
-              "away_setback_kelvin": "Absenkung (K)"
+              "away_setback_kelvin": "Absenkung (K)",
+              "away_delay_minutes": "Verzögerung, bis abwesend zählt (Minuten)"
             },
             "data_description": {
               "presence_entity": "Eine Person, ein Gerät, eine Zone (zum Beispiel zone.home), eine Gruppe, ein Binärsensor oder ein Eingabe-Schalter. Zuhause heißt: Person oder Gerät home, Zone mit mindestens einer Person, Gruppe home oder an, Schalter oder Sensor an. Leer = keine Abwesenheit.",
               "presence_unknown": "Wie ein unbekannter oder nicht verfügbarer Zustand der Entität zählt. Standard: abwesend.",
               "away_action": "Absenken senkt die Zieltemperatur um die Absenkung, nie unter die Frostschutztemperatur. Aus schaltet die Thermostate aus wie bei offenem Fenster. Eine neue Zieltemperatur während der Abwesenheit gilt bis zur Rückkehr.",
-              "away_setback_kelvin": "Um wie viel die Zieltemperatur bei Abwesenheit sinkt. 0,5 bis 10 K. Leer = {default_away_setback_kelvin}."
+              "away_setback_kelvin": "Um wie viel die Zieltemperatur bei Abwesenheit sinkt. 0,5 bis 10 K. Leer = {default_away_setback_kelvin}.",
+              "away_delay_minutes": "Wie lange die Anwesenheit ohne Unterbrechung abwesend melden muss, bevor abwesend zählt; zuhause zählt sofort. 0 bis 120 Minuten, 0 = sofort. Leer = {default_away_delay_minutes}."
             }
           },
           "statistics": {

@@ -16,6 +16,7 @@ from custom_components.easy_trv.core.model import (
     SetRoomOperation,
     SetRoomSetpoint,
     SetSetpoint,
+    SettingsChanged,
     Start,
     TrvObserved,
     WindowChanged,
@@ -371,3 +372,58 @@ def test_the_same_ha_setpoint_during_the_away_hold_keeps_it() -> None:
     assert st.away_override is False
     assert holding(st)
     assert modes(cmds) == []
+
+
+# --- The setback changes while the room runs ---------------------------------
+
+
+def changed(logic: RoomLogic, st: RoomState, setback: float):
+    st, cmds = logic.handle(SettingsChanged(away_setback=setback), AFTER, st)
+    for trv, intent in executes(cmds):
+        if isinstance(intent, SetSetpoint | SetHvacMode):
+            st, _ = logic.handle(result(trv, intent, Ok()), AFTER, st)
+    return st, cmds
+
+
+def test_settings_changed_while_lowered_writes_the_new_target() -> None:
+    logic = room()
+    st, _ = away(heating())
+    st, cmds = changed(logic, st, 2.0)
+    assert setpoints(cmds) == [(A, SetSetpoint(19.0)), (B, SetSetpoint(19.0))]
+    assert (st.setpoint, st.away) == (21.0, True)
+    # The new setback is the room's from now on: home writes the wish back.
+    st, cmds = logic.handle(PresenceChanged(away=False), AFTER, st)
+    assert setpoints(cmds) == [(A, SetSetpoint(21.0)), (B, SetSetpoint(21.0))]
+
+
+def test_settings_changed_with_the_same_setback_writes_nothing() -> None:
+    st, _ = away(heating())
+    _, cmds = changed(room(), st, 3.0)
+    assert executes(cmds) == []
+
+
+def test_settings_changed_while_home_writes_nothing() -> None:
+    logic = room()
+    st, cmds = changed(logic, heating(), 2.0)
+    assert setpoints(cmds) == []
+    # The next away uses the new setback.
+    st, cmds = logic.handle(PresenceChanged(away=True), AFTER, st)
+    assert setpoints(cmds) == [(A, SetSetpoint(19.0)), (B, SetSetpoint(19.0))]
+
+
+def test_settings_changed_during_off_hold_writes_nothing() -> None:
+    cfg = replace(CFG, away_action="off", away_setback=3.0)
+    st, _ = away(heating(cfg), cfg)
+    assert holding(st)
+    _, cmds = changed(room(cfg), st, 2.0)
+    assert setpoints(cmds) == []
+    assert not [i for _, i in executes(cmds) if isinstance(i, SetHvacMode)]
+
+
+def test_settings_changed_with_override_writes_nothing() -> None:
+    logic = room()
+    st, _ = away(heating())
+    st, _ = logic.handle(SetRoomSetpoint(22.0), AFTER, st)
+    assert st.away_override is True
+    _, cmds = changed(logic, st, 2.0)
+    assert setpoints(cmds) == []

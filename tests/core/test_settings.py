@@ -254,6 +254,12 @@ def test_statistics_follow_the_global_option_and_a_room_can_override_it(value):
     assert resolve_settings({}, {"statistics": value}).statistics == value
 
 
+def test_away_delay_defaults_to_15():
+    assert resolve_settings({}, {}).away_delay_minutes == 15
+    assert resolve_settings({"away_delay_minutes": 0}, {}).away_delay_minutes == 0
+    assert resolve_settings({"away_delay_minutes": 120}, {}).away_delay_minutes == 120
+
+
 def test_presence_settings_defaults():
     s = resolve_settings({}, {})
     assert (s.presence_unknown, s.away_action, s.away_setback_kelvin) == (

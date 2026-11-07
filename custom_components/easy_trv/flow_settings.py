@@ -26,6 +26,7 @@ from homeassistant.helpers.selector import (
 from custom_components.easy_trv.const import (
     CONF_ADAPTIVE_MODE,
     CONF_AWAY_ACTION,
+    CONF_AWAY_DELAY,
     CONF_AWAY_SETBACK,
     CONF_FROST_TEMPERATURE,
     CONF_HIDE_THERMOSTAT_ENTITIES,
@@ -124,6 +125,7 @@ NUMBERS: Final[Mapping[str, NumberSpec]] = {
         -10.0, 30.0, 0.5, UnitOfTemperature.CELSIUS
     ),
     CONF_AWAY_SETBACK: NumberSpec(0.5, 10.0, 0.5, UnitOfTemperature.KELVIN),
+    CONF_AWAY_DELAY: NumberSpec(0, 120, unit=UnitOfTime.MINUTES),
 }
 # Numbers whose value 0 (or, for the cut-off, no value) reads as "off".
 _OFF_AT_ZERO: Final = frozenset(
@@ -171,6 +173,7 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
         CONF_PRESENCE_UNKNOWN,
         CONF_AWAY_ACTION,
         CONF_AWAY_SETBACK,
+        CONF_AWAY_DELAY,
     ),
     _SECTION_STATISTICS: (CONF_STATISTICS,),
 }

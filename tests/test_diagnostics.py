@@ -129,6 +129,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "presence_unknown": "away",
         "away_action": "setback",
         "away_setback_kelvin": 3.0,
+        "away_delay_minutes": 15,
     }
 
 

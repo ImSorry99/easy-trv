@@ -80,6 +80,36 @@ def on_presence(  # noqa: PLR0913
         return _transition(cfg, state, now, was_held, capability_of, resync)
     if cfg.setpoint_range is None or setpoint.target(cfg, state) == before:
         return state, []
+    return _write_target(cfg, state, now, capability_of)
+
+
+def on_setback(  # noqa: PLR0913
+    cfg_before: RoomConfig,
+    cfg_after: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    capability_of: _Capabilities,
+    resync: _Resync,  # noqa: ARG001
+) -> _Step:
+    """Take the away setback changing while the room runs.
+
+    A room that is lowered gets the new target; at home, in a hold or with an
+    override the target does not change, so nothing is written.
+    """
+    if cfg_after.setpoint_range is None or setpoint.target(
+        cfg_after, state
+    ) == setpoint.target(cfg_before, state):
+        return state, []
+    return _write_target(cfg_after, state, now, capability_of)
+
+
+def _write_target(
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    capability_of: _Capabilities,
+) -> _Step:
+    """Write the room's target to every writable thermostat."""
     # Marked per thermostat until the writes arrive, so a sleepy thermostat that
     # still reports the value from before is not taken as a knob turn.
     commands: list[Command] = []

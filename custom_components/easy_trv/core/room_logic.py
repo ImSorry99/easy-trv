@@ -55,6 +55,7 @@ from custom_components.easy_trv.core.model import (
     SetSetpoint,
     SetSource,
     SetStatus,
+    SettingsChanged,
     SetWindowDetection,
     Signal,
     Source,
@@ -172,7 +173,12 @@ class RoomLogic:
                 )
             case KnobSettled():
                 state, commands = self._on_knob_settled(event, now, state)
-            case WindowChanged() | OutdoorChanged() | PresenceChanged():
+            case (
+                WindowChanged()
+                | OutdoorChanged()
+                | PresenceChanged()
+                | SettingsChanged()
+            ):
                 state, commands = self._on_hold_event(event, now, state)
             case _:
                 assert_never(event)
@@ -381,12 +387,17 @@ class RoomLogic:
 
     def _on_hold_event(
         self,
-        event: WindowChanged | OutdoorChanged | PresenceChanged,
+        event: WindowChanged | OutdoorChanged | PresenceChanged | SettingsChanged,
         now: datetime,
         state: RoomState,
     ) -> _Step:
-        """Route a window or outdoor change to ``hold``, presence to ``setpoint``."""
+        """Route a window, outdoor, presence or setback change to ``hold``."""
         cfg, capability_of = self._cfg, self._capability_of
+        if isinstance(event, SettingsChanged):
+            self._cfg = replace(cfg, away_setback=event.away_setback)
+            return hold.on_setback(
+                cfg, self._cfg, state, now, capability_of, self._source_intents
+            )
         if isinstance(event, PresenceChanged):
             return hold.on_presence(
                 cfg, state, now, event.away, capability_of, self._source_intents

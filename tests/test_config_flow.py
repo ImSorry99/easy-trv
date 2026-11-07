@@ -1935,6 +1935,7 @@ async def test_options_form_is_grouped_in_five_sections(hass, entry) -> None:
         "presence_unknown",
         "away_action",
         "away_setback_kelvin",
+        "away_delay_minutes",
     ]
     assert list(section_fields(result, "statistics")) == ["statistics"]
 
@@ -1956,7 +1957,33 @@ async def test_the_presence_entity_picker_takes_the_presence_domains(
         "presence_unknown": "away",
         "away_action": "setback",
     }
-    assert suggested_values(result, "presence") == {"away_setback_kelvin": 3.0}
+    assert suggested_values(result, "presence") == {
+        "away_setback_kelvin": 3.0,
+        "away_delay_minutes": 15,
+    }
+
+
+async def test_away_delay_is_an_options_only_box_from_0_to_120(hass, entry) -> None:
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    config = section_fields(result, "presence")["away_delay_minutes"].config
+    assert (config["min"], config["max"], config["step"]) == (0, 120, 1)
+    assert (config["mode"], config["unit_of_measurement"]) == ("box", "min")
+
+    for value in (0, 120):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], options_input(presence={"away_delay_minutes": value})
+        )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        assert entry.options.get("away_delay_minutes", 15) == value
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    with pytest.raises(vol.Invalid):
+        result["data_schema"](options_input(presence={"away_delay_minutes": 121}))
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_have_no_away_delay(hass, entry) -> None:
+    assert "away_delay_minutes" not in fields(await open_settings_step(hass, entry))
 
 
 async def test_options_store_the_presence_entity(hass, entry) -> None:
@@ -2023,6 +2050,7 @@ async def test_options_form_shows_the_saved_number_else_the_default(
         "default_setpoint_max": "30.0 °C",
         "default_window_open_delay_seconds": "30 s",
         "default_away_setback_kelvin": "3.0 K",
+        "default_away_delay_minutes": "15 min",
         "default_window_warn_minutes": "120 min",
         "default_window_check_minutes": "30 min",
         "default_window_check_drop_kelvin": "0.3 K",

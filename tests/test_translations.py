@@ -195,6 +195,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "presence_unknown",
         "away_action",
         "away_setback_kelvin",
+        "away_delay_minutes",
     }
     assert set(options["statistics"]["data"]) == {"statistics"}
     assert set(data["selector"]["outdoor_cutoff"]["options"]) == {"global", "off"}

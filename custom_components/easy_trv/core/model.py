@@ -562,6 +562,13 @@ class OutdoorChanged:
     celsius: float | None
 
 
+@dataclass(frozen=True)
+class SettingsChanged:
+    """A setting that applies while the room runs changed."""
+
+    away_setback: float
+
+
 Event = (
     Start
     | SensorChanged
@@ -579,6 +586,7 @@ Event = (
     | WindowChanged
     | OutdoorChanged
     | PresenceChanged
+    | SettingsChanged
 )
 
 # --- Commands ------------------------------------------------------------
