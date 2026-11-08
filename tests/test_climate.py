@@ -545,7 +545,7 @@ async def test_the_extra_data_carries_frost_protection(hass, entry) -> None:
 
 async def test_presence_attributes_and_the_stored_override(hass) -> None:
     hass.states.async_set("person.a", "not_home")
-    options = {**FAST_OPTIONS, "presence_entity": "person.a"}
+    options = {**FAST_OPTIONS, "presence_entity": "person.a", "away_delay_minutes": 0}
     entry = make_entry(hass, [room_data()], options)
     await start(hass, entry)
 
@@ -575,7 +575,7 @@ async def test_a_restored_override_holds_while_away(hass) -> None:
             )
         ],
     )
-    options = {**FAST_OPTIONS, "presence_entity": "person.a"}
+    options = {**FAST_OPTIONS, "presence_entity": "person.a", "away_delay_minutes": 0}
     entry = make_entry(hass, [room_data()], options)
     await start(hass, entry)
 

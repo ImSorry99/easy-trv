@@ -10,7 +10,8 @@ the logic, and releases everything again on ``stop``.
 import logging
 import math
 from collections import deque
-from typing import TYPE_CHECKING, Any, Final
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
@@ -241,38 +242,84 @@ def presence_home(domain: str, state: str | None) -> bool | None:
     return False if away is None or state in away else None
 
 
-class PresenceInput:
-    """Track a room's presence entity and feed home and away to the room."""
+class ForcedPresence(Protocol):
+    """What a room's presence asks the house: a forced value that beats the entity."""
 
-    def __init__(
+    def forced_away(self) -> bool | None:
+        """Return the forced value (``True`` away), ``None`` when not forced."""
+
+    def subscribe(self, callback: Callable[[], None]) -> Callable[[], None]:
+        """Call ``callback`` when the forced value changes; return the unsubscribe."""
+
+
+class PresenceInput:
+    """Track a room's presence entity and feed home and away to the room.
+
+    Away (an unknown state read as away included) counts only after the entity
+    has read away for the delay without a break; home counts at once and cancels
+    a running delay. A value forced by the house wins at once. Only changes of
+    the effective value are fed.
+    """
+
+    def __init__(  # noqa: PLR0913 - the room's entry points, one argument each
         self,
         hass: HomeAssistant,
         entity_id: str,
         *,
         unknown_is_away: bool,
         feed: Callable[[LogicEvent], None],
+        delay: timedelta,
+        house: ForcedPresence | None = None,
     ) -> None:
         """Watch ``entity_id``; an unknown state reads as ``unknown_is_away``."""
         self._hass = hass
         self._entity_id = entity_id
         self._unknown_is_away = unknown_is_away
         self._feed = feed
-        self._away: bool | None = None
-        self._unsubscribe: CALLBACK_TYPE | None = None
+        self._delay = delay
+        self._house = house
+        # What the entity reads, and what counts (delay and forcing applied).
+        self._raw_away = False
+        # When the entity began to read as it does now.
+        self._raw_since = dt_util.utcnow()
+        self._away = False
+        self._started = False
+        self._timer: CALLBACK_TYPE | None = None
+        self._away_from: datetime | None = None
+        self._unsubscribers: list[CALLBACK_TYPE] = []
+
+    @property
+    def away_from(self) -> datetime | None:
+        """Return when away will count while the delay runs, else ``None``."""
+        return self._away_from
+
+    def set_delay(self, delay: timedelta) -> None:
+        """Use ``delay`` from the next time the entity reads away."""
+        self._delay = delay
 
     def start(self) -> bool:
-        """Start tracking; return whether presence reads away now."""
-        self._unsubscribe = async_track_state_change_event(
-            self._hass, [self._entity_id], self._on_change
+        """Start tracking; return whether presence counts as away now."""
+        self._unsubscribers.append(
+            async_track_state_change_event(
+                self._hass, [self._entity_id], self._on_change
+            )
         )
-        self._away = self._read(self._hass.states.get(self._entity_id))
+        if self._house is not None:
+            self._unsubscribers.append(self._house.subscribe(self._on_house))
+        state = self._hass.states.get(self._entity_id)
+        self._raw_away = self._read(state)
+        self._started = True
+        self._raw_since = dt_util.utcnow() if state is None else state.last_changed
+        self._evaluate(feed=False)
         return self._away
 
     def stop(self) -> None:
-        """Stop tracking."""
-        if self._unsubscribe is not None:
-            self._unsubscribe()
-            self._unsubscribe = None
+        """Stop tracking and cancel the delay."""
+        self._started = False
+        self._cancel_timer()
+        for unsubscribe in self._unsubscribers:
+            unsubscribe()
+        self._unsubscribers.clear()
 
     def _read(self, state: State | None) -> bool:
         """Return whether ``state`` reads away, the unknown policy applied."""
@@ -281,14 +328,63 @@ class PresenceInput:
         )
         return self._unknown_is_away if home is None else not home
 
+    def _cancel_timer(self) -> None:
+        if self._timer is not None:
+            self._timer()
+            self._timer = None
+        self._away_from = None
+
+    def _evaluate(self, *, feed: bool = True) -> None:
+        """Work out what counts now and feed it when it changed."""
+        forced = self._house.forced_away() if self._house is not None else None
+        if forced is not None:
+            self._cancel_timer()
+            counted = forced
+        elif not self._raw_away:
+            self._cancel_timer()
+            counted = False
+        elif self._away or self._timer is not None:
+            counted = self._away
+        else:
+            remaining = self._delay - (dt_util.utcnow() - self._raw_since)
+            if remaining > timedelta(0):
+                self._away_from = dt_util.utcnow() + remaining
+                self._timer = async_call_later(
+                    self._hass, remaining.total_seconds(), self._on_timer
+                )
+                counted = False
+            else:
+                counted = True
+        if counted is self._away:
+            return
+        self._away = counted
+        if feed:
+            self._feed(PresenceChanged(counted))
+
+    @callback
+    def _on_timer(self, _now: datetime) -> None:
+        """Count away: the entity read away for the whole delay."""
+        self._timer = None
+        self._away_from = None
+        if not self._started or not self._raw_away or self._away:
+            return
+        self._away = True
+        self._feed(PresenceChanged(away=True))
+
+    @callback
+    def _on_house(self) -> None:
+        """Look again, the house forced or released presence."""
+        if self._started:
+            self._evaluate()
+
     @callback
     def _on_change(self, event: Event[EventStateChangedData]) -> None:
-        """Feed a change between home and away; anything else is not news."""
+        """Take a change of the entity; anything but home and away is not news."""
         away = self._read(event.data["new_state"])
-        if away is self._away:
-            return
-        self._away = away
-        self._feed(PresenceChanged(away))
+        if away is not self._raw_away:
+            self._raw_away = away
+            self._raw_since = dt_util.utcnow()
+        self._evaluate()
 
 
 def _outdoor_celsius(state: State | None) -> float | None:

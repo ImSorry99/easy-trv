@@ -783,7 +783,7 @@ async def test_the_heating_state_shows_presence(hass) -> None:
     hass.states.async_set("person.a", "not_home", {"friendly_name": "Alex"})
     for entity_id in ("climate.a", "climate.b"):
         hass.states.async_set(entity_id, "heat", {"temperature": 21.0})
-    options = {**FAST_OPTIONS, "presence_entity": "person.a"}
+    options = {**FAST_OPTIONS, "presence_entity": "person.a", "away_delay_minutes": 0}
     entry = make_entry(hass, [room_data()], options)
     await start(hass, entry)
 
@@ -798,7 +798,12 @@ async def test_the_heating_state_shows_presence(hass) -> None:
 
 async def test_the_heating_state_shows_the_away_hold(hass) -> None:
     hass.states.async_set("person.a", "not_home")
-    options = {**FAST_OPTIONS, "presence_entity": "person.a", "away_action": "off"}
+    options = {
+        **FAST_OPTIONS,
+        "presence_entity": "person.a",
+        "away_action": "off",
+        "away_delay_minutes": 0,
+    }
     entry = make_entry(hass, [room_data()], options)
     await start(hass, entry)
 

@@ -287,6 +287,7 @@ class RoomController:
         outdoor_sensor: str | None = None,
         presence_entity: str | None = None,
         presence_unknown: str = "away",
+        presence_delay: timedelta = timedelta(0),
     ) -> None:
         """Wire the room logic to Home Assistant, the profile and the gateway.
 
@@ -344,6 +345,7 @@ class RoomController:
                 self._presence_entity,
                 unknown_is_away=presence_unknown != "home",
                 feed=self._dispatch,
+                delay=presence_delay,
             )
             if self._presence_entity
             else None
@@ -522,6 +524,11 @@ class RoomController:
     def presence_entity(self) -> str | None:
         """Return the room's presence entity, ``None`` without presence."""
         return self._presence_entity
+
+    @property
+    def presence_away_from(self) -> datetime | None:
+        """Return when away will count while the away delay runs, else ``None``."""
+        return None if self._presence is None else self._presence.away_from
 
     @property
     def presence(self) -> str:

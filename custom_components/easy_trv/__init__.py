@@ -480,6 +480,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
         outdoor_sensor=entry.options.get(CONF_OUTDOOR_SENSOR) or None,
         presence_entity=presence_entity,
         presence_unknown=settings.presence_unknown,
+        presence_delay=timedelta(minutes=settings.away_delay_minutes),
     )
     return controller, profile, settings
 
