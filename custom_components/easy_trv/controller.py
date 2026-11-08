@@ -552,6 +552,11 @@ class RoomController:
         return bool(self._config.window_contacts)
 
     @property
+    def started(self) -> bool:
+        """Return whether the room has started; before, its readings are not real."""
+        return self._started
+
+    @property
     def open_contacts(self) -> tuple[str, ...]:
         """Return the window contacts that read open now, before the open delay."""
         return self._holds.open_contacts

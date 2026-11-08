@@ -316,3 +316,35 @@ async def test_release_measures_the_delay_from_the_flip(hass, freezer) -> None:
     await _tick(hass, freezer, 1)
     assert [event.away for event in fed] == [True]
     tracker.stop()
+
+
+async def test_set_delay_applies_to_a_running_delay(hass, freezer) -> None:
+    fed: list = []
+    hass.states.async_set("person.a", "home")
+    tracker = _delayed(hass, fed)
+    tracker.start()
+    hass.states.async_set("person.a", "not_home")
+    await hass.async_block_till_done()
+    await _tick(hass, freezer, 6)
+    tracker.set_delay(timedelta(minutes=5))
+    await hass.async_block_till_done()
+    assert [event.away for event in fed] == [True]
+    tracker.stop()
+
+
+async def test_set_delay_longer_moves_a_running_delay(hass, freezer) -> None:
+    fed: list = []
+    hass.states.async_set("person.a", "home")
+    tracker = _delayed(hass, fed)
+    tracker.start()
+    hass.states.async_set("person.a", "not_home")
+    await hass.async_block_till_done()
+    await _tick(hass, freezer, 6)
+    tracker.set_delay(timedelta(minutes=30))
+    await _tick(hass, freezer, 20)
+    assert fed == []
+    await _tick(hass, freezer, 3)
+    assert fed == []
+    await _tick(hass, freezer, 1)
+    assert [event.away for event in fed] == [True]
+    tracker.stop()

@@ -61,6 +61,11 @@ class RoomBinarySensor(BinarySensorEntity):
         self.entity_id = f"binary_sensor.{slugify(subentry.title)}_{self._suffix}"
         self._attr_device_info = _room_device_info(subentry, area_name)
 
+    @property
+    def available(self) -> bool:
+        """Return whether the room has started, so that it reads what is real."""
+        return self._controller.started
+
     async def async_added_to_hass(self) -> None:
         """Write the state after every event of the room."""
         self.async_on_remove(

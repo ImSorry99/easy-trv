@@ -230,7 +230,7 @@ The select `select.easy_trv_presence` on the device **Easy TRV** has three optio
 
 - **Home** and **Away** override what every room with presence reads, at once and without the away delay. Rooms without presence are not affected.
 - The select returns to **Automatic** by itself when the global presence entity changes between home and away. Without a global presence entity it stays until you set it back. A change of a room's own entity does not end it.
-- After a restart the option stays, unless the global presence entity reads differently than when you set it. Then it returns to **Automatic**.
+- After a restart the option stays, unless the global presence entity reads differently than when you set it. Then it returns to **Automatic**. While the global entity is `unknown`, `unavailable` or missing at start, the comparison waits for its first home or away state.
 - Attributes: `presence_entity` and `forced_at` (the time the option was set; absent on Automatic).
 - While it is forced, the heating state hint names "Easy TRV presence" instead of the entity.
 - The event `easy_trv_presence_forced` (`option`: `auto`, `home` or `away`; `reason`: `user` or `presence_changed`) fires when the option changes.

@@ -458,9 +458,14 @@ class EasyTrvCard extends HTMLElement {
       rows.push([this._t(key), this._stateText(s), id]);
     };
     for (const key of STAT_KEYS) add(key, room.stats[key]);
-    for (const [key, ids] of [["write_failures", room.failures], ["dropouts", room.dropouts]]) {
-      const total = ids.reduce((sum, id) => sum + (Number(hass.states[id].state) || 0), 0);
-      if (total > 0) rows.push([this._t(key), String(total), ids[0]]);
+    for (const ids of [room.failures, room.dropouts]) {
+      for (const id of ids) {
+        const s = hass.states[id];
+        const value = s ? Number(s.state) || 0 : 0;
+        if (value <= 0) continue;
+        const name = (s.attributes && s.attributes.friendly_name) || id;
+        rows.push([name, String(value), id]);
+      }
     }
     if (!rows.length && !STAT_KEYS.some((key) => room.stats[key])) return null;
     const open = this._open.has(room.climate);

@@ -63,6 +63,8 @@ class HousePresence:
         self._listeners: list[Callable[[], None]] = []
         self._unsubscribe: CALLBACK_TYPE | None = None
         self._started = False
+        # A restored option waits for the first real state of the global entity.
+        self._awaiting = False
 
     def forced_away(self) -> bool | None:
         """Return the forced value (``True`` away), ``None`` on auto."""
@@ -88,6 +90,19 @@ class HousePresence:
             None if state is None else state.state,
         )
         return self._unknown_is_away if home is None else not home
+
+    def _known(self) -> bool:
+        """Return whether the global entity reads home or away now."""
+        if self.global_entity is None:
+            return False
+        state = self._hass.states.get(self.global_entity)
+        return (
+            presence_home(
+                self.global_entity.partition(".")[0],
+                None if state is None else state.state,
+            )
+            is not None
+        )
 
     def start(self) -> None:
         """Watch the global entity; drop a restored option if it reads differently."""
@@ -122,11 +137,14 @@ class HousePresence:
     def _check(self) -> None:
         """Drop the option when the entity reads differently than when it was set."""
         self._current_raw = self._read()
-        if (
-            self.option != "auto"
-            and self.raw_away is not None
-            and self._current_raw is not self.raw_away
-        ):
+        self._awaiting = False
+        if self.option == "auto" or self.raw_away is None:
+            return
+        if not self._known():
+            # Unknown at start: compare on the first real state instead.
+            self._awaiting = True
+            self._current_raw = self.raw_away
+        elif self._current_raw is not self.raw_away:
             self._release()
 
     async def async_set_option(
@@ -134,6 +152,7 @@ class HousePresence:
     ) -> None:
         """Set the option, tell the rooms and fire the event."""
         self.option = option
+        self._awaiting = False
         if option == "auto":
             self.forced_at = None
             self.raw_away = None
@@ -147,6 +166,7 @@ class HousePresence:
 
     def _release(self) -> None:
         """Go back to auto because the global entity changed."""
+        self._awaiting = False
         self.option = "auto"
         self.forced_at = None
         self.raw_away = None
@@ -162,6 +182,11 @@ class HousePresence:
     @callback
     def _on_change(self, _event: Event[EventStateChangedData]) -> None:
         """End forcing when the global entity flipped between home and away."""
+        if self._awaiting:
+            if not self._known():
+                return
+            self._awaiting = False
+            self._current_raw = self.raw_away
         raw = self._read()
         flipped = raw is not self._current_raw
         self._current_raw = raw

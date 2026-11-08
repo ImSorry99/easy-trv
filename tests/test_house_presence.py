@@ -184,3 +184,34 @@ async def test_restore_with_changed_presence_returns_to_auto(hass) -> None:
         {"option": "auto", "reason": "presence_changed"}
     ]
     house.stop()
+
+
+async def _restored_unavailable(hass):
+    hass.states.async_set("person.a", "unavailable")
+    house = HousePresence(hass, "entry", "person.a", unknown_is_away=False)
+    events = async_capture_events(hass, EVENT)
+    house.restore("away", dt_util.utcnow(), raw_away=True)
+    house.start()
+    await settle(hass)
+    assert house.option == "away"
+    return house, events
+
+
+async def test_restore_waits_for_the_first_real_state(hass) -> None:
+    house, events = await _restored_unavailable(hass)
+    hass.states.async_set("person.a", "not_home")
+    await settle(hass)
+    assert house.option == "away"
+    assert events == []
+    house.stop()
+
+
+async def test_restore_ends_when_the_first_real_state_differs(hass) -> None:
+    house, events = await _restored_unavailable(hass)
+    hass.states.async_set("person.a", "home")
+    await settle(hass)
+    assert house.option == "auto"
+    assert [e.data for e in events] == [
+        {"option": "auto", "reason": "presence_changed"}
+    ]
+    house.stop()

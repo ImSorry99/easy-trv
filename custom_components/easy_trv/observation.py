@@ -301,8 +301,11 @@ class PresenceInput:
         return self._away_from
 
     def set_delay(self, delay: timedelta) -> None:
-        """Use ``delay`` from the next time the entity reads away."""
+        """Use ``delay`` now: a delay that runs is measured again from the flip."""
         self._delay = delay
+        if self._started and self._timer is not None:
+            self._cancel_timer()
+            self._evaluate()
 
     def start(self) -> bool:
         """Start tracking; return whether presence counts as away now."""
@@ -577,9 +580,11 @@ class HoldInputs:
         the heating off.
         """
         silent_before = self._unreliable
+        opened = self.open_contacts
         is_open = self._resolve()
         self._track_silent(silent_before)
-        if is_open != self._raw_open:
+        flipped = is_open != self._raw_open
+        if flipped:
             # Before the room is told, which is what makes it notify.
             self._raw_open = is_open
             if self._raw_changed is not None:
@@ -593,7 +598,10 @@ class HoldInputs:
                 self._window_open = False
                 self._feed(WindowChanged(open=False))
                 fed = True
-        if not fed and silent_before != self._unreliable:
+        if not fed and (
+            silent_before != self._unreliable
+            or (not flipped and opened != self.open_contacts)
+        ):
             self._changed()
 
     def _track_silent(self, before: frozenset[str]) -> None:

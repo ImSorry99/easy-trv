@@ -1,3 +1,5 @@
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
@@ -109,3 +111,39 @@ async def test_presence_shows_the_forcing(hass) -> None:
         await entry.runtime_data.house.async_set_option("auto")
         await settle(hass)
         assert hass.states.get(PRESENCE).attributes["source"] == "entity"
+
+
+async def test_unavailable_until_the_room_has_started(hass) -> None:
+    hass.states.async_set("climate.a", "heat", {"temperature": 21.0})
+    hass.states.async_set("climate.b", "heat", {"temperature": 21.0})
+    hass.states.async_set(CONTACT, "on")
+    hass.states.async_set("person.a", "home")
+    entry = make_entry(hass, [room_data(window_contacts=[CONTACT])], {**OPTIONS})
+    hass.set_state(CoreState.starting)
+    with patched_gateway(hass):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert hass.states.get(WINDOW).state == "unavailable"
+        assert hass.states.get(PRESENCE).state == "unavailable"
+
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await settle(hass)
+        assert hass.states.get(WINDOW).state == "on"
+        assert hass.states.get(PRESENCE).state == "on"
+
+
+async def test_second_contact_updates_the_list(hass) -> None:
+    other = "binary_sensor.contact_b"
+    hass.states.async_set(other, "off")
+    with patched_gateway(hass):
+        await _setup(
+            hass, window_contacts=[CONTACT, other], window_open_delay_seconds=60
+        )
+        hass.states.async_set(CONTACT, "on")
+        await settle(hass)
+        hass.states.async_set(other, "on")
+        await settle(hass)
+        assert hass.states.get(WINDOW).attributes["contacts_open"] == [CONTACT, other]
+        hass.states.async_set(other, "off")
+        await settle(hass)
+        assert hass.states.get(WINDOW).attributes["contacts_open"] == [CONTACT]
