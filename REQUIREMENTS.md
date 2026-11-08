@@ -57,4 +57,4 @@ Native weekly schedules, presets beyond frost, night setback, vacation with a re
 
 ## Roadmap
 
-The ordered roadmap lives in the maintainer's planning notes outside this repo. Candidates, each as profile operations where possible: vacation and presence delays, native weekly schedules, validation that no weekly schedule lives on the device, presets, open-plan rooms, humidity use, learning.
+The ordered roadmap lives in the maintainer's planning notes outside this repo. Candidates, each as profile operations where possible: vacation, native weekly schedules, validation that no weekly schedule lives on the device, presets, open-plan rooms, humidity use, learning.

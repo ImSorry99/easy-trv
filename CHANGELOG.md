@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Setting **Away delay** (`away_delay_minutes`, section Presence, 0 to 120 minutes, default 15): away counts only after the presence entity has read away for the whole delay. Home counts at once. 0 keeps the old behaviour
+- The select `select.easy_trv_presence` on the new device **Easy TRV**: force presence to **Home** or **Away** for every room with presence, or leave it on **Automatic**. It returns to Automatic when the global presence entity changes. Event `easy_trv_presence_forced`
+- The number `number.easy_trv_away_setback` on the same device: the global setback as an entity
+- Per room the binary sensors `binary_sensor.<room>_window` (any contact open) and `binary_sensor.<room>_presence` (the room reads home; attribute `away_from` while the delay runs)
+- The Easy TRV card (`type: custom:easy-trv-card`) with a house row, a block per room and collapsed statistics. It is loaded by the integration; nothing to add under dashboard resources. Options `rooms`, `house` and `statistics`
+- Diagnostics: the forced presence of the house, and per room whether it reads home and when away will count
+
+### Changed
+
+- A change of the setback or the away delay in the options is applied at once, without a reload
+- While presence is forced, the heating state hint names "Easy TRV presence" instead of the entity
+
 ## [0.8.0] - 2026-11-02
 
 ### Fixed

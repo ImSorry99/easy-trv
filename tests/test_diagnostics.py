@@ -5,6 +5,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import CoreState
 from homeassistant.helpers.json import ExtendedJSONEncoder
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
@@ -64,7 +65,7 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert set(diag) == {"options", "profiles", "profile_errors", "rooms"}
+    assert set(diag) == {"options", "profiles", "profile_errors", "house", "rooms"}
     assert diag["options"] == OPTIONS
     assert diag["profiles"] == ["sonoff_trvzb_native"]
     assert diag["profile_errors"] == []
@@ -85,6 +86,8 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
         "window_off_at",
         "silent_contacts",
         "deviations",
+        "presence_home",
+        "away_from",
     }
     assert room["config"]["name"] == "Living"
     assert room["config"]["trvs"][0]["ieee"] == IEEE_A
@@ -92,6 +95,27 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
     assert room["state"]["source"] == "external"
     assert room["not_in_profile"] == {}
     # Plain data that Home Assistant can serialise for the download.
+    json.dumps(diag, cls=ExtendedJSONEncoder)
+
+
+async def test_diagnostics_house_and_room_presence(hass, entry) -> None:
+    await start(hass, entry)
+    subentry_id = next(iter(entry.subentries))
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diag["house"] == {"option": "auto", "forced_at": None}
+    room = diag["rooms"][subentry_id]
+    # The test room has no presence.
+    assert room["presence_home"] is None
+    assert room["away_from"] is None
+    assert room["settings"]["away_delay_minutes"] == 15
+
+    entry.runtime_data.house.option = "away"
+    entry.runtime_data.house.forced_at = dt_util.utcnow()
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["house"]["option"] == "away"
+    assert diag["house"]["forced_at"] == entry.runtime_data.house.forced_at.isoformat()
     json.dumps(diag, cls=ExtendedJSONEncoder)
 
 

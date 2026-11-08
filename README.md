@@ -79,6 +79,7 @@ Every setting exists in three layers, and the most specific one that is set wins
 | Presence entity | a person, device tracker, zone, group, binary sensor or input boolean | none | Where presence comes from (see [Presence](#presence)). A room chooses **Global**, **None** or its own entity. |
 | When presence is unknown | away, home | away | How an unknown or unavailable state of the presence entity counts. |
 | While away | lower, off | lower | Lower takes the target down by the setback; off switches the room off like an open window. |
+| Away delay (global only) | 0 to 120 minutes | 15 | How long presence must read away before it counts. 0 = away counts at once. Home counts at once. |
 | Setback | 0.5 to 10 K in 0.5 K steps | 3 | How far the target goes down while away, never below the frost protection temperature. |
 | Collect statistics | off, hidden, visible | off | Whether the room has the [statistics sensors](#statistics): **off** creates none and removes existing ones, **hidden** creates them and keeps collecting but hides them from lists and automatic dashboards, **visible** shows them. See [Collecting statistics](#collecting-statistics). |
 | Profile (rooms only) | `auto` or a profile id | `auto` | `auto` takes the first profile that matches all thermostats of the room. Or choose a shipped or [user profile](#profiles). The profile is not part of the integration options. |
@@ -94,6 +95,49 @@ The thermostat settings (open-window detection, adaptive mode, hysteresis, frost
 **Hiding the thermostat entities.** With **Hide thermostat entities** on (global or per room, off by default) Easy TRV hides, for each thermostat of the room, its ZHA climate entity and the six device settings it writes: external temperature, external temperature source, open-window detection, hysteresis, adaptive mode and frost protection temperature. Nothing else is hidden; child lock, the boost and timer buttons, valve opening, battery and the sensors stay as they are. Settings left "as set in the thermostat" stay visible: with the open-window detection or the adaptive mode on that choice, its entity is not hidden, because you control it there. Hidden entities keep working: Easy TRV reads and writes them as before and automations still see them. They only drop out of automatic dashboards. The setting is applied at every start of the integration, and saving it reloads the integration.
 
 The entities come back when you turn the setting off, when the thermostat or the room is removed from Easy TRV, or when the integration is removed. An entity you showed again by hand stays visible while the setting is on, and one you hid yourself is never shown by Easy TRV. Do not *disable* the ZHA climate entities: a disabled ZHA climate entity has no state and Easy TRV skips that thermostat.
+
+## Entities
+
+Besides the room thermostat and the sensors, Easy TRV has these entities.
+
+On the house device **Easy TRV**:
+
+| Entity | What it is |
+|---|---|
+| `select.easy_trv_presence` | Forces presence to home or away for the house (see [Force presence for the house](#force-presence-for-the-house)). |
+| `number.easy_trv_away_setback` | The global setback, 0.5 to 10 K in 0.5 K steps. It is a configuration entity. It writes the option **Setback** and applies it at once, without a reload; rooms that are lowered get the new target. Rooms with their own setback keep it; the attribute `rooms_with_own_setback` lists them. |
+
+On each room's device (read-only, not hidden):
+
+| Entity | What it is |
+|---|---|
+| `binary_sensor.<room>_window` | On while any window contact of the room reads open (without the opening delay). Only for rooms with window contacts. Attribute `contacts_open`. |
+| `binary_sensor.<room>_presence` | On while the room reads home (after the away delay, with forcing applied). Only for rooms with presence. Attributes `source` (`entity` or `forced`), `presence_entity` and `away_from`. |
+
+## The Easy TRV card
+
+The card comes with Easy TRV and is loaded automatically. There is nothing to add under dashboard resources. It appears in the card picker as **Easy TRV**. Or add it in YAML:
+
+```yaml
+type: custom:easy-trv-card
+```
+
+This shows the house row and every Easy TRV room. Options (all optional; the visual editor has them too):
+
+```yaml
+type: custom:easy-trv-card
+rooms:                      # room thermostats; filters and orders the rooms
+  - climate.living_room
+  - climate.bedroom
+house: false                # hide the house row (default: shown)
+statistics: false           # never show the statistics part (default: shown)
+```
+
+- **House row:** the presence select as three buttons, and the setback with − and + in 0.5 K steps.
+- **Each room:** name, temperature, target with − and +, the modes Heat, Frost and Off, icons for open window, away and lowered target, and the heating state. When the state is not `heating`, the hint says why. The edge of the block is tinted by the state group. A tap on the name opens the room thermostat.
+- **Statistics:** collapsed per room; shown when the statistics sensors exist.
+
+A part with no entity behind it (no contacts, no presence, statistics off) is simply not shown.
 
 ## Room thermostat
 
@@ -170,14 +214,26 @@ Choose a presence entity in the integration options (**Presence**); every room w
 | `group` | `home` or `on` | `not_home` or `off` |
 | `binary_sensor`, `input_boolean` | `on` | `off` |
 
-Any other state (`unknown`, `unavailable`, a missing entity) counts as set in **When presence is unknown**: away by default, or home. Away counts at once; for a delay, use a template or group helper in Home Assistant.
+Any other state (`unknown`, `unavailable`, a missing entity) counts as set in **When presence is unknown**: away by default, or home. Away counts only after the **Away delay** (15 minutes by default; 0 = at once). Home counts at once and ends a running delay.
 
 - **Lower** (default): the thermostats get the room's target minus the setback (default 3 K), never below the frost protection temperature; a target already below it stays. The room thermostat keeps showing your target; the attribute `away_target` shows the value sent, and the heating state is `setback_away`.
 - **Off:** the room is held off like with an open window (heating state `off_away`). It is a third hold beside the window and the outdoor cut-off; the room returns when all are clear.
+- **Away delay:** the entity must read away for the whole delay without a break. While it runs the room behaves as home, and the room's presence sensor has the attribute `away_from` with the time away will count. An entity that has been away for longer than the delay when Easy TRV starts counts as away at once. The delay is global; there is none per room.
 - **Home again:** the target (and the mode) come back.
 - Presence acts only while the room's mode is **Heat**; **Off** stays off and **Frost protection** is below any setback.
 - **Override:** a new target while away, set in Home Assistant or turned at a knob, holds until presence reads home: the room heats normally (with **Off**, it ends the away hold). The next time everybody leaves, presence acts again. The override survives a restart (attribute `away_override`). A thermostat that still reports the target from before the room was lowered is not taken as a knob turn; it gets the lowered value again.
 - The event `easy_trv_away` (`room`, `state`: `on` or `off`) fires when presence starts or stops acting on the room. The room thermostat shows `presence` (`home`, `away` or `none`).
+
+### Force presence for the house
+
+The select `select.easy_trv_presence` on the device **Easy TRV** has three options: **Automatic** (default), **Home** and **Away** (German: Automatisch, Zuhause, Abwesend).
+
+- **Home** and **Away** override what every room with presence reads, at once and without the away delay. Rooms without presence are not affected.
+- The select returns to **Automatic** by itself when the global presence entity changes between home and away. Without a global presence entity it stays until you set it back. A change of a room's own entity does not end it.
+- After a restart the option stays, unless the global presence entity reads differently than when you set it. Then it returns to **Automatic**.
+- Attributes: `presence_entity` and `forced_at` (the time the option was set; absent on Automatic).
+- While it is forced, the heating state hint names "Easy TRV presence" instead of the entity.
+- The event `easy_trv_presence_forced` (`option`: `auto`, `home` or `away`; `reason`: `user` or `presence_changed`) fires when the option changes.
 
 ## How it behaves
 
@@ -288,7 +344,7 @@ With debug logging on for `custom_components.easy_trv` (Settings > Devices & ser
 
 ### Diagnostics
 
-**Settings > Devices & services > Easy TRV > Download diagnostics** contains the options, the loaded profiles and skipped profile files, and for every room its configuration, the resolved settings (what the room runs with after the three layers), its full state (including timestamps and attempt counters), the holds (window and outdoor), the heating state with its reasons, the time of its last change, the deadline of a running open-window delay, the silent window contacts and the thermostats that deviate, the notes of thermostats on a schedule or in a window phase, and the latest observations per thermostat (kind, capability, raw value, time). It includes the thermostats' IEEE addresses and entity ids, so look through it before posting it publicly.
+**Settings > Devices & services > Easy TRV > Download diagnostics** contains the options, the forced presence of the house (`house.option`, `house.forced_at`), the loaded profiles and skipped profile files, and for every room its configuration, the resolved settings (what the room runs with after the three layers), its full state (including timestamps and attempt counters), the holds (window and outdoor), the heating state with its reasons, the time of its last change, the deadline of a running open-window delay, the silent window contacts and the thermostats that deviate, whether it reads home (`presence_home`) and when away will count (`away_from`), the notes of thermostats on a schedule or in a window phase, and the latest observations per thermostat (kind, capability, raw value, time). It includes the thermostats' IEEE addresses and entity ids, so look through it before posting it publicly.
 
 ## Statistics
 
@@ -397,7 +453,7 @@ Firmware minimums are part of a profile. Below the profile's minimum firmware no
 - **Writes while a room is off.** No temperature is written while the room is off or held. Whether a write could wake an `off` thermostat is one of the open checks in [`docs/testing-on-device.md`](docs/testing-on-device.md).
 - **ZHA and the Sonoff TRVZB only.** Other models need their own profile.
 - **ZHA's internal API.** Writing and verifying attributes needs ZHA's internal API. Easy TRV keeps all of it in one adapter module, so a future Home Assistant change is fixed in one place. If the API breaks, the `zha_api_incompatible` issue says so.
-- **Presence:** one entity per room (the global one or its own), no vacation with a return time, no delay before away counts.
+- **Presence:** one entity per room (the global one or its own), no vacation with a return time, no away delay per room, no forced presence per room.
 - **Not used yet:** humidity sensors, presets, battery warnings.
 
 ## Removal
