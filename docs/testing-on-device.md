@@ -460,3 +460,29 @@ The diagnostics contain the thermostats' IEEE addresses and entity ids. Remove o
 | S10: adaptive mode with the external sensor (±0.5 K over an evening, valve behaviour, swing) | | |
 | S11: `hvac_action` of the TRVZB in ZHA (attribute there / `heating` seen / delay) | | |
 | S11 and 8.5 with adaptive mode on (Schlafzimmer): `hvac_action` back to `idle` when the valve closed (yes / no), heating time grew with a closed valve (yes / no, how long) | | |
+
+## 12. The Easy TRV card (0.9)
+
+The card is served by the integration; nothing goes under dashboard resources. Work through it in a browser and on a phone, in English and in German. Write what you see in the Result column.
+
+| Check | Result |
+|---|---|
+| After the update restart the browser (hard reload once): the card "Easy TRV" is in the card picker without adding a resource | |
+| `type: custom:easy-trv-card` and nothing else: the house row and every Easy TRV room are there, in the order of the rooms | |
+| `rooms:` with one room thermostat: only that room, and no other; two rooms in reversed order are shown in that order | |
+| `house: false` hides the house row; `statistics: false` never shows a Statistik toggle | |
+| Visual editor: the three options change the card and are written to the YAML | |
+| A room without window contacts, without presence entity and with statistics off: the block shows only what it has (no window or presence icon, no Statistik toggle), nothing breaks | |
+| House row, presence: Automatisch / Zuhause / Abwesend switch the select; the active one is marked; a forced option shows "erzwungen seit HH:MM" with the right time; Automatisch removes it | |
+| House row, setback: − and + change `number.easy_trv_away_setback` by 0.5 K within 0.5 to 10 K; a room with its own setback shows the hint | |
+| Room target: − and + change the target by the room's step (`target_temp_step`) and stay within the minimum and maximum of the thermostat | |
+| Room mode: Heizen / Frost / Aus set heat / frost protection / off, and the active one is marked | |
+| Status line: window open icon follows the contact; home or "abwesend ab HH:MM" while the delay runs; the lowered target shows while the room is lowered | |
+| Why line: only when the heating state is not `heating`; shows the hint (for example "Abgesenkt: abwesend (person.…)", "Notbetrieb: …") | |
+| Edge colour of the block: green (heating, frost), blue (lowered, off, window pending), orange (restricted), red (emergency, fault) | |
+| Tap on the room name opens the more-info dialog of the room thermostat | |
+| Statistik is collapsed by default; opening it shows control deviation, heating time, window openings and open time where the sensors exist; failed writes and dropouts only when above 0; a tap on a value opens its more-info dialog with the history | |
+| Rename an entity id of the room thermostat or the heating state sensor: the card still finds it | |
+| Dark theme: text, buttons and the block background are readable | |
+| Phone width (about 360 px): nothing cut off, buttons wrap, every button is easy to hit | |
+| German interface: all labels German; English interface: all labels English | |

@@ -14,6 +14,7 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
+from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 
 from custom_components.easy_trv import issues
@@ -51,6 +52,7 @@ from custom_components.easy_trv.core.settings import (
     resolve_presence_entity,
     resolve_settings,
 )
+from custom_components.easy_trv.frontend import async_register_card
 from custom_components.easy_trv.house import HousePresence
 from custom_components.easy_trv.labels import (
     async_capability_labels,
@@ -611,6 +613,8 @@ async def async_setup_entry(  # noqa: PLR0915 - the steps of one entry
         msg = f"ZHA is not available: {err}"
         raise ConfigEntryNotReady(msg) from err
     issues.clear_zha_api(hass)
+    integration = await async_get_integration(hass, DOMAIN)
+    await async_register_card(hass, str(integration.version))
 
     profiles = await async_load_profiles(hass)
     for error in profiles.errors:
