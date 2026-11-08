@@ -934,8 +934,9 @@ async def test_unloading_releases_the_listeners_of_the_statistics(
 ) -> None:
     await start(hass, big_room)
     controller = room_of(big_room)
-    # The room thermostat, the state sensor and the thirteen statistics sensors.
-    assert len(controller._update_listeners) == 2 + 13  # noqa: SLF001
+    # The room thermostat, the state sensor, the window sensor and the thirteen
+    # statistics sensors.
+    assert len(controller._update_listeners) == 3 + 13  # noqa: SLF001
 
     assert await hass.config_entries.async_unload(big_room.entry_id)
 

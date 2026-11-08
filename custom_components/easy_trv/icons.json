@@ -1,5 +1,20 @@
 {
   "entity": {
+    "binary_sensor": {
+      "window": {
+        "default": "mdi:window-closed-variant",
+        "state": {
+          "on": "mdi:window-open-variant"
+        }
+      },
+      "presence": {
+        "default": "mdi:home-outline",
+        "state": {
+          "on": "mdi:home-account",
+          "off": "mdi:home-export-outline"
+        }
+      }
+    },
     "climate": {
       "room": {
         "default": "mdi:thermostat",

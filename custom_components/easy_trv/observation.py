@@ -270,14 +270,21 @@ class PresenceInput:
         feed: Callable[[LogicEvent], None],
         delay: timedelta,
         house: ForcedPresence | None = None,
+        changed: Callable[[], None] | None = None,
     ) -> None:
-        """Watch ``entity_id``; an unknown state reads as ``unknown_is_away``."""
+        """Watch ``entity_id``; an unknown state reads as ``unknown_is_away``.
+
+        ``changed`` is called when what the room shows of presence may have
+        changed although nothing is fed: the delay starts or ends, the house
+        forces or releases.
+        """
         self._hass = hass
         self._entity_id = entity_id
         self._unknown_is_away = unknown_is_away
         self._feed = feed
         self._delay = delay
         self._house = house
+        self._changed = changed
         # What the entity reads, and what counts (delay and forcing applied).
         self._raw_away = False
         # When the entity began to read as it does now.
@@ -356,6 +363,8 @@ class PresenceInput:
             else:
                 counted = True
         if counted is self._away:
+            if feed and self._changed is not None:
+                self._changed()
             return
         self._away = counted
         if feed:
@@ -449,6 +458,20 @@ class HoldInputs:
         # The timer that raises the issue of silent contacts, and whether it has.
         self._silent_timer: CALLBACK_TYPE | None = None
         self._silent_raised = False
+
+    @property
+    def open_contacts(self) -> tuple[str, ...]:
+        """Return the contacts that read open now, sorted, before the open delay.
+
+        A contact that says nothing counts as it last was.
+        """
+        return tuple(
+            sorted(
+                entity_id
+                for entity_id in self._config.window_contacts
+                if self._last.get(entity_id)
+            )
+        )
 
     @property
     def contacts_reliable(self) -> bool:

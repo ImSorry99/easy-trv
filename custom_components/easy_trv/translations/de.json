@@ -250,6 +250,14 @@
         "name": "{thermostat} Ausfälle"
       }
     },
+    "binary_sensor": {
+      "window": {
+        "name": "Fenster"
+      },
+      "presence": {
+        "name": "Anwesenheit"
+      }
+    },
     "select": {
       "presence": {
         "name": "Anwesenheit",

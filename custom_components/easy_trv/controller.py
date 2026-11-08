@@ -351,6 +351,7 @@ class RoomController:
                 feed=self._dispatch,
                 delay=presence_delay,
                 house=house,
+                changed=self._notify_update,
             )
             if self._presence_entity
             else None
@@ -543,6 +544,21 @@ class RoomController:
     def presence_away_from(self) -> datetime | None:
         """Return when away will count while the away delay runs, else ``None``."""
         return None if self._presence is None else self._presence.away_from
+
+    @property
+    def has_window_contacts(self) -> bool:
+        """Return whether the room has window contacts."""
+        return bool(self._config.window_contacts)
+
+    @property
+    def open_contacts(self) -> tuple[str, ...]:
+        """Return the window contacts that read open now, before the open delay."""
+        return self._holds.open_contacts
+
+    @property
+    def presence_home(self) -> bool | None:
+        """Return whether the room reads home; ``None`` without presence."""
+        return None if self._presence is None else not self._state.away
 
     @property
     def presence(self) -> str:

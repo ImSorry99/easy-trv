@@ -250,6 +250,14 @@
         "name": "{thermostat} dropouts"
       }
     },
+    "binary_sensor": {
+      "window": {
+        "name": "Window"
+      },
+      "presence": {
+        "name": "Presence"
+      }
+    },
     "select": {
       "presence": {
         "name": "Presence",

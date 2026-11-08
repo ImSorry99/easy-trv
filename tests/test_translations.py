@@ -235,7 +235,12 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["selector"]["sensor_timeout"]["options"]) == {"off"}
     # The select entity is gone: frost protection is the mode ``auto`` of the
     # room thermostat, and this is its label.
-    assert set(data["entity"]) == {"climate", "select", "sensor"}
+    assert set(data["entity"]) == {
+        "binary_sensor",
+        "climate",
+        "select",
+        "sensor",
+    }
     assert set(data["entity"]["climate"]) == {"room"}
     assert set(data["entity"]["climate"]["room"]) == {"state"}
     assert set(data["entity"]["climate"]["room"]["state"]) == {"auto"}
