@@ -76,6 +76,11 @@
           "away": "mdi:home-export-outline"
         }
       }
+    },
+    "number": {
+      "away_setback": {
+        "default": "mdi:home-thermometer-outline"
+      }
     }
   }
 }

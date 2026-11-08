@@ -267,6 +267,11 @@
           "away": "Away"
         }
       }
+    },
+    "number": {
+      "away_setback": {
+        "name": "Away setback"
+      }
     }
   },
   "issues": {

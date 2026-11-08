@@ -33,6 +33,7 @@ SUBENTRY_ROOM: Final = "room"
 PLATFORMS: Final = [
     Platform.BINARY_SENSOR,
     Platform.CLIMATE,
+    Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
 ]

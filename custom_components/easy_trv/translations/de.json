@@ -267,6 +267,11 @@
           "away": "Abwesend"
         }
       }
+    },
+    "number": {
+      "away_setback": {
+        "name": "Abwesenheits-Absenkung"
+      }
     }
   },
   "issues": {

@@ -238,6 +238,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["entity"]) == {
         "binary_sensor",
         "climate",
+        "number",
         "select",
         "sensor",
     }

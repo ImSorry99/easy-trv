@@ -77,6 +77,7 @@ from custom_components.easy_trv.core.model import (
     SetRoomSetpoint,
     SetSetpoint,
     SetStatus,
+    SettingsChanged,
     Signal,
     Start,
     Tick,
@@ -1016,6 +1017,23 @@ class RoomController:
         self._trv_counts[trv]["writes"] += 1
         if not self._stopped:
             self._tell_update_listeners()
+
+    def apply_live_settings(
+        self, *, away_setback: float, away_delay: timedelta
+    ) -> None:
+        """Apply the settings that change without a reload.
+
+        ``away_setback`` is what this room resolves to (its own value if it has
+        one, else the global one), so a room with its own setback sees no
+        change. A lowered room gets the new target written at once; the delay
+        applies from the next away.
+        """
+        if self._presence is not None:
+            self._presence.set_delay(away_delay)
+        if away_setback == self._config.away_setback:
+            return
+        self._config = replace(self._config, away_setback=away_setback)
+        self._dispatch(SettingsChanged(away_setback))
 
     # --- Logic dispatch --------------------------------------------------
 

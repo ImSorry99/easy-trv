@@ -26,6 +26,8 @@ from custom_components.easy_trv.adapters.zha_gateway import (
 )
 from custom_components.easy_trv.const import (
     CONF_AREA,
+    CONF_AWAY_DELAY,
+    CONF_AWAY_SETBACK,
     CONF_HYSTERESIS,
     CONF_OUTDOOR_SENSOR,
     CONF_PRESENCE_UNKNOWN,
@@ -84,6 +86,10 @@ _LOGGER = logging.getLogger(__name__)
 _RETIRED_SELECT_SUFFIX: Final = "_operating_mode"
 _RETIRED_SENSOR_SUFFIX: Final = "_status"
 
+# The options that apply to running rooms without a reload.
+LIVE_OPTION_KEYS: Final = frozenset({CONF_AWAY_SETBACK, CONF_AWAY_DELAY})
+_MISSING: Final = object()
+
 # The hysteresis choice that version 1 entries could store and version 2 retired.
 _HYSTERESIS_LEAVE = "leave"
 
@@ -111,6 +117,11 @@ class EasyTrvRuntimeData:
     areas: dict[str, str | None]  # area name by subentry id (None: no area)
     labels: Mapping[str, str]  # plain-language setting name by intent
     house: HousePresence
+    # What the options and the room subentries held at setup (or at the last
+    # change that needed no reload); the update listener diffs against it.
+    options: dict[str, Any]
+    subentry_data: dict[str, Mapping[str, Any]]
+    subentry_titles: dict[str, str]
 
 
 type EasyTrvConfigEntry = ConfigEntry[EasyTrvRuntimeData]
@@ -655,7 +666,16 @@ async def async_setup_entry(  # noqa: PLR0915 - the steps of one entry
         hass, {ieee for controller in rooms.values() for ieee in controller.ieees}
     )
     entry.runtime_data = EasyTrvRuntimeData(
-        gateway, profiles, rooms, resolved, areas, labels, house
+        gateway,
+        profiles,
+        rooms,
+        resolved,
+        areas,
+        labels,
+        house,
+        dict(entry.options),
+        {sid: dict(sub.data) for sid, sub in entry.subentries.items()},
+        {sid: sub.title for sid, sub in entry.subentries.items()},
     )
     _remove_unused_entities(hass, entry, invalid)
 
@@ -751,8 +771,34 @@ def _is_retired(registered: er.RegistryEntry) -> bool:
 async def _async_reload_on_update(
     hass: HomeAssistant, entry: EasyTrvConfigEntry
 ) -> None:
-    """Reload when the options or the rooms (subentries) change."""
-    hass.config_entries.async_schedule_reload(entry.entry_id)
+    """Apply a change of the live settings; reload for any other change.
+
+    Only ``away_setback_kelvin`` and ``away_delay_minutes`` changing in the
+    options (and nothing in the rooms) is applied to the running rooms.
+    """
+    data = entry.runtime_data
+    subentries = {sid: dict(sub.data) for sid, sub in entry.subentries.items()}
+    changed = {
+        key
+        for key in data.options.keys() | entry.options.keys()
+        if data.options.get(key, _MISSING) != entry.options.get(key, _MISSING)
+    }
+    titles = {sid: sub.title for sid, sub in entry.subentries.items()}
+    if (
+        subentries != data.subentry_data
+        or titles != data.subentry_titles
+        or not changed <= LIVE_OPTION_KEYS
+    ):
+        hass.config_entries.async_schedule_reload(entry.entry_id)
+        return
+    data.options = dict(entry.options)
+    delay = timedelta(minutes=resolve_settings(entry.options, {}).away_delay_minutes)
+    for subentry_id, controller in data.rooms.items():
+        settings = resolve_settings(entry.options, subentries[subentry_id])
+        data.settings[subentry_id] = settings
+        controller.apply_live_settings(
+            away_setback=settings.away_setback_kelvin, away_delay=delay
+        )
 
 
 async def async_remove_entry(hass: HomeAssistant, _entry: ConfigEntry) -> None:
