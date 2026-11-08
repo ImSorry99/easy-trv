@@ -249,6 +249,16 @@
       "dropouts": {
         "name": "{thermostat} Ausfälle"
       }
+    },
+    "select": {
+      "presence": {
+        "name": "Anwesenheit",
+        "state": {
+          "auto": "Automatisch",
+          "home": "Zuhause",
+          "away": "Abwesend"
+        }
+      }
     }
   },
   "issues": {
@@ -474,7 +484,8 @@
         "why_unavailable": "nicht verfügbar",
         "why_unknown": "unbekannt",
         "why_missing": "gibt es nicht",
-        "away": "{name} abwesend"
+        "away": "{name} abwesend",
+        "house": "Easy-TRV-Anwesenheit"
       }
     },
     "outdoor_cutoff": {

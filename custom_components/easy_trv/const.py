@@ -21,13 +21,16 @@ DOMAIN: Final = "easy_trv"
 # Bus event fired when the heating state of a room changes.
 EVENT_STATE_CHANGED: Final = "easy_trv_state_changed"
 
+# Bus event fired when the house presence is forced or released.
+EVENT_PRESENCE_FORCED: Final = "easy_trv_presence_forced"
+
 # Room setting value meaning "use the global setting"
 SETTING_GLOBAL: Final = _settings.GLOBAL
 
 # Config subentries
 SUBENTRY_ROOM: Final = "room"
 
-PLATFORMS: Final = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS: Final = [Platform.CLIMATE, Platform.SELECT, Platform.SENSOR]
 
 # Room configuration keys
 CONF_TRVS: Final = "trvs"

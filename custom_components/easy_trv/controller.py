@@ -18,7 +18,7 @@ from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Final, assert_never
+from typing import TYPE_CHECKING, Any, Final, Literal, assert_never
 
 from homeassistant.components.climate.const import ATTR_HVAC_ACTION, HVACAction
 from homeassistant.const import (
@@ -104,6 +104,7 @@ from custom_components.easy_trv.core.setpoint import operation as room_operation
 from custom_components.easy_trv.core.values import parse_temperature
 from custom_components.easy_trv.labels import thermostat_name
 from custom_components.easy_trv.observation import (
+    ForcedPresence,
     HoldInputs,
     KnobTimers,
     PresenceInput,
@@ -288,6 +289,7 @@ class RoomController:
         presence_entity: str | None = None,
         presence_unknown: str = "away",
         presence_delay: timedelta = timedelta(0),
+        house: ForcedPresence | None = None,
     ) -> None:
         """Wire the room logic to Home Assistant, the profile and the gateway.
 
@@ -296,7 +298,8 @@ class RoomController:
         ``outdoor_sensor`` is the global outdoor temperature sensor, which only
         matters for a room with an outdoor cut-off. ``presence_entity`` is the
         room's resolved presence entity (only with an ``away_action``); an
-        unknown state of it counts as ``presence_unknown``.
+        unknown state of it counts as ``presence_unknown``. ``house`` can force
+        what the room reads for presence.
         """
         self._hass = hass
         self._config = config
@@ -339,6 +342,7 @@ class RoomController:
         self._presence_entity = (
             presence_entity if config.away_action is not None else None
         )
+        self._house = house
         self._presence = (
             PresenceInput(
                 hass,
@@ -346,6 +350,7 @@ class RoomController:
                 unknown_is_away=presence_unknown != "home",
                 feed=self._dispatch,
                 delay=presence_delay,
+                house=house,
             )
             if self._presence_entity
             else None
@@ -524,6 +529,15 @@ class RoomController:
     def presence_entity(self) -> str | None:
         """Return the room's presence entity, ``None`` without presence."""
         return self._presence_entity
+
+    @property
+    def presence_source(self) -> Literal["entity", "forced"] | None:
+        """Return what decides presence: the entity or the house; ``None`` if none."""
+        if self._presence is None:
+            return None
+        if self._house is not None and self._house.forced_away() is not None:
+            return "forced"
+        return "entity"
 
     @property
     def presence_away_from(self) -> datetime | None:

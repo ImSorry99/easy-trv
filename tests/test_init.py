@@ -102,10 +102,14 @@ async def test_setup_creates_room_device_and_state_sensor(hass, entry) -> None:
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     by_id = {e.entity_id: e for e in entities}
     assert {"climate.living_heating", "sensor.living_heating_state"} <= by_id.keys()
-    assert {e.domain for e in entities} == {"climate", "sensor"}
+    assert {e.domain for e in entities} == {"climate", "select", "sensor"}
     assert by_id["sensor.living_heating_state"].unique_id == f"{subentry_id}_state"
     assert by_id["climate.living_heating"].unique_id == f"{subentry_id}_climate"
-    assert {e.config_subentry_id for e in entities} == {subentry_id}
+    # The presence select belongs to the house, not to a room.
+    assert {e.config_subentry_id for e in entities if e.domain != "select"} == {
+        subentry_id
+    }
+    assert by_id["select.easy_trv_presence"].config_subentry_id is None
     assert entry.runtime_data.rooms.keys() == {subentry_id}
     # The capability labels are loaded once per entry, for the Repairs texts.
     labels = entry.runtime_data.labels

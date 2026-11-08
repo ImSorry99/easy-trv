@@ -249,6 +249,16 @@
       "dropouts": {
         "name": "{thermostat} dropouts"
       }
+    },
+    "select": {
+      "presence": {
+        "name": "Presence",
+        "state": {
+          "auto": "Automatic",
+          "home": "Home",
+          "away": "Away"
+        }
+      }
     }
   },
   "issues": {
@@ -474,7 +484,8 @@
         "why_unavailable": "unavailable",
         "why_unknown": "unknown",
         "why_missing": "does not exist",
-        "away": "{name} away"
+        "away": "{name} away",
+        "house": "Easy TRV presence"
       }
     },
     "outdoor_cutoff": {

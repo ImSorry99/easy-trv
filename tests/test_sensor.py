@@ -808,3 +808,18 @@ async def test_the_heating_state_shows_the_away_hold(hass) -> None:
     await start(hass, entry)
 
     assert hass.states.get(STATE_SENSOR).state == "off_away"
+
+
+async def test_the_hint_names_the_house_while_forced(hass) -> None:
+    hass.states.async_set("person.a", "home", {"friendly_name": "Alex"})
+    for entity_id in ("climate.a", "climate.b"):
+        hass.states.async_set(entity_id, "heat", {"temperature": 21.0})
+    options = {**FAST_OPTIONS, "presence_entity": "person.a"}
+    entry = make_entry(hass, [room_data()], options)
+    await start(hass, entry)
+
+    await entry.runtime_data.house.async_set_option("away")
+    await settle(hass)
+
+    assert hass.states.get(STATE_SENSOR).state == "setback_away"
+    assert hint(hass) == "Easy TRV presence away"

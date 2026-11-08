@@ -235,7 +235,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["selector"]["sensor_timeout"]["options"]) == {"off"}
     # The select entity is gone: frost protection is the mode ``auto`` of the
     # room thermostat, and this is its label.
-    assert set(data["entity"]) == {"climate", "sensor"}
+    assert set(data["entity"]) == {"climate", "select", "sensor"}
     assert set(data["entity"]["climate"]) == {"room"}
     assert set(data["entity"]["climate"]["room"]) == {"state"}
     assert set(data["entity"]["climate"]["room"]["state"]) == {"auto"}
@@ -321,7 +321,7 @@ def test_the_auto_mode_has_the_frost_protection_icon() -> None:
     assert icons["entity"]["climate"]["room"]["state"]["auto"] == (
         "mdi:snowflake-thermometer"
     )
-    assert "select" not in icons["entity"]
+    assert set(icons["entity"]["select"]) == {"presence"}
 
 
 def test_room_device_name_is_translated() -> None:
@@ -481,6 +481,7 @@ HINT_EN = {
     "schedule": "{name} runs its own schedule",
     "window_phase": "{name}: own window detection active",
     "away": "{name} away",
+    "house": "Easy TRV presence",
     "why_unavailable": "unavailable",
     "why_unknown": "unknown",
     "why_missing": "does not exist",
@@ -493,6 +494,7 @@ HINT_DE = {
     "schedule": "{name} läuft im eigenen Wochenplan",
     "window_phase": "{name}: eigene Fenstererkennung aktiv",
     "away": "{name} abwesend",
+    "house": "Easy-TRV-Anwesenheit",
     "why_unavailable": "nicht verfügbar",
     "why_unknown": "unbekannt",
     "why_missing": "gibt es nicht",

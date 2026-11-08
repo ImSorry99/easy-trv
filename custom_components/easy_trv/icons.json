@@ -51,6 +51,16 @@
       "dropouts": {
         "default": "mdi:lan-disconnect"
       }
+    },
+    "select": {
+      "presence": {
+        "default": "mdi:home-account",
+        "state": {
+          "auto": "mdi:home-account",
+          "home": "mdi:home",
+          "away": "mdi:home-export-outline"
+        }
+      }
     }
   }
 }

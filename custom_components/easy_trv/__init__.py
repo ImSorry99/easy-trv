@@ -28,10 +28,12 @@ from custom_components.easy_trv.const import (
     CONF_AREA,
     CONF_HYSTERESIS,
     CONF_OUTDOOR_SENSOR,
+    CONF_PRESENCE_UNKNOWN,
     CONF_STATISTICS,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
     CONF_WINDOW_CONTACTS,
+    DEFAULT_PRESENCE_UNKNOWN,
     DEFAULT_SETPOINT_MAX,
     DEFAULT_SETPOINT_MIN,
     DOMAIN,
@@ -47,6 +49,7 @@ from custom_components.easy_trv.core.settings import (
     resolve_presence_entity,
     resolve_settings,
 )
+from custom_components.easy_trv.house import HousePresence
 from custom_components.easy_trv.labels import (
     async_capability_labels,
     localized_number,
@@ -107,6 +110,7 @@ class EasyTrvRuntimeData:
     settings: dict[str, RoomSettings]  # resolved settings by subentry id
     areas: dict[str, str | None]  # area name by subentry id (None: no area)
     labels: Mapping[str, str]  # plain-language setting name by intent
+    house: HousePresence
 
 
 type EasyTrvConfigEntry = ConfigEntry[EasyTrvRuntimeData]
@@ -452,6 +456,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
     gateway: TrvGateway,
     profiles: Mapping[str, Profile],
     labels: Mapping[str, str],
+    house: HousePresence,
 ) -> tuple[RoomController, Profile, RoomSettings]:
     """Create the controller of one ``room`` subentry."""
     settings = resolve_settings(entry.options, subentry.data)
@@ -481,6 +486,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
         presence_entity=presence_entity,
         presence_unknown=settings.presence_unknown,
         presence_delay=timedelta(minutes=settings.away_delay_minutes),
+        house=house,
     )
     return controller, profile, settings
 
@@ -572,7 +578,20 @@ async def _set_up_platforms(
     _reconcile_hidden_entities(hass, entry, profiles, settings, invalid, started)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> bool:
+def _build_house(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> HousePresence:
+    """Create the house of ``entry``: its global presence entity and policy."""
+    unknown = entry.options.get(CONF_PRESENCE_UNKNOWN, DEFAULT_PRESENCE_UNKNOWN)
+    return HousePresence(
+        hass,
+        entry.entry_id,
+        resolve_presence_entity(entry.options, {}),
+        unknown_is_away=unknown != "home",
+    )
+
+
+async def async_setup_entry(  # noqa: PLR0915 - the steps of one entry
+    hass: HomeAssistant, entry: EasyTrvConfigEntry
+) -> bool:
     """Set up Easy TRV: one controller and one heating-state sensor per room."""
     try:
         gateway = GATEWAY_FACTORY(hass)
@@ -590,6 +609,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     )
 
     labels = await async_capability_labels(hass)
+    house = _build_house(hass, entry)
     rooms: dict[str, RoomController] = {}
     resolved: dict[str, RoomSettings] = {}
     areas: dict[str, str | None] = {}
@@ -601,7 +621,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
             continue
         try:
             controller, profile, settings = _build_room(
-                hass, entry, subentry, gateway, profiles.profiles, labels
+                hass, entry, subentry, gateway, profiles.profiles, labels, house
             )
         except (ConfigEntryError, ValueError, KeyError, TypeError) as err:
             # One room that cannot be set up must not take the others down.
@@ -635,7 +655,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
         hass, {ieee for controller in rooms.values() for ieee in controller.ieees}
     )
     entry.runtime_data = EasyTrvRuntimeData(
-        gateway, profiles, rooms, resolved, areas, labels
+        gateway, profiles, rooms, resolved, areas, labels, house
     )
     _remove_unused_entities(hass, entry, invalid)
 
@@ -643,6 +663,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
     _assign_room_areas(hass, entry)
 
     async def _start_rooms(_hass: HomeAssistant) -> None:
+        house.start()
         for subentry_id, controller in rooms.items():
             try:
                 await controller.async_start()
@@ -655,6 +676,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> b
 
     # The thermostats are only touched once Home Assistant has fully started,
     # so ZHA and the sensors have had their chance to come up.
+    entry.async_on_unload(house.stop)
     entry.async_on_unload(async_at_started(hass, _start_rooms))
     entry.async_on_unload(entry.add_update_listener(_async_reload_on_update))
     return True

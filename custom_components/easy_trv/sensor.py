@@ -34,6 +34,7 @@ HINT_PHRASES: Final = {
     "schedule": "{name} runs its own schedule",
     "window_phase": "{name}: own window detection active",
     "away": "{name} away",
+    "house": "Easy TRV presence",
     "why_unavailable": "unavailable",
     "why_unknown": "unknown",
     "why_missing": "does not exist",
@@ -248,6 +249,8 @@ class RoomStateSensor(SensorEntity):
         entity_id = self._controller.presence_entity
         if entity_id is None:
             return []
+        if self._controller.presence_source == "forced":
+            return [self._phrase("away", name=self._phrases["house"])]
         state = self.hass.states.get(entity_id)
         name = entity_id if state is None else state.name
         return [self._phrase("away", name=name)]
