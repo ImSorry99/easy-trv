@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 CARD_URL: Final = "/easy_trv/easy-trv-card.js"
-CARD_FILE: Final = Path(__file__).parent / "frontend" / "easy-trv-card.js"
+CARD_FILE: Final = Path(__file__).parent / "www" / "easy-trv-card.js"
 _REGISTERED: Final = f"{DOMAIN}_card_registered"
 
 

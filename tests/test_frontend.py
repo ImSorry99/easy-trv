@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.easy_trv import frontend
 
-CARD = Path(frontend.__file__).parent / "frontend" / "easy-trv-card.js"
+CARD = Path(frontend.__file__).parent / "www" / "easy-trv-card.js"
 MANIFEST = Path(frontend.__file__).parent / "manifest.json"
 
 
