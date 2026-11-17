@@ -954,3 +954,84 @@ def test_leaving_the_window_phase_on_an_echo_waits_for_a_pending_resync() -> Non
     st, cmds = logic().handle(reported(A, 21.0), T0 + timedelta(seconds=60), st)
     assert st.trvs[A].note is None
     assert executes(cmds) == []
+
+
+# --- a thermostat that takes no writes and repeats its old report --------
+
+
+def deaf_thermostat(room_setpoint: float = 22.0, old: float = 19.0) -> RoomState:
+    """A reported ``old`` before the room wrote ``room_setpoint``; it never took it."""
+    st = started_with_setpoint(room_setpoint)
+    return with_trv(
+        st,
+        A,
+        reported_setpoint=old,
+        reported_at={"setpoint": T0 - timedelta(minutes=5)},
+    )
+
+
+def test_a_repeated_old_report_is_no_knob_turn_while_our_write_did_not_land() -> None:
+    st = deaf_thermostat()
+    for at in (AFTER, AFTER + timedelta(minutes=10), SETTLED + timedelta(hours=1)):
+        st, cmds = logic().handle(reported(A, 19.0), at, st)
+        assert of_type(cmds, ScheduleKnobSettle) == []
+        assert st.trvs[A].knob_pending == {}
+        assert st.setpoint == 22.0
+        st, cmds = settle(st, at=at + timedelta(seconds=3))
+        assert st.setpoint == 22.0
+        assert executes(cmds) == []
+        assert adopted_events(cmds) == []
+
+
+def test_a_repeated_old_report_of_a_thermostat_that_gave_up_is_no_knob_turn() -> None:
+    st = deaf_thermostat()
+    for _ in range(3):
+        st, _ = logic().handle(
+            result(A, SetSetpoint(22.0), Failed("TimeoutError")), AFTER, st
+        )
+    assert st.trvs[A].given_up == frozenset({"setpoint"})
+    for at in (AFTER, AFTER + timedelta(minutes=30)):
+        st, cmds = logic().handle(reported(A, 19.0), at, st)
+        assert of_type(cmds, ScheduleKnobSettle) == []
+        st, cmds = settle(st, at=at + timedelta(seconds=3))
+        assert st.setpoint == 22.0
+        assert executes(cmds) == []
+
+
+def test_a_real_knob_turn_after_a_report_is_still_adopted() -> None:
+    st = started_with_setpoint(22.0)
+    st, _ = logic().handle(reported(A, 22.0), T0 + timedelta(seconds=10), st)
+    st, cmds = logic().handle(reported(A, 20.5), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == [ScheduleKnobSettle(A, "setpoint", 3.0)]
+    st, cmds = settle(st)
+    assert st.setpoint == 20.5
+    assert executes(cmds) == [(B, SetSetpoint(20.5))]
+
+
+def test_a_knob_turn_after_the_thermostat_took_our_write_is_adopted() -> None:
+    st = deaf_thermostat()
+    # It takes the 22.0 after all and reports it (an echo), then the knob goes to 19.
+    st, _ = logic().handle(reported(A, 22.0), T0 + timedelta(seconds=20), st)
+    st, cmds = logic().handle(reported(A, 19.0), AFTER, st)
+    assert of_type(cmds, ScheduleKnobSettle) == [ScheduleKnobSettle(A, "setpoint", 3.0)]
+    st, cmds = settle(st)
+    assert st.setpoint == 19.0
+    assert executes(cmds) == [(B, SetSetpoint(19.0))]
+
+
+def test_a_repeated_old_mode_report_does_not_switch_the_room_off() -> None:
+    st = started_with_setpoint(21.0)
+    st = with_trv(
+        st,
+        A,
+        reported_mode="off",
+        reported_at={"hvac_mode": T0 - timedelta(minutes=5)},
+    )
+    st, _ = logic().handle(SetRoomMode(RoomMode.OFF), T0, st)
+    st, _ = logic().handle(SetRoomMode(RoomMode.HEAT), T0 + timedelta(seconds=5), st)
+    for at in (AFTER, AFTER + timedelta(minutes=10)):
+        st, cmds = logic().handle(reported_mode(A, "off"), at, st)
+        assert of_type(cmds, ScheduleKnobSettle) == []
+        st, cmds = settle(st, capability="hvac_mode", at=at + timedelta(seconds=3))
+        assert st.mode is RoomMode.HEAT
+        assert executes(cmds) == []

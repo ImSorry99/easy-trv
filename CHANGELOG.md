@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- A thermostat that no longer takes writes and keeps reporting its old setpoint no longer pulls the whole room to that value
+
 ## [0.9.0] - 2026-11-08
 
 ### Added

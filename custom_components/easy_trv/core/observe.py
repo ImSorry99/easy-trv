@@ -365,6 +365,7 @@ def _observe_setpoint(  # noqa: PLR0913
     trv, capability = event.trv, event.capability
     known = state.trvs[trv]
     previous = shown(known, capability, known.reported_setpoint)
+    unchanged = _repeats_report(known, capability, known.reported_setpoint, value)
     echo = is_echo(known, capability, value, now)
     known = replace(
         known,
@@ -401,9 +402,28 @@ def _observe_setpoint(  # noqa: PLR0913
     state = _store(state, trv, known)
     if leaving_window:
         return _leave_window_phase(cfg, state, now, trv, value, capability_of)
-    if previous is None or _equal(previous, value):
+    if previous is None or _equal(previous, value) or unchanged:
         return state, []
     return _pend(state, trv, known, capability, value)
+
+
+def _repeats_report(
+    known: TrvState,
+    capability: str,
+    reported: float | str | None,
+    value: float | str,
+) -> bool:
+    """Return whether ``value`` is what the thermostat reported before, too.
+
+    Such a report is no knob turn: the thermostat changed nothing, a write of
+    ours that is newer than that report just did not land (a failure for the
+    retry logic). A report without a time is no earlier report.
+    """
+    return (
+        reported is not None
+        and capability in known.reported_at
+        and _equal(reported, value)
+    )
 
 
 def _shows_frost_while_off(
@@ -457,6 +477,7 @@ def _observe_mode(
     known = state.trvs[trv]
     was_on_schedule = on_schedule(known)
     previous = shown(known, capability, known.reported_mode)
+    unchanged = _repeats_report(known, capability, known.reported_mode, mode)
     echo = is_echo(known, capability, mode, now)
     known = replace(
         known,
@@ -481,7 +502,13 @@ def _observe_mode(
     # are meant to be off: it is brought in line with the room.
     if was_on_schedule or (holding(state) and mode == "heat" and not settled):
         return resync_trv(cfg, state, now, trv, capability_of)
-    if settled or holding(state) or previous is None or _equal(previous, mode):
+    if (
+        settled
+        or holding(state)
+        or previous is None
+        or _equal(previous, mode)
+        or unchanged
+    ):
         return state, []
     return _pend(state, trv, known, capability, mode)
 
