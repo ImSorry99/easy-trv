@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-17
+
 ### Fixed
 
 - A thermostat that no longer takes writes and keeps reporting its old setpoint no longer pulls the whole room to that value
@@ -208,7 +210,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/ImSorry99/easy-trv/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ImSorry99/easy-trv/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ImSorry99/easy-trv/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/ImSorry99/easy-trv/compare/v0.7.1...v0.7.2
