@@ -254,6 +254,8 @@ async def test_gateway_writes_reads_and_observes(hass, acme, services) -> None:
     )
     assert await gateway.read(ref.ieee, 0, 0, [op.attribute]) == {op.attribute: 2140}
     assert gateway.is_available(ref.ieee)
+    # Entities carry no radio values, so the silent check never fires for them.
+    assert not gateway.link(ref.ieee).known
 
     seen = []
     setpoint = next(
@@ -290,6 +292,8 @@ async def test_routing_without_zha_refuses_zha_devices(hass) -> None:
     gateway = RoutingGateway(hass, None)
     with pytest.raises(GatewayError, match="ZHA is not set up"):
         gateway.is_available("00:11")
+    # The radio values never raise, also without ZHA.
+    assert not gateway.link("00:11").known
 
 
 # --- A room end to end -------------------------------------------------------

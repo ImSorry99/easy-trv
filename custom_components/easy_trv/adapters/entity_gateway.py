@@ -24,6 +24,7 @@ from custom_components.easy_trv.adapters.zha_gateway import (
     NotZhaEntity,
     TrvGateway,
 )
+from custom_components.easy_trv.core.link import LinkInfo
 from custom_components.easy_trv.profiles.entity_profile import (
     KIND_CLIMATE_MODE,
     KIND_CLIMATE_TEMPERATURE,
@@ -210,6 +211,10 @@ class EntityGateway:
         state = self._hass.states.get(entity_id)
         return state is not None and state.state != STATE_UNAVAILABLE
 
+    def link(self, ieee: str) -> LinkInfo:  # noqa: ARG002
+        """Return no radio values: entities carry no LQI, RSSI or last heard."""
+        return LinkInfo()
+
     async def write(
         self, ieee: str, endpoint: int, cluster: int, attribute: int, value: int
     ) -> None:
@@ -371,6 +376,14 @@ class RoutingGateway:
         """Return the cached value through the gateway of the device."""
         value: int | None = self._for(ieee).cached(ieee, endpoint, cluster, attribute)
         return value
+
+    def link(self, ieee: str) -> LinkInfo:
+        """Return the radio values through the gateway of the device; never raises."""
+        try:
+            info: LinkInfo = self._for(ieee).link(ieee)
+        except GatewayError:
+            return LinkInfo()
+        return info
 
     def subscribe(
         self,
