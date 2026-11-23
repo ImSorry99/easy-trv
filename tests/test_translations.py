@@ -269,6 +269,11 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     assert set(data["selector"]["hint"]["options"]) == HINT_KEYS
     assert set(data["issues"]) == {
         "trv_unreachable",
+        "trv_unreachable_battery",
+        "trv_unreachable_silent",
+        "trv_unreachable_signal",
+        "trv_unreachable_unclear",
+        "trv_silent",
         "trv_firmware",
         "zha_api_incompatible",
         "profile_invalid",
@@ -357,7 +362,13 @@ def test_thermostat_issues_name_the_setting_and_the_thermostat(path: Path) -> No
         },
         "trv_firmware": {"room", "setting", "thermostat", "required", "current"},
     }
-    expected_without_setting = {"schedule_thermostat_off": {"room", "thermostat"}}
+    radio = {"battery", "lqi", "rssi", "silent"}
+    for cause in ("battery", "silent", "signal", "unclear"):
+        expected[f"trv_unreachable_{cause}"] = expected["trv_unreachable"] | radio
+    expected_without_setting = {
+        "schedule_thermostat_off": {"room", "thermostat"},
+        "trv_silent": {"room", "thermostat"} | radio,
+    }
     for key, allowed in expected_without_setting.items():
         used = {
             name.strip("{}")

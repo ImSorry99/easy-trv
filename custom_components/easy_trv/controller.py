@@ -46,6 +46,7 @@ from custom_components.easy_trv.const import (
     OPERATION_TIMEOUT,
     TICK_SECONDS,
 )
+from custom_components.easy_trv.core import link as radio
 from custom_components.easy_trv.core import statistics as room_stats
 from custom_components.easy_trv.core.model import (
     INTENT_NAMES,
@@ -324,6 +325,8 @@ class RoomController:
         self._worker_task: asyncio.Task[None] | None = None
         # (thermostat, capability) -> operations queued or running for it
         self._busy: Counter[tuple[str, str]] = Counter()
+        # Thermostats with a raised "nothing heard" issue.
+        self._silent: set[str] = set()
         self._unsubscribers: list[CALLBACK_TYPE] = []
         self._cancel_debounce: CALLBACK_TYPE | None = None
         self._cancel_retries: list[CALLBACK_TYPE] = []
@@ -761,6 +764,10 @@ class RoomController:
             ),
             "silent_contacts": list(self.silent_contacts),
             "deviations": self.deviations,
+            "links": {
+                trv.entity_id: self._gateway.link(trv.ieee).as_dict()
+                for trv in self._config.trvs
+            },
         }
 
     def statistics(self, now: datetime | None = None) -> RoomStatistics:
@@ -862,6 +869,7 @@ class RoomController:
         # again by the first operations.
         for trv in config.trvs:
             issues.clear_unreachable(self._hass, trv.ieee)
+            issues.clear_silent(self._hass, trv.ieee)
             issues.clear_firmware(self._hass, trv.ieee)
             issues.clear_schedule_thermostat_off(self._hass, trv.ieee)
         issues.clear_window_open_long(self._hass, config.room_id)
@@ -960,6 +968,39 @@ class RoomController:
     def _handle_tick(self, _now: datetime) -> None:
         """Let the logic check timeouts and the periodic refresh."""
         self._dispatch(Tick())
+        if not self._stopped:
+            self._check_silent(dt_util.utcnow())
+
+    def _check_silent(self, now: datetime) -> None:
+        """Report thermostats ZHA has not heard from for a long time.
+
+        Reads the radio values from ZHA's cache, so it costs no radio traffic.
+        A thermostat already reported as not accepting writes keeps that one
+        issue, which names the silence itself. The issue goes as soon as the
+        thermostat is heard again.
+        """
+        for trv in self._config.trvs:
+            info = self._gateway.link(trv.ieee)
+            reported = self._state.trvs[trv.entity_id].issue_raised
+            if radio.is_silent(info, now) and not reported:
+                issues.raise_silent(
+                    self._hass,
+                    trv.ieee,
+                    room=self._config.name,
+                    thermostat=thermostat_name(self._hass, trv.entity_id),
+                    link=radio.placeholders(info, now),
+                )
+                if trv.entity_id not in self._silent:
+                    self._silent.add(trv.entity_id)
+                    _LOGGER.warning(
+                        "%s: nothing heard from %s since %s",
+                        self._config.name,
+                        trv.entity_id,
+                        info.last_seen,
+                    )
+            elif trv.entity_id in self._silent:
+                self._silent.discard(trv.entity_id)
+                issues.clear_silent(self._hass, trv.ieee)
 
     # --- Reading Home Assistant ------------------------------------------
 
@@ -1227,6 +1268,8 @@ class RoomController:
             case "unreachable":
                 ref = self._device_refs[command.trv]
                 thermostat = thermostat_name(self._hass, ref.entity_id)
+                now = dt_util.utcnow()
+                info = self._gateway.link(ref.ieee)
                 issues.raise_unreachable(
                     self._hass,
                     ref.ieee,
@@ -1235,6 +1278,8 @@ class RoomController:
                     thermostat=thermostat,
                     minutes=found["minutes"],
                     error=found["error"],
+                    cause=radio.likely_cause(info, now).value,
+                    link=radio.placeholders(info, now),
                 )
             case "schedule_thermostat_off":
                 ref = self._device_refs[command.trv]

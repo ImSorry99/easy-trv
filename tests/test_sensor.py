@@ -743,6 +743,11 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
     assert strings["device"]["room"]["name"] == "{room} heating"
     assert set(strings["issues"]) == {
         "trv_unreachable",
+        "trv_unreachable_battery",
+        "trv_unreachable_silent",
+        "trv_unreachable_signal",
+        "trv_unreachable_unclear",
+        "trv_silent",
         "trv_firmware",
         "zha_api_incompatible",
         "profile_invalid",
