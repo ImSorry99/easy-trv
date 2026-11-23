@@ -23,6 +23,8 @@ Other thermostats, Zigbee2MQTT and other Zigbee integrations are not supported.
 3. Download **Easy TRV** and restart Home Assistant.
 4. Go to **Settings > Devices & services > Add integration** and add **Easy TRV**. It can be added once; it has no setup form.
 
+Pre-releases (versions like `0.10.0b1`) are not offered as an update by default. To try one, open Easy TRV in HACS, choose **Redownload** and pick the version, or switch on the pre-release switch HACS adds for the repository.
+
 ## Configuration
 
 Rooms live inside the single Easy TRV entry. On the integration page choose **Add room**, then pick how the room is created:
