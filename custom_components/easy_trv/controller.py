@@ -109,6 +109,7 @@ from custom_components.easy_trv.observation import (
     HoldInputs,
     KnobTimers,
     PresenceInput,
+    ScheduleInput,
     ThermostatSubscriptions,
 )
 from custom_components.easy_trv.profiles.engine import CapabilityUnsupported
@@ -291,6 +292,7 @@ class RoomController:
         presence_unknown: str = "away",
         presence_delay: timedelta = timedelta(0),
         house: ForcedPresence | None = None,
+        schedule_entity: str | None = None,
     ) -> None:
         """Wire the room logic to Home Assistant, the profile and the gateway.
 
@@ -300,7 +302,8 @@ class RoomController:
         matters for a room with an outdoor cut-off. ``presence_entity`` is the
         room's resolved presence entity (only with an ``away_action``); an
         unknown state of it counts as ``presence_unknown``. ``house`` can force
-        what the room reads for presence.
+        what the room reads for presence. ``schedule_entity`` is the room's
+        schedule helper (only with a ``schedule_setback``).
         """
         self._hass = hass
         self._config = config
@@ -355,6 +358,11 @@ class RoomController:
                 changed=self._notify_update,
             )
             if self._presence_entity
+            else None
+        )
+        self._schedule = (
+            ScheduleInput(hass, schedule_entity, self._dispatch)
+            if schedule_entity and config.schedule_setback is not None
             else None
         )
         self._warned_units: set[str] = set()
@@ -587,6 +595,23 @@ class RoomController:
         return self._state.away_override
 
     @property
+    def schedule_entity(self) -> str | None:
+        """Return the room's schedule helper, ``None`` without a schedule."""
+        return None if self._schedule is None else self._schedule.entity_id
+
+    @property
+    def schedule(self) -> str | None:
+        """Return ``on`` or ``off`` as the schedule reads; ``None`` without one."""
+        if self._schedule is None:
+            return None
+        return "off" if self._state.schedule_off else "on"
+
+    @property
+    def schedule_override(self) -> bool:
+        """Return whether a target set while the schedule is off overrides it."""
+        return self._state.schedule_override
+
+    @property
     def outdoor_hold(self) -> bool:
         """Return whether the outdoor cut-off hold is active."""
         return self._state.outdoor_hold
@@ -680,7 +705,7 @@ class RoomController:
         """Switch the room off, to frost protection only, or to heating."""
         self._dispatch(SetRoomOperation(operation))
 
-    async def async_restore(
+    async def async_restore(  # noqa: PLR0913 - what a restart remembers
         self,
         setpoint: float | None,
         mode: RoomMode | None,
@@ -688,9 +713,14 @@ class RoomController:
         frost_return: float | None = None,
         *,
         away_override: bool = False,
+        schedule_override: bool = False,
     ) -> None:
         """Take the state remembered across a restart; call it before the start."""
-        self._dispatch(RestoreRoom(setpoint, mode, preset, frost_return, away_override))
+        self._dispatch(
+            RestoreRoom(
+                setpoint, mode, preset, frost_return, away_override, schedule_override
+            )
+        )
 
     def snapshot(self) -> dict[str, Any]:
         """Return configuration, tunables and state as JSON-able data.
@@ -840,6 +870,9 @@ class RoomController:
         self._subscriptions.subscribe_all()
         window_open, outdoor = self._holds.start()
         away = self._presence.start() if self._presence is not None else False
+        schedule_on, schedule_temperature = (
+            self._schedule.start() if self._schedule is not None else (True, None)
+        )
         self._started = True
         self._begin_periods(window_open=window_open)
         self._dispatch(
@@ -857,6 +890,8 @@ class RoomController:
                 window_open=window_open,
                 outdoor=outdoor,
                 away=away,
+                schedule_on=schedule_on,
+                schedule_temperature=schedule_temperature,
             )
         )
 
@@ -875,6 +910,8 @@ class RoomController:
         self._holds.stop()
         if self._presence is not None:
             self._presence.stop()
+        if self._schedule is not None:
+            self._schedule.stop()
         if self._cancel_debounce is not None:
             self._cancel_debounce()
             self._cancel_debounce = None

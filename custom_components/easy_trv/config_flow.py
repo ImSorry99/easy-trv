@@ -36,6 +36,7 @@ from custom_components.easy_trv.const import (
     CONF_NAME,
     CONF_PRESENCE_ENTITY,
     CONF_PROFILE,
+    CONF_SCHEDULE_ENTITY,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
     CONF_WINDOW_CONTACTS,
@@ -97,6 +98,8 @@ _ENTITY_KEYS: Final = (
     CONF_HUMIDITY_SENSORS,
     CONF_WINDOW_CONTACTS,
 )
+# Optional single entities of the room's entities form; stored only when chosen.
+_OPTIONAL_ENTITY_KEYS: Final = (CONF_SCHEDULE_ENTITY,)
 
 # The device classes of a binary sensor that can be a window contact.
 _CONTACT_CLASSES: Final = ("window", "door", "opening", "garage_door")
@@ -246,6 +249,20 @@ def _entity_fields() -> dict[Any, Any]:
                 multiple=True,
             )
         ),
+        # A schedule helper: on heats, off lowers the room.
+        vol.Optional(CONF_SCHEDULE_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain="schedule")
+        ),
+    }
+
+
+def _chosen_entities(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Return what a room stores of its entities form."""
+    return {
+        **{key: user_input[key] for key in _ENTITY_KEYS},
+        **{
+            key: user_input[key] for key in _OPTIONAL_ENTITY_KEYS if user_input.get(key)
+        },
     }
 
 
@@ -368,7 +385,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
                 self.hass, self._get_entry(), None, user_input, profiles
             )
             if not errors:
-                self._entities = {key: user_input[key] for key in _ENTITY_KEYS}
+                self._entities = _chosen_entities(user_input)
                 return await self.async_step_settings()
         schema = vol.Schema(_entity_fields())
         return self.async_show_form(
@@ -400,7 +417,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
             if not errors:
                 self._name = name
                 self._area_id = user_input.get(CONF_AREA) or None
-                self._entities = {key: user_input[key] for key in _ENTITY_KEYS}
+                self._entities = _chosen_entities(user_input)
                 return await self.async_step_settings()
         schema = vol.Schema(
             {

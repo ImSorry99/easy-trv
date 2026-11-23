@@ -128,9 +128,16 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "presence_unknown",
         "away_action",
         "away_setback_kelvin",
+        "schedule_setback_kelvin",
         "statistics",
     }
-    entity_fields = {"trvs", "temp_sensors", "humidity_sensors", "window_contacts"}
+    entity_fields = {
+        "trvs",
+        "temp_sensors",
+        "humidity_sensors",
+        "window_contacts",
+        "schedule_entity",
+    }
     assert set(room["step"]["entities"]["data"]) == entity_fields
     assert set(room["step"]["reconfigure"]["data"]) == {
         "name",
@@ -157,6 +164,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "room_thermostat",
         "windows_outdoor",
         "presence",
+        "schedule",
         "statistics",
     }
     for section in options.values():
@@ -197,6 +205,7 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
         "away_setback_kelvin",
         "away_delay_minutes",
     }
+    assert set(options["schedule"]["data"]) == {"schedule_setback_kelvin"}
     assert set(options["statistics"]["data"]) == {"statistics"}
     assert set(data["selector"]["outdoor_cutoff"]["options"]) == {"global", "off"}
     assert set(data["selector"]["window_detection"]["options"]) == {
@@ -430,6 +439,7 @@ STATE_NAMES_EN = {
     "restricted_window_phase": "Restricted: thermostat's window detection active",
     "boost": "Manual (boost)",
     "setback_away": "Lowered: away",
+    "setback_schedule": "Lowered: schedule",
     "frost": "Frost protection",
     "heating": "Heating",
 }
@@ -448,6 +458,7 @@ STATE_NAMES_DE = {
     "restricted_window_phase": "Eingeschränkt: TRV-Fenstererkennung aktiv",
     "boost": "Handbetrieb (Boost)",
     "setback_away": "Abgesenkt: abwesend",
+    "setback_schedule": "Abgesenkt: Zeitplan",
     "frost": "Frostschutz",
     "heating": "Heizbetrieb",
 }
@@ -488,6 +499,7 @@ HINT_EN = {
     "window_phase": "{name}: own window detection active",
     "away": "{name} away",
     "house": "Easy TRV presence",
+    "schedule_off": "{name} off",
     "why_unavailable": "unavailable",
     "why_unknown": "unknown",
     "why_missing": "does not exist",
@@ -501,6 +513,7 @@ HINT_DE = {
     "window_phase": "{name}: eigene Fenstererkennung aktiv",
     "away": "{name} abwesend",
     "house": "Easy-TRV-Anwesenheit",
+    "schedule_off": "{name} aus",
     "why_unavailable": "nicht verfügbar",
     "why_unknown": "unbekannt",
     "why_missing": "gibt es nicht",

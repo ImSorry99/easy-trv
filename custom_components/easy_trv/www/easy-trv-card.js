@@ -74,6 +74,7 @@ const GROUPS = {
   frost: "normal",
   boost: "normal",
   setback_away: "lowered",
+  setback_schedule: "lowered",
   off_manual: "lowered",
   off_window: "lowered",
   off_outdoor: "lowered",

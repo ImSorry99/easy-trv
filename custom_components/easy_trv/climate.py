@@ -49,12 +49,14 @@ class RoomExtraData(ExtraStoredData):
 
     ``preset`` is whether the room is on frost protection; ``None`` when the
     data predates it (0.3.0 kept it in the ``preset_mode`` attribute).
-    ``away_override`` is a target set while away (0.7.0).
+    ``away_override`` is a target set while away (0.7.0), ``schedule_override``
+    one set while the schedule was off (0.10.0).
     """
 
     frost_return: float | None
     preset: Preset | None = None
     away_override: bool = False
+    schedule_override: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """Return the data for the restore store."""
@@ -62,6 +64,7 @@ class RoomExtraData(ExtraStoredData):
             "frost_return": self.frost_return,
             "preset": None if self.preset is None else self.preset.value,
             "away_override": self.away_override,
+            "schedule_override": self.schedule_override,
         }
 
     @classmethod
@@ -71,6 +74,7 @@ class RoomExtraData(ExtraStoredData):
             _number(data.get("frost_return")),
             _PRESETS.get(str(data.get("preset"))),
             data.get("away_override") is True,
+            data.get("schedule_override") is True,
         )
 
 
@@ -185,6 +189,9 @@ class RoomClimate(ClimateEntity, RestoreEntity):
             "presence": controller.presence,
             "away_target": controller.away_target,
             "away_override": controller.away_override,
+            "schedule_entity": controller.schedule_entity,
+            "schedule": controller.schedule,
+            "schedule_override": controller.schedule_override,
         }
 
     @property
@@ -192,7 +199,10 @@ class RoomClimate(ClimateEntity, RestoreEntity):
         """Return what has to survive a restart besides the visible state."""
         controller = self._controller
         return RoomExtraData(
-            controller.frost_return, controller.preset, controller.away_override
+            controller.frost_return,
+            controller.preset,
+            controller.away_override,
+            controller.schedule_override,
         )
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
@@ -255,4 +265,5 @@ class RoomClimate(ClimateEntity, RestoreEntity):
             preset,
             data.frost_return if data else None,
             away_override=data.away_override if data else False,
+            schedule_override=data.schedule_override if data else False,
         )

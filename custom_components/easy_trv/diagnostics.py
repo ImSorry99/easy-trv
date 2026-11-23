@@ -54,6 +54,8 @@ async def async_get_config_entry_diagnostics(
                     if controller.presence_away_from is None
                     else controller.presence_away_from.isoformat()
                 ),
+                "schedule_entity": controller.schedule_entity,
+                "schedule": controller.schedule,
                 "settings": asdict(runtime.settings[subentry_id]),
             }
             for subentry_id, controller in runtime.rooms.items()

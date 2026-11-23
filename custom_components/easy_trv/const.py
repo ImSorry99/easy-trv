@@ -74,9 +74,11 @@ CONF_PRESENCE_UNKNOWN: Final = "presence_unknown"
 CONF_AWAY_ACTION: Final = "away_action"
 CONF_AWAY_SETBACK: Final = "away_setback_kelvin"
 CONF_AWAY_DELAY: Final = "away_delay_minutes"
+CONF_SCHEDULE_SETBACK: Final = "schedule_setback_kelvin"
 # Entry-level and room entity configuration (not settings with a default)
 CONF_OUTDOOR_SENSOR: Final = "outdoor_sensor"
 CONF_WINDOW_CONTACTS: Final = "window_contacts"
+CONF_SCHEDULE_ENTITY: Final = "schedule_entity"
 
 # Defaults
 DEFAULT_REFRESH_MINUTES: Final = _settings.DEFAULT_REFRESH_MINUTES
@@ -103,6 +105,7 @@ DEFAULT_PRESENCE_UNKNOWN: Final = _settings.DEFAULT_PRESENCE_UNKNOWN
 DEFAULT_AWAY_ACTION: Final = _settings.DEFAULT_AWAY_ACTION
 DEFAULT_AWAY_SETBACK: Final = _settings.DEFAULT_AWAY_SETBACK
 DEFAULT_AWAY_DELAY: Final = _settings.DEFAULT_AWAY_DELAY
+DEFAULT_SCHEDULE_SETBACK: Final = _settings.DEFAULT_SCHEDULE_SETBACK
 
 # Timing
 DEBOUNCE_SECONDS: Final = 5.0

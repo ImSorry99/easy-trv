@@ -42,6 +42,7 @@ from custom_components.easy_trv.const import (
     CONF_PROFILE,
     CONF_REFRESH_MINUTES,
     CONF_RESET_SETTINGS,
+    CONF_SCHEDULE_SETBACK,
     CONF_SENSOR_TIMEOUT,
     CONF_SETPOINT_MAX,
     CONF_SETPOINT_MIN,
@@ -126,6 +127,8 @@ NUMBERS: Final[Mapping[str, NumberSpec]] = {
     ),
     CONF_AWAY_SETBACK: NumberSpec(0.5, 10.0, 0.5, UnitOfTemperature.KELVIN),
     CONF_AWAY_DELAY: NumberSpec(0, 120, unit=UnitOfTime.MINUTES),
+    # Up to 15 K, so a room can go down to frost protection (never below it).
+    CONF_SCHEDULE_SETBACK: NumberSpec(0.5, 15.0, 0.5, UnitOfTemperature.KELVIN),
 }
 # Numbers whose value 0 (or, for the cut-off, no value) reads as "off".
 _OFF_AT_ZERO: Final = frozenset(
@@ -138,6 +141,7 @@ _SECTION_THERMOSTAT: Final = "thermostat"
 _SECTION_ROOM_THERMOSTAT: Final = "room_thermostat"
 _SECTION_WINDOWS_OUTDOOR: Final = "windows_outdoor"
 _SECTION_PRESENCE: Final = "presence"
+_SECTION_SCHEDULE: Final = "schedule"
 _SECTION_STATISTICS: Final = "statistics"
 SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
     _SECTION_WRITES: (
@@ -175,6 +179,7 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
         CONF_AWAY_SETBACK,
         CONF_AWAY_DELAY,
     ),
+    _SECTION_SCHEDULE: (CONF_SCHEDULE_SETBACK,),
     _SECTION_STATISTICS: (CONF_STATISTICS,),
 }
 # The entity pickers of the options form; stored only when one is chosen.
@@ -207,6 +212,7 @@ ROOM_SETTING_KEYS: Final = (
     CONF_PRESENCE_UNKNOWN,
     CONF_AWAY_ACTION,
     CONF_AWAY_SETBACK,
+    CONF_SCHEDULE_SETBACK,
     CONF_STATISTICS,
 )
 ROOM_SELECT_KEYS: Final = (
@@ -423,7 +429,7 @@ def presence_error(user_input: Mapping[str, Any]) -> dict[str, str]:
 
 
 def options_schema(current: Mapping[str, Any]) -> vol.Schema:
-    """Return the form of the global options in five collapsed sections.
+    """Return the form of the global options in collapsed sections.
 
     The selects default to what is saved (else the built-in default). The
     numbers get no default: they are suggested by ``options_suggestions``, and

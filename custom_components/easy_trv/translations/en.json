@@ -48,13 +48,15 @@
             "trvs": "Thermostats (ZHA)",
             "temp_sensors": "Temperature sensors",
             "humidity_sensors": "Humidity sensors",
-            "window_contacts": "Window and door contacts"
+            "window_contacts": "Window and door contacts",
+            "schedule_entity": "Schedule"
           },
           "data_description": {
             "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
             "humidity_sensors": "Stored for later use; not evaluated yet.",
-            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional."
+            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional.",
+            "schedule_entity": "A schedule helper. While it is on, the room heats; while it is off, the room is lowered. A block with the data field temperature sets the room's target when it starts. Optional."
           }
         },
         "reconfigure": {
@@ -65,14 +67,16 @@
             "trvs": "Thermostats (ZHA)",
             "temp_sensors": "Temperature sensors",
             "humidity_sensors": "Humidity sensors",
-            "window_contacts": "Window and door contacts"
+            "window_contacts": "Window and door contacts",
+            "schedule_entity": "Schedule"
           },
           "data_description": {
             "area_id": "The room's Easy TRV entities go into this area.",
             "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
             "humidity_sensors": "Stored for later use; not evaluated yet.",
-            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional."
+            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional.",
+            "schedule_entity": "A schedule helper. While it is on, the room heats; while it is off, the room is lowered. A block with the data field temperature sets the room's target when it starts. Optional."
           }
         },
         "settings": {
@@ -106,7 +110,8 @@
             "away_action": "While away",
             "away_setback_kelvin": "Setback (K)",
             "statistics": "Collect statistics",
-            "reset_settings": "Reset all settings of this room to Global"
+            "reset_settings": "Reset all settings of this room to Global",
+            "schedule_setback_kelvin": "Setback outside the schedule (K)"
           },
           "data_description": {
             "profile": "Auto picks the first profile that matches all thermostats of the room. Global is currently {global_profile}.",
@@ -136,7 +141,8 @@
             "away_action": "Lower takes the target down by the setback, never below the frost protection temperature. Off switches the thermostats off like an open window. Global is currently {global_away_action}.",
             "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Global is currently {global_away_setback_kelvin}.",
             "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones. Global is currently {global_statistics}.",
-            "reset_settings": "On submit every setting of this room follows the global options again and the values above are ignored. Where the room's presence comes from stays."
+            "reset_settings": "On submit every setting of this room follows the global options again and the values above are ignored. Where the room's presence comes from stays.",
+            "schedule_setback_kelvin": "How far the target goes down while the room's schedule is off. 0.5 to 15 K, never below frost protection. Global is currently {global_schedule_setback_kelvin}."
           }
         }
       },
@@ -189,6 +195,7 @@
           "restricted_window_phase": "Restricted: thermostat's window detection active",
           "boost": "Manual (boost)",
           "setback_away": "Lowered: away",
+          "setback_schedule": "Lowered: schedule",
           "frost": "Frost protection",
           "heating": "Heating"
         },
@@ -412,6 +419,16 @@
               "away_delay_minutes": "How long presence must read away without a break before away counts; home counts at once. 0 to 120 minutes, 0 = at once. Empty = {default_away_delay_minutes}."
             }
           },
+          "schedule": {
+            "name": "Schedule",
+            "description": "A room with a schedule helper (chosen in the room) is lowered while its schedule is off.",
+            "data": {
+              "schedule_setback_kelvin": "Setback (K)"
+            },
+            "data_description": {
+              "schedule_setback_kelvin": "How far the target goes down while the schedule is off. 0.5 to 15 K, never below frost protection. Empty = {default_schedule_setback_kelvin}."
+            }
+          },
           "statistics": {
             "name": "Statistics",
             "description": "What Easy TRV records about each room as long-term statistics.",
@@ -498,7 +515,8 @@
         "why_unknown": "unknown",
         "why_missing": "does not exist",
         "away": "{name} away",
-        "house": "Easy TRV presence"
+        "house": "Easy TRV presence",
+        "schedule_off": "{name} off"
       }
     },
     "outdoor_cutoff": {

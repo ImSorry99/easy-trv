@@ -88,6 +88,8 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
         "deviations",
         "presence_home",
         "away_from",
+        "schedule_entity",
+        "schedule",
     }
     assert room["config"]["name"] == "Living"
     assert room["config"]["trvs"][0]["ieee"] == IEEE_A
@@ -154,6 +156,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "away_action": "setback",
         "away_setback_kelvin": 3.0,
         "away_delay_minutes": 15,
+        "schedule_setback_kelvin": 3.0,
     }
 
 

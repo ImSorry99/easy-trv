@@ -433,6 +433,7 @@ def test_enum_order() -> None:
         "restricted_window_phase",
         "boost",
         "setback_away",
+        "setback_schedule",
         "frost",
         "heating",
     ]

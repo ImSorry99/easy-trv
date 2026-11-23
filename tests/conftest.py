@@ -23,11 +23,13 @@ def _no_card_serving(hass):
 
 
 @pytest.fixture
-def local_binding() -> None:
+def local_binding(socket_enabled: None) -> None:  # noqa: ARG001
     """Skip the test where no socket can be bound on the loopback interface.
 
     Tests that start a real HTTP server (``hass_client``) need this; sandboxes
-    that forbid binding make the bind fail with ``EPERM``.
+    that forbid binding make the bind fail with ``EPERM``. The probe opens a
+    socket itself, so it needs sockets enabled (``socket_enabled``), whatever
+    order the other fixtures run in.
     """
     message = "local port binding not permitted in this environment"
     try:
