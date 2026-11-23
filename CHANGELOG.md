@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Add thermostat profile** on the integration page: create your own profile (Beta), upload or paste one, or download one from the community. Stored profiles are listed there, can be shown, edited and deleted, and rooms choose them in their Profile field
+- Entity profiles (Beta, `backend: entity`): a profile can name the thermostat's Home Assistant entities instead of Zigbee attributes, so thermostats of any integration (Zigbee2MQTT, deCONZ, Tuya, ...) work. The wizard builds one from the entities you pick
+- Community profiles in `community/profiles/` with an index the integration reads. **Show or edit profile** has a share link that opens a pre-filled GitHub form; a workflow checks the profile and opens a pull request
+
+### Changed
+
+- ZHA is optional: it is set up first when present (`after_dependencies`), and without ZHA the entry loads for rooms with entity profiles. With ZHA configured, a ZHA that cannot be reached still makes setup retry
+- The room's thermostat picker and the area prefill offer every climate entity, not only ZHA ones; a thermostat without a fitting profile is rejected with "no profile"
+
 ## [0.9.1] - 2026-11-17
 
 ### Fixed

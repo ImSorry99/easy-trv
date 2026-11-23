@@ -45,13 +45,13 @@
         "entities": {
           "title": "Room devices",
           "data": {
-            "trvs": "Thermostats (ZHA)",
+            "trvs": "Thermostats",
             "temp_sensors": "Temperature sensors",
             "humidity_sensors": "Humidity sensors",
             "window_contacts": "Window and door contacts"
           },
           "data_description": {
-            "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
+            "trvs": "The thermostats that heat this room, all of the same model. A thermostat can belong to one room only. Sonoff TRVZB on ZHA works out of the box; other thermostats need a profile (Add thermostat profile).",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
             "humidity_sensors": "Stored for later use; not evaluated yet.",
             "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional."
@@ -62,14 +62,14 @@
           "data": {
             "name": "Room name",
             "area_id": "Area",
-            "trvs": "Thermostats (ZHA)",
+            "trvs": "Thermostats",
             "temp_sensors": "Temperature sensors",
             "humidity_sensors": "Humidity sensors",
             "window_contacts": "Window and door contacts"
           },
           "data_description": {
             "area_id": "The room's Easy TRV entities go into this area.",
-            "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
+            "trvs": "The thermostats that heat this room, all of the same model. A thermostat can belong to one room only. Sonoff TRVZB on ZHA works out of the box; other thermostats need a profile (Add thermostat profile).",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
             "humidity_sensors": "Stored for later use; not evaluated yet.",
             "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional."
@@ -142,8 +142,8 @@
       },
       "error": {
         "no_trv": "Select at least one thermostat.",
-        "not_zha": "At least one of the selected entities is not a ZHA thermostat.",
-        "no_profile": "No profile matches all selected thermostats. Add a profile for the model or split the room.",
+        "not_zha": "At least one of the selected entities is not a thermostat with a device.",
+        "no_profile": "No profile matches all selected thermostats. Add a thermostat profile for the model (upload, community or your own) or split the room.",
         "profile_mismatch": "The selected profile does not match all selected thermostats.",
         "trv_in_other_room": "At least one of the selected thermostats already belongs to another room.",
         "name_exists": "A room with this name already exists.",
@@ -155,6 +155,92 @@
       "abort": {
         "reconfigure_successful": "Re-configuration was successful",
         "already_configured": "A room with this name already exists."
+      }
+    },
+    "profile": {
+      "entry_type": "Thermostat profile",
+      "initiate_flow": {
+        "user": "Add thermostat profile",
+        "reconfigure": "Show or edit profile"
+      },
+      "step": {
+        "user": {
+          "title": "Add thermostat profile",
+          "description": "A profile tells Easy TRV how to drive a thermostat model. Sonoff TRVZB is built in. Rooms choose a profile in their settings.",
+          "menu_options": {
+            "create": "Create your own profile (Beta)",
+            "upload": "Upload or paste a profile",
+            "community": "Download from the community"
+          }
+        },
+        "upload": {
+          "title": "Upload profile",
+          "description": "Choose a profile file (.yaml) or paste its text. Easy TRV checks it before saving.{error}",
+          "data": {
+            "file": "Profile file",
+            "yaml": "Profile text (YAML)"
+          },
+          "data_description": {
+            "file": "A profile file, for example one shared by another user.",
+            "yaml": "Used when no file is chosen."
+          }
+        },
+        "community": {
+          "title": "Community profiles",
+          "description": "Profiles shared by other users. Profiles marked [Beta] drive the thermostat through its Home Assistant entities.{error}",
+          "data": {
+            "profile": "Profile"
+          }
+        },
+        "reconfigure": {
+          "title": "Profile",
+          "description": "Copy this text to keep a backup, or [share the profile with the community]({share_url}) (opens a pre-filled form on GitHub). Change the text and submit to update the profile; rooms that use it restart.{error}",
+          "data": {
+            "yaml": "Profile text (YAML)"
+          }
+        },
+        "create": {
+          "title": "Create your own profile (Beta)",
+          "description": "Name the profile and pick one of your thermostats as the sample. On the next page you choose which of its entities does what. Works with any integration (Zigbee2MQTT, deCONZ, ZHA, Tuya, ...). Other thermostats of the same model are found automatically.{error}",
+          "data": {
+            "name": "Profile name",
+            "thermostat": "Sample thermostat"
+          }
+        },
+        "create_map": {
+          "title": "What does which entity do?",
+          "description": "Pick the entities of {thermostat}. Only the room temperature is required; leave out what the thermostat does not have.",
+          "data": {
+            "external_temperature": "Room temperature for the thermostat (external sensor value)",
+            "source": "Temperature source (internal or external sensor)",
+            "window_detection": "Open window detection of the thermostat",
+            "frost_temperature": "Frost protection temperature",
+            "hysteresis": "Hysteresis (control accuracy)",
+            "adaptive_mode": "Adaptive mode"
+          }
+        },
+        "create_source": {
+          "title": "Temperature source",
+          "description": "Which option of the select uses the external sensor, and which the built-in one?",
+          "data": {
+            "external": "Option for the external sensor",
+            "internal": "Option for the built-in sensor"
+          }
+        }
+      },
+      "error": {
+        "no_input": "Choose a file or paste a profile.",
+        "invalid_profile": "The profile is not valid.",
+        "profile_id_taken": "Another profile already uses this id. Change the id in the profile.",
+        "download_failed": "The profile could not be downloaded. Try again later.",
+        "name_required": "Enter a name.",
+        "no_entities": "This thermostat has no number entity for the room temperature, or no device."
+      },
+      "abort": {
+        "reconfigure_successful": "The profile was updated.",
+        "community_unreachable": "The community profiles could not be loaded. Check the internet connection and try again later.",
+        "community_empty": "There are no community profiles that are not installed yet.",
+        "wizard_failed": "The profile could not be built from these entities. Please report this as an issue."
       }
     }
   },

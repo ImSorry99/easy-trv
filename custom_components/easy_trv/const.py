@@ -122,3 +122,15 @@ ISSUE_SETTINGS_MIGRATED: Final = "settings_migrated"
 # Profiles
 PROFILE_AUTO: Final = "auto"
 USER_PROFILES_DIR: Final = "easy_trv/profiles"
+
+# Profiles stored in the entry (uploaded, downloaded or made in the wizard)
+SUBENTRY_PROFILE: Final = "profile"
+CONF_PROFILE_YAML: Final = "yaml"
+# The shared profiles of the community live in the repository; the index lists them.
+COMMUNITY_BASE_URL: Final = (
+    "https://raw.githubusercontent.com/ImSorry99/easy-trv/main/community/profiles/"
+)
+COMMUNITY_INDEX_FILE: Final = "index.json"
+# Sharing a profile opens a pre-filled issue form; a workflow turns it into a PR.
+SHARE_BASE_URL: Final = "https://github.com/ImSorry99/easy-trv/issues/new"
+SHARE_TEMPLATE: Final = "profile.yml"

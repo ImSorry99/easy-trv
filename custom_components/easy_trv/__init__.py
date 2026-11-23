@@ -18,7 +18,9 @@ from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 
 from custom_components.easy_trv import issues
+from custom_components.easy_trv.adapters.entity_gateway import RoutingGateway
 from custom_components.easy_trv.adapters.zha_gateway import (
+    ZHA_DOMAIN,
     DeviceRef,
     GatewayError,
     TrvGateway,
@@ -58,7 +60,13 @@ from custom_components.easy_trv.labels import (
     async_capability_labels,
     localized_number,
 )
-from custom_components.easy_trv.profiles.loader import LoadResult, async_load_profiles
+from custom_components.easy_trv.profile_flow import profile_documents
+from custom_components.easy_trv.profiles.entity_profile import BACKEND_ENTITY
+from custom_components.easy_trv.profiles.loader import (
+    LoadResult,
+    add_documents,
+    async_load_profiles,
+)
 from custom_components.easy_trv.statistics_sensor import (
     is_statistics_unique_id,
     room_statistics_unique_ids,
@@ -336,7 +344,7 @@ def _resolve_thermostats(
         try:
             refs[entity_id] = gateway.resolve(entity_id)
         except GatewayError as err:
-            msg = f"{entity_id} is not a ZHA thermostat"
+            msg = f"{entity_id} is not a thermostat with a device"
             raise ConfigEntryError(msg) from err
     return refs
 
@@ -475,6 +483,12 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
     settings = resolve_settings(entry.options, subentry.data)
     device_refs = _resolve_thermostats(gateway, list(subentry.data[CONF_TRVS]))
     profile = select_profile(profiles, settings.profile, device_refs)
+    if profile.backend == BACKEND_ENTITY:
+        if not isinstance(gateway, RoutingGateway):
+            msg = f"profile {profile.id!r} needs the entity gateway"
+            raise ConfigEntryError(msg)
+        for ref in device_refs.values():
+            gateway.bind(ref, profile)
     presence_entity = resolve_presence_entity(entry.options, subentry.data)
     config = room_config_from_subentry(
         subentry.subentry_id,
@@ -602,21 +616,39 @@ def _build_house(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> HousePresenc
     )
 
 
+def _needs_zha(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> bool:
+    """Return whether ZHA is set up here or a room has a ZHA thermostat."""
+    if hass.config_entries.async_entries(ZHA_DOMAIN):
+        return True
+    registry = er.async_get(hass)
+    return any(
+        (registered := registry.async_get(entity_id)) is not None
+        and registered.platform == ZHA_DOMAIN
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_ROOM
+        for entity_id in _thermostat_ids(subentry.data)
+    )
+
+
 async def async_setup_entry(  # noqa: PLR0915 - the steps of one entry
     hass: HomeAssistant, entry: EasyTrvConfigEntry
 ) -> bool:
     """Set up Easy TRV: one controller and one heating-state sensor per room."""
     try:
-        gateway = GATEWAY_FACTORY(hass)
+        zha: TrvGateway | None = GATEWAY_FACTORY(hass)
     except ZhaUnavailable as err:
-        issues.raise_zha_api(hass, str(err))
-        msg = f"ZHA is not available: {err}"
-        raise ConfigEntryNotReady(msg) from err
+        if _needs_zha(hass, entry):
+            issues.raise_zha_api(hass, str(err))
+            msg = f"ZHA is not available: {err}"
+            raise ConfigEntryNotReady(msg) from err
+        # No ZHA at all: rooms with entity profiles (Beta) still work.
+        zha = None
     issues.clear_zha_api(hass)
+    gateway = RoutingGateway(hass, zha)
     integration = await async_get_integration(hass, DOMAIN)
     await async_register_card(hass, str(integration.version))
 
-    profiles = await async_load_profiles(hass)
+    profiles = add_documents(await async_load_profiles(hass), profile_documents(entry))
     for error in profiles.errors:
         issues.raise_profile_invalid(hass, error.file, str(error))
     issues.clear_profile_issues(

@@ -37,5 +37,7 @@ async def test_card_registered_once_across_reloads(hass) -> None:
 
 
 def test_manifest_depends_on_http_and_frontend() -> None:
-    dependencies = json.loads(MANIFEST.read_text())["dependencies"]
-    assert {"zha", "http", "frontend"} <= set(dependencies)
+    manifest = json.loads(MANIFEST.read_text())
+    assert {"http", "frontend"} <= set(manifest["dependencies"])
+    # ZHA is optional since entity profiles; it is set up first when present.
+    assert manifest["after_dependencies"] == ["zha"]

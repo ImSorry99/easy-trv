@@ -71,6 +71,7 @@ def test_every_default_has_a_matching_conf_constant():
         const.CONF_PRESENCE_ENTITY,
         const.CONF_RESET_SETTINGS,
         const.CONF_WINDOW_CONTACTS,
+        const.CONF_PROFILE_YAML,
     }
     conf_values = {
         value

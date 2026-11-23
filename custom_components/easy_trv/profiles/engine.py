@@ -294,6 +294,11 @@ class Profile:
     min_firmware: Version
     tested_firmware: tuple[Version, ...]
     capabilities: Mapping[str, CapabilitySpec]
+    # "zha" drives Zigbee attributes; "entity" (Beta) drives the device's
+    # Home Assistant entities through ``bindings`` (attribute number to an
+    # ``EntityBinding``).
+    backend: str = "zha"
+    bindings: Mapping[int, Any] = MappingProxyType({})
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Profile:
@@ -320,6 +325,8 @@ class Profile:
                     for name, raw in data["capabilities"].items()
                 }
             ),
+            backend=data.get("backend", "zha"),
+            bindings=MappingProxyType(dict(data.get("bindings", {}))),
         )
 
     def matches(self, manufacturer: str, model: str) -> bool:
