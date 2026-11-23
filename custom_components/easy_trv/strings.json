@@ -279,6 +279,26 @@
       "title": "Thermostat {thermostat} in {room} is not responding",
       "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
     },
+    "trv_unreachable_battery": {
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nLikely cause: the battery is almost empty. Replace the thermostat's batteries.\n\nRadio values from ZHA: battery {battery}, LQI {lqi}, RSSI {rssi}, last heard {silent} minutes ago.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_unreachable_silent": {
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nLikely cause: the thermostat has lost its connection, ZHA has not heard from it for {silent} minutes. Check the battery and the distance to the nearest Zigbee router or coordinator. If it still does not respond, re-pair it with ZHA.\n\nRadio values from ZHA: battery {battery}, LQI {lqi}, RSSI {rssi}, last heard {silent} minutes ago.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_unreachable_signal": {
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nLikely cause: the Zigbee signal is weak. A Zigbee router (a Zigbee smart plug, say) closer to the thermostat usually helps. How meaningful the LQI is depends on the radio stick.\n\nRadio values from ZHA: battery {battery}, LQI {lqi}, RSSI {rssi}, last heard {silent} minutes ago.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_unreachable_unclear": {
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nBattery and signal look normal. Waking the thermostat once (press its button) or taking its batteries out briefly often helps. If it still does not respond, re-pair it with ZHA.\n\nRadio values from ZHA: battery {battery}, LQI {lqi}, RSSI {rssi}, last heard {silent} minutes ago.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_silent": {
+      "title": "Nothing heard from thermostat {thermostat} in {room}",
+      "description": "ZHA has not heard from {thermostat} in {room} for {silent} minutes. Easy TRV cannot control it like this.\n\nCheck the thermostat's battery and the distance to the nearest Zigbee router or coordinator. Waking the thermostat once (press its button) often helps.\n\nBattery {battery}, LQI {lqi}, RSSI {rssi}.\n\nThis notice disappears by itself as soon as ZHA hears from the thermostat again."
+    },
     "trv_firmware": {
       "title": "Thermostat {thermostat} in {room} lacks a firmware feature",
       "description": "Easy TRV cannot use \"{setting}\" on {thermostat} in {room}. Required firmware: {required}. Installed firmware: {current}.\n\nEasy TRV skips this setting for this thermostat and keeps controlling it otherwise. Update the thermostat's firmware (for example through the ZHA over-the-air update) to enable it. Alternatively set this setting to 'leave as set in the thermostat' or off for this room."

@@ -86,6 +86,7 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
         "window_off_at",
         "silent_contacts",
         "deviations",
+        "links",
         "presence_home",
         "away_from",
     }

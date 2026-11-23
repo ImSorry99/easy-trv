@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Repairs issue `trv_silent`: ZHA has not heard anything from a thermostat for 3 hours, even while Easy TRV writes nothing to it. It disappears as soon as the thermostat is heard again
+- Diagnostics: per thermostat the radio values ZHA last knew (`links`: LQI, RSSI, last heard, battery)
+
+### Changed
+
+- The issue "Thermostat does not respond" shows battery, LQI, RSSI and how long ago the thermostat was last heard, and names the likely cause: an almost empty battery, a thermostat that has gone silent, or a weak signal. The values come from ZHA's cache, so reading them costs no radio traffic
+
 ## [0.9.1] - 2026-11-17
 
 ### Fixed

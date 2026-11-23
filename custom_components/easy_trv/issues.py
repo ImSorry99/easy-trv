@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _UNREACHABLE_PREFIX = "trv_unreachable_"
+_SILENT_PREFIX = "trv_silent_"
 _FIRMWARE_PREFIX = "trv_firmware_"
 _SCHEDULE_OFF_PREFIX = "schedule_thermostat_off_"
 _PROFILE_INVALID_PREFIX = "profile_invalid_"
@@ -29,6 +30,11 @@ _WINDOW_CONTACT_UNAVAILABLE_PREFIX = "window_contact_unavailable_"
 def issue_id_unreachable(ieee: str) -> str:
     """Return the id of the "thermostat does not accept writes" issue."""
     return f"{_UNREACHABLE_PREFIX}{ieee.replace(':', '')}"
+
+
+def issue_id_silent(ieee: str) -> str:
+    """Return the id of the "nothing heard from the thermostat" issue."""
+    return f"{_SILENT_PREFIX}{ieee.replace(':', '')}"
 
 
 def issue_id_firmware(ieee: str) -> str:
@@ -95,22 +101,30 @@ def raise_unreachable(  # noqa: PLR0913 - one argument per placeholder of the te
     thermostat: str,
     minutes: str,
     error: str,
+    cause: str = "unknown",
+    link: Mapping[str, str] | None = None,
 ) -> None:
     """Report a thermostat whose writes have failed for ``minutes`` minutes.
 
     ``setting`` and ``thermostat`` are plain-language names, not keys.
+    ``cause`` is a :class:`~custom_components.easy_trv.core.link.LinkCause`
+    value and picks the advice; ``link`` holds the radio values
+    (``battery``, ``lqi``, ``rssi``, ``silent``) the text shows. Without them
+    (cause ``unknown``) the text gives the general advice.
     """
+    known = cause != "unknown" and link is not None
     _create(
         hass,
         issue_id_unreachable(ieee),
         ir.IssueSeverity.WARNING,
-        "trv_unreachable",
+        f"trv_unreachable_{cause}" if known else "trv_unreachable",
         {
             "room": room,
             "setting": setting,
             "thermostat": thermostat,
             "minutes": minutes,
             "error": error,
+            **(link if known and link is not None else {}),
         },
     )
 
@@ -118,6 +132,33 @@ def raise_unreachable(  # noqa: PLR0913 - one argument per placeholder of the te
 def clear_unreachable(hass: HomeAssistant, ieee: str) -> None:
     """Remove the "thermostat does not accept writes" issue."""
     ir.async_delete_issue(hass, DOMAIN, issue_id_unreachable(ieee))
+
+
+def raise_silent(
+    hass: HomeAssistant,
+    ieee: str,
+    *,
+    room: str,
+    thermostat: str,
+    link: Mapping[str, str],
+) -> None:
+    """Report a thermostat that has not been heard for a long time.
+
+    ``link`` holds the radio values (``battery``, ``lqi``, ``rssi``,
+    ``silent`` in minutes) the text shows.
+    """
+    _create(
+        hass,
+        issue_id_silent(ieee),
+        ir.IssueSeverity.WARNING,
+        "trv_silent",
+        {"room": room, "thermostat": thermostat, **link},
+    )
+
+
+def clear_silent(hass: HomeAssistant, ieee: str) -> None:
+    """Remove the "nothing heard from the thermostat" issue."""
+    ir.async_delete_issue(hass, DOMAIN, issue_id_silent(ieee))
 
 
 def raise_firmware(  # noqa: PLR0913 - one argument per placeholder of the text
@@ -241,7 +282,7 @@ def clear_profile_issues(hass: HomeAssistant, keep: set[str]) -> None:
 def clear_thermostat_issues_except(hass: HomeAssistant, keep_ieees: set[str]) -> None:
     """Remove the thermostat issues of every thermostat not in ``keep_ieees``.
 
-    Covers ``trv_unreachable_*``, ``trv_firmware_*`` and
+    Covers ``trv_unreachable_*``, ``trv_silent_*``, ``trv_firmware_*`` and
     ``schedule_thermostat_off_*``. ``keep_ieees`` holds
     the IEEE addresses of the thermostats of all configured rooms, so the issues
     of a thermostat that was removed from its room (or whose room was deleted)
@@ -249,6 +290,7 @@ def clear_thermostat_issues_except(hass: HomeAssistant, keep_ieees: set[str]) ->
     """
     wanted = (
         {issue_id_unreachable(ieee) for ieee in keep_ieees}
+        | {issue_id_silent(ieee) for ieee in keep_ieees}
         | {issue_id_firmware(ieee) for ieee in keep_ieees}
         | {issue_id_schedule_thermostat_off(ieee) for ieee in keep_ieees}
     )
@@ -256,7 +298,12 @@ def clear_thermostat_issues_except(hass: HomeAssistant, keep_ieees: set[str]) ->
         if (
             domain == DOMAIN
             and issue_id.startswith(
-                (_UNREACHABLE_PREFIX, _FIRMWARE_PREFIX, _SCHEDULE_OFF_PREFIX)
+                (
+                    _UNREACHABLE_PREFIX,
+                    _SILENT_PREFIX,
+                    _FIRMWARE_PREFIX,
+                    _SCHEDULE_OFF_PREFIX,
+                )
             )
             and issue_id not in wanted
         ):
