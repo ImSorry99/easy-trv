@@ -32,6 +32,7 @@ from custom_components.easy_trv.const import (
     CONF_HYSTERESIS,
     CONF_OUTDOOR_SENSOR,
     CONF_PRESENCE_UNKNOWN,
+    CONF_SCHEDULE_ENTITY,
     CONF_STATISTICS,
     CONF_TEMP_SENSORS,
     CONF_TRVS,
@@ -270,6 +271,9 @@ def room_config_from_subentry(  # noqa: PLR0913 - the stored data and what shape
         ),
         away_action=settings.away_action if presence_entity else None,
         away_setback=settings.away_setback_kelvin,
+        schedule_setback=(
+            settings.schedule_setback_kelvin if data.get(CONF_SCHEDULE_ENTITY) else None
+        ),
     )
 
 
@@ -500,6 +504,7 @@ def _build_room(  # noqa: PLR0913 - the collaborators of one room
         presence_unknown=settings.presence_unknown,
         presence_delay=timedelta(minutes=settings.away_delay_minutes),
         house=house,
+        schedule_entity=subentry.data.get(CONF_SCHEDULE_ENTITY) or None,
     )
     return controller, profile, settings
 

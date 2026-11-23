@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Schedules from a Home Assistant schedule helper: each room can get a **Schedule** (`schedule_entity`, chosen with the thermostats and sensors). While it is on, the room heats; while it is off, the room is lowered by **Setback outside the schedule** (`schedule_setback_kelvin`, new options section Schedule, room override, 0.5 to 15 K, default 3), never below frost protection. A block with the data field `temperature` sets the room's target when it starts. A target set while the schedule is off holds until it is on again. Away and schedule do not add up: the larger setback applies
+- Heating state `setback_schedule` (Lowered: schedule / Abgesenkt: Zeitplan) with the schedule named in the hint; room thermostat attributes `schedule_entity`, `schedule` and `schedule_override`; both in diagnostics
+
 ## [0.9.1] - 2026-11-17
 
 ### Fixed

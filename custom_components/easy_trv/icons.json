@@ -41,6 +41,7 @@
           "restricted_window_phase": "mdi:window-open",
           "boost": "mdi:fire",
           "setback_away": "mdi:home-thermometer-outline",
+          "setback_schedule": "mdi:calendar-clock",
           "frost": "mdi:snowflake-thermometer",
           "heating": "mdi:radiator"
         }

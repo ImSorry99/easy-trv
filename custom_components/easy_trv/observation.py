@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
+    STATE_OFF,
     STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
@@ -30,6 +31,7 @@ from custom_components.easy_trv.core.model import (
     KnobSettled,
     OutdoorChanged,
     PresenceChanged,
+    ScheduleChanged,
     TrvObserved,
     WindowChanged,
 )
@@ -250,6 +252,94 @@ class ForcedPresence(Protocol):
 
     def subscribe(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Call ``callback`` when the forced value changes; return the unsubscribe."""
+
+
+# The data key of a schedule block that carries the room's target.
+SCHEDULE_TEMPERATURE: Final = "temperature"
+
+
+def read_schedule(entity_id: str, state: State | None) -> tuple[bool, float | None]:
+    """Return whether a schedule reads on and the temperature of its block.
+
+    Anything but ``off`` reads as on (unavailable, unknown or missing included),
+    so a broken helper never leaves a room cold. A block temperature that is not
+    a finite number is ignored, with a warning.
+    """
+    if state is not None and state.state == STATE_OFF:
+        return False, None
+    if state is None or state.state != STATE_ON:
+        return True, None
+    raw = state.attributes.get(SCHEDULE_TEMPERATURE)
+    if raw is None:
+        return True, None
+    try:
+        value = math.nan if isinstance(raw, bool) else float(raw)
+    except (TypeError, ValueError):
+        value = math.nan
+    if not math.isfinite(value):
+        _LOGGER.warning(
+            "%s: the block's %s is not a number: %r",
+            entity_id,
+            SCHEDULE_TEMPERATURE,
+            raw,
+        )
+        return True, None
+    return True, value
+
+
+class ScheduleInput:
+    """Track a room's schedule helper and feed on/off and its block temperature.
+
+    Only changes are fed; the helper switches by itself, so no timer is needed.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entity_id: str,
+        feed: Callable[[LogicEvent], None],
+    ) -> None:
+        """Watch ``entity_id`` and feed ``ScheduleChanged`` to ``feed``."""
+        self._hass = hass
+        self._entity_id = entity_id
+        self._feed = feed
+        self._read: tuple[bool, float | None] = (True, None)
+        self._unsubscribe: CALLBACK_TYPE | None = None
+
+    @property
+    def entity_id(self) -> str:
+        """Return the schedule entity."""
+        return self._entity_id
+
+    @property
+    def on(self) -> bool:
+        """Return whether the schedule reads on."""
+        return self._read[0]
+
+    def start(self) -> tuple[bool, float | None]:
+        """Start tracking; return whether it reads on and the block temperature."""
+        self._unsubscribe = async_track_state_change_event(
+            self._hass, [self._entity_id], self._on_change
+        )
+        self._read = read_schedule(
+            self._entity_id, self._hass.states.get(self._entity_id)
+        )
+        return self._read
+
+    def stop(self) -> None:
+        """Stop tracking."""
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
+
+    @callback
+    def _on_change(self, event: Event[EventStateChangedData]) -> None:
+        """Feed a change of on/off or of the block temperature."""
+        read = read_schedule(self._entity_id, event.data["new_state"])
+        if read == self._read:
+            return
+        self._read = read
+        self._feed(ScheduleChanged(*read))
 
 
 class PresenceInput:
