@@ -1,0 +1,24 @@
+name: Share a thermostat profile
+description: Add your Easy TRV profile to the community list. A workflow checks it and opens a pull request.
+title: "Profile: "
+labels: ["profile"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing! In Easy TRV open the profile (Settings → Devices & services → Easy TRV → your profile → Show or edit profile) and use the share link; it fills in the text below. You can also paste it yourself.
+  - type: textarea
+    id: profile
+    attributes:
+      label: Profile (YAML)
+      description: The complete profile text.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: tested
+    attributes:
+      label: Tested with
+      description: Integration (ZHA, Zigbee2MQTT, ...), firmware and how long it has run for you.
+    validations:
+      required: false

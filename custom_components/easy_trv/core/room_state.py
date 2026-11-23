@@ -19,7 +19,13 @@ from custom_components.easy_trv.core.model import (
     TrvState,
     visible_health,
 )
-from custom_components.easy_trv.core.setpoint import away_held, lowered, target
+from custom_components.easy_trv.core.setpoint import (
+    away_held,
+    away_lowered,
+    lowered,
+    schedule_acts,
+    target,
+)
 from custom_components.easy_trv.core.setpoint import operation as room_operation
 
 if TYPE_CHECKING:
@@ -44,6 +50,7 @@ class HeatingState(StrEnum):
     RESTRICTED_WINDOW_PHASE = "restricted_window_phase"
     BOOST = "boost"
     SETBACK_AWAY = "setback_away"
+    SETBACK_SCHEDULE = "setback_schedule"
     FROST = "frost"
     HEATING = "heating"
 
@@ -68,6 +75,8 @@ class StateFacts:
     # Presence switched the room off, or lowered its target.
     away_hold: bool = False
     away_lowered: bool = False
+    # The room's schedule is off and lowers its target.
+    schedule_lowered: bool = False
 
 
 def failsafe_recent(state: RoomState, now: datetime, refresh: timedelta) -> bool:
@@ -153,12 +162,14 @@ def state_facts(  # noqa: PLR0913 - the room, its config, the clock and the two 
         ),
         silent_contacts=silent_contacts,
         away_hold=away_held(state),
-        away_lowered=_lowered_below_wish(config, state),
+        away_lowered=_lowered_below_wish(config, state) and away_lowered(config, state),
+        schedule_lowered=_lowered_below_wish(config, state)
+        and schedule_acts(config, state),
     )
 
 
 def _lowered_below_wish(config: RoomConfig, state: RoomState) -> bool:
-    """Return whether presence lowers the room's target below its wish."""
+    """Return whether presence or the schedule lowers the target below the wish."""
     goal = target(config, state)
     return (
         lowered(config, state)
@@ -191,6 +202,7 @@ def heating_state(facts: StateFacts) -> tuple[HeatingState, tuple[HeatingState, 
         ),
         HeatingState.BOOST: False,
         HeatingState.SETBACK_AWAY: facts.away_lowered,
+        HeatingState.SETBACK_SCHEDULE: facts.schedule_lowered,
         HeatingState.FROST: facts.operation is OperatingMode.FROST,
         HeatingState.HEATING: facts.operation is OperatingMode.HEAT,
     }

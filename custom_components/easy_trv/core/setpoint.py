@@ -65,22 +65,68 @@ def away_acts(cfg: RoomConfig, state: RoomState) -> bool:
     )
 
 
-def lowered(cfg: RoomConfig, state: RoomState) -> bool:
+def away_lowered(cfg: RoomConfig, state: RoomState) -> bool:
     """Return whether the room is lowered because nobody is home."""
     return away_acts(cfg, state) and cfg.away_action == "setback"
+
+
+def schedule_acts(cfg: RoomConfig, state: RoomState) -> bool:
+    """Return whether the room's schedule lowers it now.
+
+    The room has a schedule, it reads off, nobody overrode it, and the room
+    heats (operating mode heat).
+    """
+    return (
+        cfg.schedule_setback is not None
+        and state.schedule_off
+        and not state.schedule_override
+        and operation(state) is OperatingMode.HEAT
+    )
+
+
+def lowered(cfg: RoomConfig, state: RoomState) -> bool:
+    """Return whether the room is lowered: nobody is home or its schedule is off."""
+    return away_lowered(cfg, state) or schedule_acts(cfg, state)
+
+
+def setback(cfg: RoomConfig, state: RoomState) -> float:
+    """Return how far the room is lowered now: the larger acting setback."""
+    acting = [
+        kelvin
+        for acts, kelvin in (
+            (away_lowered(cfg, state), cfg.away_setback),
+            (schedule_acts(cfg, state), cfg.schedule_setback),
+        )
+        if acts and kelvin is not None
+    ]
+    return max(acting, default=0.0)
+
+
+def with_overrides(cfg: RoomConfig, state: RoomState) -> RoomState:
+    """Mark a new target as an override of what lowers the room now.
+
+    Presence and the schedule each keep their own override: it ends when
+    presence reads home or the schedule turns on again.
+    """
+    return replace(
+        state,
+        away_override=state.away_override or away_acts(cfg, state),
+        schedule_override=state.schedule_override or schedule_acts(cfg, state),
+    )
 
 
 def target(cfg: RoomConfig, state: RoomState) -> float | None:
     """Return the value the thermostats should show: the wish, unless lowered.
 
-    Lowered is the wish minus the setback, never below the frost protection
-    temperature (a wish below it stays) and rounded and clamped to the range.
+    Lowered is the wish minus the setback (the larger of away and schedule),
+    never below the frost protection temperature (a wish below it stays) and
+    rounded and clamped to the range.
     """
     wish = state.setpoint
     if wish is None or cfg.setpoint_range is None or not lowered(cfg, state):
         return wish
     floor = min(cfg.frost_temperature, wish)
-    return clamp(max(wish - cfg.away_setback, floor), cfg.setpoint_range)
+    return clamp(max(wish - setback(cfg, state), floor), cfg.setpoint_range)
 
 
 def away_held(state: RoomState) -> bool:
@@ -134,13 +180,14 @@ def on_set_setpoint(  # noqa: PLR0913
     # Only a new value overrides presence; the same one sent again does not.
     changed = state.setpoint is None or abs(clamped - state.setpoint) > SAME
     state = _forget_knobs(state, capability_of(SetSetpoint(celsius)))
+    if changed:
+        state = with_overrides(cfg, state)
     state = replace(
         state,
         setpoint=clamped,
         setpoint_source="ha",
         preset=Preset.NONE,
         frost_return=None,
-        away_override=state.away_override or (changed and away_acts(cfg, state)),
     )
     if held_by_away and not holding(state):
         return resume(cfg, state, now, capability_of, resync)
@@ -375,7 +422,11 @@ def on_restore(  # noqa: PLR0913
         state = replace(state, preset=restore.preset)
     if restore.frost_return is not None:
         state = replace(state, frost_return=restore.frost_return)
-    state = replace(state, away_override=restore.away_override)
+    state = replace(
+        state,
+        away_override=restore.away_override,
+        schedule_override=restore.schedule_override,
+    )
     if state.mode is RoomMode.OFF:
         # A room remembered off with frost protection (0.3.0 allowed that) is off.
         state = _with_frost(cfg, state, frost=False)

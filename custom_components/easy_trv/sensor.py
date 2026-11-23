@@ -35,6 +35,7 @@ HINT_PHRASES: Final = {
     "window_phase": "{name}: own window detection active",
     "away": "{name} away",
     "house": "Easy TRV presence",
+    "schedule_off": "{name} off",
     "why_unavailable": "unavailable",
     "why_unknown": "unknown",
     "why_missing": "does not exist",
@@ -216,6 +217,8 @@ class RoomStateSensor(SensorEntity):
                 phrases = self._thermostats_noted("window_phase", Note.WINDOW_PHASE)
             case HeatingState.OFF_AWAY | HeatingState.SETBACK_AWAY:
                 phrases = self._presence()
+            case HeatingState.SETBACK_SCHEDULE:
+                phrases = self._schedule()
             case _:
                 pass
         return phrases
@@ -254,6 +257,15 @@ class RoomStateSensor(SensorEntity):
         state = self.hass.states.get(entity_id)
         name = entity_id if state is None else state.name
         return [self._phrase("away", name=name)]
+
+    def _schedule(self) -> list[str]:
+        """Return the phrase that names the room's schedule helper."""
+        entity_id = self._controller.schedule_entity
+        if entity_id is None:  # pragma: no cover - lowered by a schedule it has
+            return []
+        state = self.hass.states.get(entity_id)
+        name = entity_id if state is None else state.name
+        return [self._phrase("schedule_off", name=name)]
 
     def _contact(self, entity_id: str) -> str:
         """Return the phrase for a window contact that says nothing, and why."""

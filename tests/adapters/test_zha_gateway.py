@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -22,6 +23,7 @@ from zigpy.zcl.foundation import Status, WriteAttributesStatusRecord
 
 from custom_components.easy_trv.adapters import zha_gateway
 from custom_components.easy_trv.adapters.zha_gateway import DeviceRef, GatewayError
+from custom_components.easy_trv.core.link import LinkInfo
 from tests.fake_gateway import FakeGateway
 
 IEEE = "00:12:4b:00:aa:bb:cc:dd"
@@ -978,3 +980,48 @@ async def test_cached_is_none_when_absent_or_broken(hass) -> None:
         device.async_get_cluster.side_effect = KeyError(0xFC11)
         assert gw.cached(IEEE, 1, 0xFC11, 0x6000) is None
         assert gw.cached("not-an-ieee", 1, 0xFC11, 0x6000) is None
+
+
+# --- link -----------------------------------------------------------------
+
+
+def _radio_device(battery_raw: object) -> MagicMock:
+    """Return a ZHA device with radio values and a power cluster on endpoint 1."""
+    device = MagicMock()
+    device.lqi = 96
+    device.rssi = -71
+    device.last_seen = 1_795_000_000.0
+    power = MagicMock()
+    power.get.return_value = battery_raw
+    zdo = MagicMock()
+    zdo.in_clusters = {}
+    endpoint = MagicMock()
+    endpoint.in_clusters = {0x0001: power}
+    device.device.endpoints = {0: zdo, 1: endpoint}
+    return device
+
+
+async def test_link_reads_the_radio_values_from_the_cache(hass) -> None:
+    device = _radio_device(97)  # half percent
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        info = gw.link(IEEE)
+    assert info.lqi == 96
+    assert info.rssi == -71
+    assert info.last_seen == datetime.fromtimestamp(1_795_000_000.0, UTC)
+    assert info.battery == 48
+    device.device.endpoints[1].in_clusters[0x0001].get.assert_called_with(0x0021)
+
+
+async def test_link_treats_invalid_and_broken_values_as_unknown(hass) -> None:
+    device = _radio_device(0xFF)
+    device.last_seen = None
+    type(device).lqi = PropertyMock(side_effect=RuntimeError("gone"))
+    with patch(PATCH_TARGET, return_value=_gateway_with(device)):
+        gw = zha_gateway.ZhaLibraryGateway(hass)
+        info = gw.link(IEEE)
+        assert info.lqi is None
+        assert info.rssi == -71
+        assert info.last_seen is None
+        assert info.battery is None
+        assert gw.link("not-an-ieee") == LinkInfo()

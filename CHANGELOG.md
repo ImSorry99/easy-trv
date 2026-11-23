@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-23
+
+### Added
+
+- Schedules from a Home Assistant schedule helper: each room can get a **Schedule** (`schedule_entity`, chosen with the thermostats and sensors). While it is on, the room heats; while it is off, the room is lowered by **Setback outside the schedule** (`schedule_setback_kelvin`, new options section Schedule, room override, 0.5 to 15 K, default 3), never below frost protection. A block with the data field `temperature` sets the room's target when it starts. A target set while the schedule is off holds until it is on again. Away and schedule do not add up: the larger setback applies
+- Heating state `setback_schedule` (Lowered: schedule / Abgesenkt: Zeitplan) with the schedule named in the hint; room thermostat attributes `schedule_entity`, `schedule` and `schedule_override`; both in diagnostics
+- **Add thermostat profile** on the integration page: create your own profile (Beta), upload or paste one, or download one from the community. Stored profiles are listed there, can be shown, edited and deleted, and rooms choose them in their Profile field
+- Entity profiles (Beta, `backend: entity`): a profile can name the thermostat's Home Assistant entities instead of Zigbee attributes, so thermostats of any integration (Zigbee2MQTT, deCONZ, Tuya, ...) work. The wizard builds one from the entities you pick
+- Community profiles in `community/profiles/` with an index the integration reads. **Show or edit profile** has a share link that opens a pre-filled GitHub form; a workflow checks the profile and opens a pull request
+- Repairs issue `trv_silent`: ZHA has not heard anything from a thermostat for 3 hours, even while Easy TRV writes nothing to it. It disappears as soon as the thermostat is heard again
+- Diagnostics: per thermostat the radio values ZHA last knew (`links`: LQI, RSSI, last heard, battery)
+
+### Changed
+
+- ZHA is optional: it is set up first when present (`after_dependencies`), and without ZHA the entry loads for rooms with entity profiles. With ZHA configured, a ZHA that cannot be reached still makes setup retry
+- The room's thermostat picker and the area prefill offer every climate entity, not only ZHA ones; a thermostat without a fitting profile is rejected with "no profile"
+- The issue "Thermostat does not respond" shows battery, LQI, RSSI and how long ago the thermostat was last heard, and names the likely cause: an almost empty battery, a thermostat that has gone silent, or a weak signal. The values come from ZHA's cache, so reading them costs no radio traffic
+
 ## [0.9.1] - 2026-11-17
 
 ### Fixed
@@ -210,7 +228,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/ImSorry99/easy-trv/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/ImSorry99/easy-trv/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ImSorry99/easy-trv/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ImSorry99/easy-trv/compare/v0.7.2...v0.8.0

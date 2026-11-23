@@ -46,6 +46,7 @@ from custom_components.easy_trv.const import (
     OPERATION_TIMEOUT,
     TICK_SECONDS,
 )
+from custom_components.easy_trv.core import link as radio
 from custom_components.easy_trv.core import statistics as room_stats
 from custom_components.easy_trv.core.model import (
     INTENT_NAMES,
@@ -109,6 +110,7 @@ from custom_components.easy_trv.observation import (
     HoldInputs,
     KnobTimers,
     PresenceInput,
+    ScheduleInput,
     ThermostatSubscriptions,
 )
 from custom_components.easy_trv.profiles.engine import CapabilityUnsupported
@@ -291,6 +293,7 @@ class RoomController:
         presence_unknown: str = "away",
         presence_delay: timedelta = timedelta(0),
         house: ForcedPresence | None = None,
+        schedule_entity: str | None = None,
     ) -> None:
         """Wire the room logic to Home Assistant, the profile and the gateway.
 
@@ -300,7 +303,8 @@ class RoomController:
         matters for a room with an outdoor cut-off. ``presence_entity`` is the
         room's resolved presence entity (only with an ``away_action``); an
         unknown state of it counts as ``presence_unknown``. ``house`` can force
-        what the room reads for presence.
+        what the room reads for presence. ``schedule_entity`` is the room's
+        schedule helper (only with a ``schedule_setback``).
         """
         self._hass = hass
         self._config = config
@@ -321,6 +325,8 @@ class RoomController:
         self._worker_task: asyncio.Task[None] | None = None
         # (thermostat, capability) -> operations queued or running for it
         self._busy: Counter[tuple[str, str]] = Counter()
+        # Thermostats with a raised "nothing heard" issue.
+        self._silent: set[str] = set()
         self._unsubscribers: list[CALLBACK_TYPE] = []
         self._cancel_debounce: CALLBACK_TYPE | None = None
         self._cancel_retries: list[CALLBACK_TYPE] = []
@@ -355,6 +361,11 @@ class RoomController:
                 changed=self._notify_update,
             )
             if self._presence_entity
+            else None
+        )
+        self._schedule = (
+            ScheduleInput(hass, schedule_entity, self._dispatch)
+            if schedule_entity and config.schedule_setback is not None
             else None
         )
         self._warned_units: set[str] = set()
@@ -587,6 +598,23 @@ class RoomController:
         return self._state.away_override
 
     @property
+    def schedule_entity(self) -> str | None:
+        """Return the room's schedule helper, ``None`` without a schedule."""
+        return None if self._schedule is None else self._schedule.entity_id
+
+    @property
+    def schedule(self) -> str | None:
+        """Return ``on`` or ``off`` as the schedule reads; ``None`` without one."""
+        if self._schedule is None:
+            return None
+        return "off" if self._state.schedule_off else "on"
+
+    @property
+    def schedule_override(self) -> bool:
+        """Return whether a target set while the schedule is off overrides it."""
+        return self._state.schedule_override
+
+    @property
     def outdoor_hold(self) -> bool:
         """Return whether the outdoor cut-off hold is active."""
         return self._state.outdoor_hold
@@ -680,7 +708,7 @@ class RoomController:
         """Switch the room off, to frost protection only, or to heating."""
         self._dispatch(SetRoomOperation(operation))
 
-    async def async_restore(
+    async def async_restore(  # noqa: PLR0913 - what a restart remembers
         self,
         setpoint: float | None,
         mode: RoomMode | None,
@@ -688,9 +716,14 @@ class RoomController:
         frost_return: float | None = None,
         *,
         away_override: bool = False,
+        schedule_override: bool = False,
     ) -> None:
         """Take the state remembered across a restart; call it before the start."""
-        self._dispatch(RestoreRoom(setpoint, mode, preset, frost_return, away_override))
+        self._dispatch(
+            RestoreRoom(
+                setpoint, mode, preset, frost_return, away_override, schedule_override
+            )
+        )
 
     def snapshot(self) -> dict[str, Any]:
         """Return configuration, tunables and state as JSON-able data.
@@ -731,6 +764,10 @@ class RoomController:
             ),
             "silent_contacts": list(self.silent_contacts),
             "deviations": self.deviations,
+            "links": {
+                trv.entity_id: self._gateway.link(trv.ieee).as_dict()
+                for trv in self._config.trvs
+            },
         }
 
     def statistics(self, now: datetime | None = None) -> RoomStatistics:
@@ -832,6 +869,7 @@ class RoomController:
         # again by the first operations.
         for trv in config.trvs:
             issues.clear_unreachable(self._hass, trv.ieee)
+            issues.clear_silent(self._hass, trv.ieee)
             issues.clear_firmware(self._hass, trv.ieee)
             issues.clear_schedule_thermostat_off(self._hass, trv.ieee)
         issues.clear_window_open_long(self._hass, config.room_id)
@@ -840,6 +878,9 @@ class RoomController:
         self._subscriptions.subscribe_all()
         window_open, outdoor = self._holds.start()
         away = self._presence.start() if self._presence is not None else False
+        schedule_on, schedule_temperature = (
+            self._schedule.start() if self._schedule is not None else (True, None)
+        )
         self._started = True
         self._begin_periods(window_open=window_open)
         self._dispatch(
@@ -857,6 +898,8 @@ class RoomController:
                 window_open=window_open,
                 outdoor=outdoor,
                 away=away,
+                schedule_on=schedule_on,
+                schedule_temperature=schedule_temperature,
             )
         )
 
@@ -875,6 +918,8 @@ class RoomController:
         self._holds.stop()
         if self._presence is not None:
             self._presence.stop()
+        if self._schedule is not None:
+            self._schedule.stop()
         if self._cancel_debounce is not None:
             self._cancel_debounce()
             self._cancel_debounce = None
@@ -923,6 +968,39 @@ class RoomController:
     def _handle_tick(self, _now: datetime) -> None:
         """Let the logic check timeouts and the periodic refresh."""
         self._dispatch(Tick())
+        if not self._stopped:
+            self._check_silent(dt_util.utcnow())
+
+    def _check_silent(self, now: datetime) -> None:
+        """Report thermostats ZHA has not heard from for a long time.
+
+        Reads the radio values from ZHA's cache, so it costs no radio traffic.
+        A thermostat already reported as not accepting writes keeps that one
+        issue, which names the silence itself. The issue goes as soon as the
+        thermostat is heard again.
+        """
+        for trv in self._config.trvs:
+            info = self._gateway.link(trv.ieee)
+            reported = self._state.trvs[trv.entity_id].issue_raised
+            if radio.is_silent(info, now) and not reported:
+                issues.raise_silent(
+                    self._hass,
+                    trv.ieee,
+                    room=self._config.name,
+                    thermostat=thermostat_name(self._hass, trv.entity_id),
+                    link=radio.placeholders(info, now),
+                )
+                if trv.entity_id not in self._silent:
+                    self._silent.add(trv.entity_id)
+                    _LOGGER.warning(
+                        "%s: nothing heard from %s since %s",
+                        self._config.name,
+                        trv.entity_id,
+                        info.last_seen,
+                    )
+            elif trv.entity_id in self._silent:
+                self._silent.discard(trv.entity_id)
+                issues.clear_silent(self._hass, trv.ieee)
 
     # --- Reading Home Assistant ------------------------------------------
 
@@ -1190,6 +1268,8 @@ class RoomController:
             case "unreachable":
                 ref = self._device_refs[command.trv]
                 thermostat = thermostat_name(self._hass, ref.entity_id)
+                now = dt_util.utcnow()
+                info = self._gateway.link(ref.ieee)
                 issues.raise_unreachable(
                     self._hass,
                     ref.ieee,
@@ -1198,6 +1278,8 @@ class RoomController:
                     thermostat=thermostat,
                     minutes=found["minutes"],
                     error=found["error"],
+                    cause=radio.likely_cause(info, now).value,
+                    link=radio.placeholders(info, now),
                 )
             case "schedule_thermostat_off":
                 ref = self._device_refs[command.trv]

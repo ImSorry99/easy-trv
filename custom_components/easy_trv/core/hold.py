@@ -19,6 +19,7 @@ from custom_components.easy_trv.core.model import (
     FireEvent,
     Intent,
     Log,
+    Preset,
     RaiseIssue,
     RoomConfig,
     RoomMode,
@@ -79,6 +80,45 @@ def on_presence(  # noqa: PLR0913
     if was_held is not held(state):
         return _transition(cfg, state, now, was_held, capability_of, resync)
     if cfg.setpoint_range is None or setpoint.target(cfg, state) == before:
+        return state, []
+    return _write_target(cfg, state, now, capability_of)
+
+
+def on_schedule(  # noqa: PLR0913
+    cfg: RoomConfig,
+    state: RoomState,
+    now: datetime,
+    on: bool,  # noqa: FBT001
+    temperature: float | None,
+    capability_of: _Capabilities,
+) -> _Step:
+    """Take the room's schedule turning on or off or its block temperature changing.
+
+    On ends an override. A block that carries a new ``temperature`` makes it the
+    wish (during frost protection the setpoint frost returns to). Off lowers a
+    room that heats by the schedule setback. A room that heats gets its new
+    target when it changes; one that is off or held only remembers.
+    """
+    if cfg.schedule_setback is None or cfg.setpoint_range is None:
+        return state, []
+    before = setpoint.target(cfg, state)
+    state = replace(
+        state,
+        schedule_off=not on,
+        schedule_override=state.schedule_override and not on,
+    )
+    block = temperature if on else None
+    if block is not None and (
+        state.schedule_temperature is None
+        or abs(block - state.schedule_temperature) > setpoint.SAME
+    ):
+        wish = setpoint.clamp(block, cfg.setpoint_range)
+        if state.preset is Preset.FROST:
+            state = replace(state, frost_return=wish)
+        else:
+            state = replace(state, setpoint=wish, setpoint_source="schedule")
+    state = replace(state, schedule_temperature=block)
+    if setpoint.suspended(state) or setpoint.target(cfg, state) == before:
         return state, []
     return _write_target(cfg, state, now, capability_of)
 

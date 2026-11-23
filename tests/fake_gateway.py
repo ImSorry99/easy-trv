@@ -9,6 +9,7 @@ from custom_components.easy_trv.adapters.zha_gateway import (
     UnsupportedAttribute,
     ZhaUnavailable,
 )
+from custom_components.easy_trv.core.link import LinkInfo
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -36,7 +37,8 @@ class FakeGateway:
     registered device owns, except :meth:`subscribe`, which raises
     :class:`ZhaUnavailable` for it (like the adapter). ``subscribe_unavailable``
     (a set of IEEEs) makes ``subscribe`` raise it for a known device too, like
-    a ZHA that has not loaded the device yet.
+    a ZHA that has not loaded the device yet. ``links`` (keyed by IEEE) holds
+    what :meth:`link` returns.
     """
 
     def __init__(self) -> None:
@@ -51,6 +53,8 @@ class FakeGateway:
         self.read_override: dict[tuple[str, int], int] = {}
         self.unsupported_write: set[tuple[str, int]] = set()
         self.subscribe_unavailable: set[str] = set()
+        # ieee -> radio values; a device without an entry knows nothing.
+        self.links: dict[str, LinkInfo] = {}
         self.subscriptions: list[
             tuple[str, int, int, tuple[int, ...], ObservationCallback]
         ] = []
@@ -141,6 +145,10 @@ class FakeGateway:
         if (ieee, attribute) in self.unsupported_write:
             return None
         return self.store.get((ieee, endpoint, cluster, attribute))
+
+    def link(self, ieee: str) -> LinkInfo:
+        """Return the scripted radio values; like the adapter, never raises."""
+        return self.links.get(ieee, LinkInfo())
 
     def subscribe(
         self,

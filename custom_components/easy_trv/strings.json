@@ -45,16 +45,18 @@
         "entities": {
           "title": "Room devices",
           "data": {
-            "trvs": "Thermostats (ZHA)",
+            "trvs": "Thermostats",
             "temp_sensors": "Temperature sensors",
             "humidity_sensors": "Humidity sensors",
-            "window_contacts": "Window and door contacts"
+            "window_contacts": "Window and door contacts",
+            "schedule_entity": "Schedule"
           },
           "data_description": {
-            "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
+            "trvs": "The thermostats that heat this room, all of the same model. A thermostat can belong to one room only. Sonoff TRVZB on ZHA works out of the box; other thermostats need a profile (Add thermostat profile).",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
             "humidity_sensors": "Stored for later use; not evaluated yet.",
-            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional."
+            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional.",
+            "schedule_entity": "A schedule helper. While it is on, the room heats; while it is off, the room is lowered. A block with the data field temperature sets the room's target when it starts. Optional."
           }
         },
         "reconfigure": {
@@ -62,17 +64,19 @@
           "data": {
             "name": "Room name",
             "area_id": "Area",
-            "trvs": "Thermostats (ZHA)",
+            "trvs": "Thermostats",
             "temp_sensors": "Temperature sensors",
             "humidity_sensors": "Humidity sensors",
-            "window_contacts": "Window and door contacts"
+            "window_contacts": "Window and door contacts",
+            "schedule_entity": "Schedule"
           },
           "data_description": {
             "area_id": "The room's Easy TRV entities go into this area.",
-            "trvs": "The ZHA thermostats that heat this room. A thermostat can belong to one room only.",
+            "trvs": "The thermostats that heat this room, all of the same model. A thermostat can belong to one room only. Sonoff TRVZB on ZHA works out of the box; other thermostats need a profile (Add thermostat profile).",
             "temp_sensors": "Order = priority; the first usable sensor is used.",
             "humidity_sensors": "Stored for later use; not evaluated yet.",
-            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional."
+            "window_contacts": "Contacts that report an open window or door of this room. They may come from another area, for example the kitchen when it is joined to the living room. While one of them is open, the room's heating is switched off. Optional.",
+            "schedule_entity": "A schedule helper. While it is on, the room heats; while it is off, the room is lowered. A block with the data field temperature sets the room's target when it starts. Optional."
           }
         },
         "settings": {
@@ -106,7 +110,8 @@
             "away_action": "While away",
             "away_setback_kelvin": "Setback (K)",
             "statistics": "Collect statistics",
-            "reset_settings": "Reset all settings of this room to Global"
+            "reset_settings": "Reset all settings of this room to Global",
+            "schedule_setback_kelvin": "Setback outside the schedule (K)"
           },
           "data_description": {
             "profile": "Auto picks the first profile that matches all thermostats of the room. Global is currently {global_profile}.",
@@ -136,14 +141,15 @@
             "away_action": "Lower takes the target down by the setback, never below the frost protection temperature. Off switches the thermostats off like an open window. Global is currently {global_away_action}.",
             "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Global is currently {global_away_setback_kelvin}.",
             "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones. Global is currently {global_statistics}.",
-            "reset_settings": "On submit every setting of this room follows the global options again and the values above are ignored. Where the room's presence comes from stays."
+            "reset_settings": "On submit every setting of this room follows the global options again and the values above are ignored. Where the room's presence comes from stays.",
+            "schedule_setback_kelvin": "How far the target goes down while the room's schedule is off. 0.5 to 15 K, never below frost protection. Global is currently {global_schedule_setback_kelvin}."
           }
         }
       },
       "error": {
         "no_trv": "Select at least one thermostat.",
-        "not_zha": "At least one of the selected entities is not a ZHA thermostat.",
-        "no_profile": "No profile matches all selected thermostats. Add a profile for the model or split the room.",
+        "not_zha": "At least one of the selected entities is not a thermostat with a device.",
+        "no_profile": "No profile matches all selected thermostats. Add a thermostat profile for the model (upload, community or your own) or split the room.",
         "profile_mismatch": "The selected profile does not match all selected thermostats.",
         "trv_in_other_room": "At least one of the selected thermostats already belongs to another room.",
         "name_exists": "A room with this name already exists.",
@@ -155,6 +161,92 @@
       "abort": {
         "reconfigure_successful": "Re-configuration was successful",
         "already_configured": "A room with this name already exists."
+      }
+    },
+    "profile": {
+      "entry_type": "Thermostat profile",
+      "initiate_flow": {
+        "user": "Add thermostat profile",
+        "reconfigure": "Show or edit profile"
+      },
+      "step": {
+        "user": {
+          "title": "Add thermostat profile",
+          "description": "A profile tells Easy TRV how to drive a thermostat model. Sonoff TRVZB is built in. Rooms choose a profile in their settings.",
+          "menu_options": {
+            "create": "Create your own profile (Beta)",
+            "upload": "Upload or paste a profile",
+            "community": "Download from the community"
+          }
+        },
+        "upload": {
+          "title": "Upload profile",
+          "description": "Choose a profile file (.yaml) or paste its text. Easy TRV checks it before saving.{error}",
+          "data": {
+            "file": "Profile file",
+            "yaml": "Profile text (YAML)"
+          },
+          "data_description": {
+            "file": "A profile file, for example one shared by another user.",
+            "yaml": "Used when no file is chosen."
+          }
+        },
+        "community": {
+          "title": "Community profiles",
+          "description": "Profiles shared by other users. Profiles marked [Beta] drive the thermostat through its Home Assistant entities.{error}",
+          "data": {
+            "profile": "Profile"
+          }
+        },
+        "reconfigure": {
+          "title": "Profile",
+          "description": "Copy this text to keep a backup, or [share the profile with the community]({share_url}) (opens a pre-filled form on GitHub). Change the text and submit to update the profile; rooms that use it restart.{error}",
+          "data": {
+            "yaml": "Profile text (YAML)"
+          }
+        },
+        "create": {
+          "title": "Create your own profile (Beta)",
+          "description": "Name the profile and pick one of your thermostats as the sample. On the next page you choose which of its entities does what. Works with any integration (Zigbee2MQTT, deCONZ, ZHA, Tuya, ...). Other thermostats of the same model are found automatically.{error}",
+          "data": {
+            "name": "Profile name",
+            "thermostat": "Sample thermostat"
+          }
+        },
+        "create_map": {
+          "title": "What does which entity do?",
+          "description": "Pick the entities of {thermostat}. Only the room temperature is required; leave out what the thermostat does not have.",
+          "data": {
+            "external_temperature": "Room temperature for the thermostat (external sensor value)",
+            "source": "Temperature source (internal or external sensor)",
+            "window_detection": "Open window detection of the thermostat",
+            "frost_temperature": "Frost protection temperature",
+            "hysteresis": "Hysteresis (control accuracy)",
+            "adaptive_mode": "Adaptive mode"
+          }
+        },
+        "create_source": {
+          "title": "Temperature source",
+          "description": "Which option of the select uses the external sensor, and which the built-in one?",
+          "data": {
+            "external": "Option for the external sensor",
+            "internal": "Option for the built-in sensor"
+          }
+        }
+      },
+      "error": {
+        "no_input": "Choose a file or paste a profile.",
+        "invalid_profile": "The profile is not valid.",
+        "profile_id_taken": "Another profile already uses this id. Change the id in the profile.",
+        "download_failed": "The profile could not be downloaded. Try again later.",
+        "name_required": "Enter a name.",
+        "no_entities": "This thermostat has no number entity for the room temperature, or no device."
+      },
+      "abort": {
+        "reconfigure_successful": "The profile was updated.",
+        "community_unreachable": "The community profiles could not be loaded. Check the internet connection and try again later.",
+        "community_empty": "There are no community profiles that are not installed yet.",
+        "wizard_failed": "The profile could not be built from these entities. Please report this as an issue."
       }
     }
   },
@@ -189,6 +281,7 @@
           "restricted_window_phase": "Restricted: thermostat's window detection active",
           "boost": "Manual (boost)",
           "setback_away": "Lowered: away",
+          "setback_schedule": "Lowered: schedule",
           "frost": "Frost protection",
           "heating": "Heating"
         },
@@ -278,6 +371,26 @@
     "trv_unreachable": {
       "title": "Thermostat {thermostat} in {room} is not responding",
       "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nCheck the thermostat's battery and its Zigbee signal (distance to the nearest router or coordinator). If it still does not respond, re-pair it with ZHA.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_unreachable_battery": {
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nLikely cause: the battery is almost empty. Replace the thermostat's batteries.\n\nRadio values from ZHA: battery {battery}, LQI {lqi}, RSSI {rssi}, last heard {silent} minutes ago.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_unreachable_silent": {
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nLikely cause: the thermostat has lost its connection, ZHA has not heard from it for {silent} minutes. Check the battery and the distance to the nearest Zigbee router or coordinator. If it still does not respond, re-pair it with ZHA.\n\nRadio values from ZHA: battery {battery}, LQI {lqi}, RSSI {rssi}, last heard {silent} minutes ago.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_unreachable_signal": {
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nLikely cause: the Zigbee signal is weak. A Zigbee router (a Zigbee smart plug, say) closer to the thermostat usually helps. How meaningful the LQI is depends on the radio stick.\n\nRadio values from ZHA: battery {battery}, LQI {lqi}, RSSI {rssi}, last heard {silent} minutes ago.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_unreachable_unclear": {
+      "title": "Thermostat {thermostat} in {room} is not responding",
+      "description": "Writes to {thermostat} in {room} have been failing for more than {minutes} minutes. Still missing: \"{setting}\". Last error: {error}\n\nBattery and signal look normal. Waking the thermostat once (press its button) or taking its batteries out briefly often helps. If it still does not respond, re-pair it with ZHA.\n\nRadio values from ZHA: battery {battery}, LQI {lqi}, RSSI {rssi}, last heard {silent} minutes ago.\n\nThis issue resolves itself as soon as a write of \"{setting}\" to the thermostat has been verified. Easy TRV tries it again at every refresh interval."
+    },
+    "trv_silent": {
+      "title": "Nothing heard from thermostat {thermostat} in {room}",
+      "description": "ZHA has not heard from {thermostat} in {room} for {silent} minutes. Easy TRV cannot control it like this.\n\nCheck the thermostat's battery and the distance to the nearest Zigbee router or coordinator. Waking the thermostat once (press its button) often helps.\n\nBattery {battery}, LQI {lqi}, RSSI {rssi}.\n\nThis notice disappears by itself as soon as ZHA hears from the thermostat again."
     },
     "trv_firmware": {
       "title": "Thermostat {thermostat} in {room} lacks a firmware feature",
@@ -412,6 +525,16 @@
               "away_delay_minutes": "How long presence must read away without a break before away counts; home counts at once. 0 to 120 minutes, 0 = at once. Empty = {default_away_delay_minutes}."
             }
           },
+          "schedule": {
+            "name": "Schedule",
+            "description": "A room with a schedule helper (chosen in the room) is lowered while its schedule is off.",
+            "data": {
+              "schedule_setback_kelvin": "Setback (K)"
+            },
+            "data_description": {
+              "schedule_setback_kelvin": "How far the target goes down while the schedule is off. 0.5 to 15 K, never below frost protection. Empty = {default_schedule_setback_kelvin}."
+            }
+          },
           "statistics": {
             "name": "Statistics",
             "description": "What Easy TRV records about each room as long-term statistics.",
@@ -498,7 +621,8 @@
         "why_unknown": "unknown",
         "why_missing": "does not exist",
         "away": "{name} away",
-        "house": "Easy TRV presence"
+        "house": "Easy TRV presence",
+        "schedule_off": "{name} off"
       }
     },
     "outdoor_cutoff": {

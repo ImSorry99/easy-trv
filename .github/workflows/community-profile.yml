@@ -1,0 +1,48 @@
+name: Community profile
+
+# A "Share a thermostat profile" issue becomes a pull request that adds the
+# profile to community/profiles. Merging the pull request publishes it.
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  profile:
+    if: contains(github.event.issue.labels.*.name, 'profile')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - id: profile
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+        run: uv run python scripts/profile_from_issue.py >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+      - if: steps.profile.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ERROR: ${{ steps.profile.outputs.error }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$NUMBER" --repo "$GITHUB_REPOSITORY" --body "The profile could not be added: $ERROR
+
+          Edit the issue to fix it; the check runs again."
+          exit 1
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: community/profile-${{ steps.profile.outputs.id }}
+          title: "Community profile: ${{ steps.profile.outputs.name }}"
+          commit-message: "community: add profile ${{ steps.profile.outputs.id }}"
+          body: |
+            Adds the community profile `${{ steps.profile.outputs.id }}` from #${{ github.event.issue.number }}.
+            The schema check passed. Merge to publish it.
+
+            Closes #${{ github.event.issue.number }}
+          labels: profile

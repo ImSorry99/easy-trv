@@ -12,7 +12,7 @@ Status: version 0.8.0 is released (a quieter, more robust write path: a thermost
 |---|---|---|---|
 | Sonoff TRVZB (Gen 1) | ZHA | 1.2.1 or newer | Hysteresis needs 1.3.0 or newer, the adaptive mode 1.4.4 or newer. Targeted firmware: 1.3.0 and 1.4.4. The first hardware run is pending (see [`docs/testing-on-device.md`](docs/testing-on-device.md)). |
 
-Home Assistant 2026.8 or newer is required. The thermostats must already be paired with ZHA. Use ZHA's built-in quirk for the TRVZB; do not add a custom quirk for the same model, the two conflict.
+Home Assistant 2026.8 or newer is required. The shipped profile needs the thermostats paired with ZHA; thermostats of other integrations work with an entity profile (Beta, see [Profiles](#profiles)). Use ZHA's built-in quirk for the TRVZB; do not add a custom quirk for the same model, the two conflict.
 
 Other thermostats, Zigbee2MQTT and other Zigbee integrations are not supported.
 
@@ -34,10 +34,11 @@ The room form asks for:
 
 | Field | Meaning |
 |---|---|
-| Thermostats (ZHA) | One or more ZHA thermostats of a supported model. A thermostat can belong to one room only. |
+| Thermostats | One or more thermostats of the same model that a profile fits. A thermostat can belong to one room only. |
 | Temperature sensors | The room's sensors in priority order (drag to reorder). The first usable one is used. Without any sensor Easy TRV does not touch the thermostats' temperature source. |
 | Humidity sensors | Stored for later use. Not evaluated yet. |
 | Window and door contacts | Optional. `binary_sensor` entities of the class window, door, opening or garage door, from any area. See [Window contacts](#window-contacts). |
+| Schedule | Optional. A Home Assistant schedule helper: on heats, off lowers the room. See [Schedule](#schedule). |
 
 A further page, **Room settings**, lets the room deviate from the global settings (see below). To change a room later, or to remove it, open the room's menu on the integration page (edit or delete). Saving a change reloads the integration.
 
@@ -81,6 +82,7 @@ Every setting exists in three layers, and the most specific one that is set wins
 | While away | lower, off | lower | Lower takes the target down by the setback; off switches the room off like an open window. |
 | Away delay (global only) | 0 to 120 minutes | 15 | How long presence must read away before it counts. 0 = away counts at once. Home counts at once. |
 | Setback | 0.5 to 10 K in 0.5 K steps | 3 | How far the target goes down while away, never below the frost protection temperature. |
+| Setback outside the schedule | 0.5 to 15 K in 0.5 K steps | 3 | How far the target goes down while the room's [schedule](#schedule) is off, never below the frost protection temperature. |
 | Collect statistics | off, hidden, visible | off | Whether the room has the [statistics sensors](#statistics): **off** creates none and removes existing ones, **hidden** creates them and keeps collecting but hides them from lists and automatic dashboards, **visible** shows them. See [Collecting statistics](#collecting-statistics). |
 | Profile (rooms only) | `auto` or a profile id | `auto` | `auto` takes the first profile that matches all thermostats of the room. Or choose a shipped or [user profile](#profiles). The profile is not part of the integration options. |
 
@@ -147,7 +149,7 @@ Each room has one `climate.<room>_heating` (for example `climate.living_room_hea
 - **No presets.** Frost protection is a mode of the room thermostat, not a preset.
 - **Range:** with the setpoint range **automatic** (the default), the `min_temp` and `max_temp` the thermostats show in Home Assistant when the room is set up; with several thermostats the narrowest range that all of them accept. A thermostat that shows no limits is left out, and without any the profile's range applies (4 to 35 °C for the TRVZB). With **manual**, the room's minimum and maximum target temperature. Either way the range is narrowed to the profile's limits, in 0.5 K steps for the TRVZB. A changed limit on a thermostat is read at the next reload of the integration.
 - **`current_temperature`:** the value last sent to the thermostats, else the active sensor's.
-- **Attributes:** `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost` or `initial`), `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff`, `note`, `presence`, `away_target` and `away_override` (see [Presence](#presence)).
+- **Attributes:** `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost`, `schedule` or `initial`), `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff`, `note`, `presence`, `away_target` and `away_override` (see [Presence](#presence)), `schedule_entity`, `schedule` and `schedule_override` (see [Schedule](#schedule)).
 - **`in_sync`** is true when every thermostat is verified at what it should show now (off during a hold).
 
 ### Modes
@@ -224,6 +226,22 @@ Any other state (`unknown`, `unavailable`, a missing entity) counts as set in **
 - **Override:** a new target while away, set in Home Assistant or turned at a knob, holds until presence reads home: the room heats normally (with **Off**, it ends the away hold). The next time everybody leaves, presence acts again. The override survives a restart (attribute `away_override`). A thermostat that still reports the target from before the room was lowered is not taken as a knob turn; it gets the lowered value again.
 - The event `easy_trv_away` (`room`, `state`: `on` or `off`) fires when presence starts or stops acting on the room. The room thermostat shows `presence` (`home`, `away` or `none`).
 
+## Schedule
+
+A room can follow a Home Assistant **schedule helper** (Settings > Devices & services > Helpers > Schedule). Choose it in the room form, field **Schedule**. Each room has its own schedule, so rooms can run opposite to each other: the living room on in the day, the bedroom only in the evening.
+
+- **Schedule on:** the room heats to its target.
+- **Schedule off:** the room is lowered by **Setback outside the schedule** (default 3 K, up to 15 K), never below the frost protection temperature. A large setback therefore brings the room down to frost protection. The heating state is `setback_schedule`, and `away_target` shows the value sent.
+- **Target per block:** give a block the additional data `temperature: 21` (in the helper's block dialog, *Advanced settings*). When that block starts, 21 °C becomes the room's target, as if you had set it. A block without it leaves the target alone.
+- **Changing the target by hand:** while the schedule is on, a new target lasts until the next block with a `temperature`. While it is off, a new target (in Home Assistant or at a knob) is an override: the room heats to it until the schedule is on again (attribute `schedule_override`, survives a restart).
+- **Preheating:** let the block start as early as the room needs to warm up. Bedtime at 22:00 and a bedroom that takes an hour: start the block at 21:00.
+- **With presence:** away and schedule off do not add up; the larger setback applies. Away with **Off** holds the room off as before.
+- The schedule acts only while the room's mode is **Heat**. A block temperature that arrives in **Frost protection** is the target the room returns to; one that arrives while the room is **Off** is its target when you switch it on.
+- A schedule that is `unavailable`, `unknown` or missing counts as on, so a broken helper never leaves a room cold. After a restart the room keeps its remembered target; the next block sets it again.
+- The room thermostat shows `schedule_entity`, `schedule` (`on` or `off`) and `schedule_override`.
+
+This is a Home Assistant helper, not the thermostat's own weekly schedule (`auto`), which Easy TRV still leaves alone.
+
 ### Force presence for the house
 
 The select `select.easy_trv_presence` on the device **Easy TRV** has three options: **Automatic** (default), **Home** and **Away** (German: Automatisch, Zuhause, Abwesend).
@@ -270,6 +288,7 @@ The sensor, for example `sensor.living_room_heating_state`, sits in the diagnost
 | `restricted_window_phase` | Restricted: thermostat's window detection active / Eingeschränkt: TRV-Fenstererkennung aktiv | A thermostat is in its own open-window phase (it shows 12 °C). |
 | `boost` | Manual (boost) / Handbetrieb (Boost) | Does not occur yet; reserved for boost. |
 | `setback_away` | Lowered: away / Abgesenkt: abwesend | Presence reads away and the room is lowered below its target. |
+| `setback_schedule` | Lowered: schedule / Abgesenkt: Zeitplan | The room's [schedule](#schedule) is off and the room is lowered below its target. |
 | `frost` | Frost protection / Frostschutz | The room's mode is frost protection. |
 | `heating` | Heating / Heizbetrieb | The room's mode is heat. |
 
@@ -300,6 +319,7 @@ Attributes, in this order:
 | `restricted_unsupported` | `<thermostat>: lacks a function (<functions>)` with the plain-language names of the settings it lacks |
 | `restricted_schedule` | `<thermostat> runs its own schedule` |
 | `restricted_window_phase` | `<thermostat>: own window detection active` |
+| `setback_schedule` | `<schedule> off` |
 
 For example "Sofa valve not reachable; Balcony door reports nothing (unavailable)" or, in German, "Sofa valve nicht erreichbar; Balkontür meldet nichts (nicht verfügbar)".
 
@@ -311,7 +331,8 @@ The event `easy_trv_state_changed` (`room`, `state`, `previous`, `reasons`) fire
 
 | Issue | Severity | Raised when | Cleared |
 |---|---|---|---|
-| `trv_unreachable` | Warning | A thermostat's writes have been failing for 60 minutes. The message names the setting (for example "Hysteresis") and the thermostat as you know it from the device page. Check battery and Zigbee signal. | When every write that failed is verified, or is not written to that thermostat any more (Easy TRV sends them again at every refresh interval, and also when the thermostat returns after being unavailable), or on a reload of the integration (raised again if the problem persists). |
+| `trv_unreachable` | Warning | A thermostat's writes have been failing for 60 minutes. The message names the setting (for example "Hysteresis") and the thermostat as you know it from the device page. The message also shows what ZHA last knew about the thermostat's radio (battery, LQI, RSSI, minutes since it was last heard, read from ZHA's cache without radio traffic) and names the likely cause: an almost empty battery (15 % or less), a thermostat that has not been heard for 30 minutes, or a weak signal (LQI below 50; how meaningful the LQI is depends on the coordinator). | When every write that failed is verified, or is not written to that thermostat any more (Easy TRV sends them again at every refresh interval, and also when the thermostat returns after being unavailable), or on a reload of the integration (raised again if the problem persists). |
+| `trv_silent` | Warning | ZHA has not heard anything from a thermostat for 3 hours (half of the six hours after which ZHA marks a battery device unavailable), whether or not Easy TRV is writing to it. The message names the thermostat and shows battery, LQI and RSSI. Not raised while the thermostat already has `trv_unreachable`. | As soon as ZHA hears from the thermostat again, or on a reload of the integration. |
 | `trv_firmware` | Warning | The thermostat's firmware is too old for a setting (hysteresis below 1.3.0, adaptive mode below 1.4.4), or the thermostat reports the setting as unsupported. The message names the setting, the thermostat and the required and installed firmware. Easy TRV does not retry it. | On a reload of the integration, for example after a firmware update (raised again if the problem persists). |
 | `settings_migrated` | Warning | After the update to Phase 2a: rooms that had "leave unchanged" for the hysteresis now follow the global hysteresis. The notice lists them. | When you dismiss it. |
 | `window_open_long` | Error | A window has been open longer than the window warning. | When the contacts report closed, or on a reload of the integration (raised again if the window is still open). |
@@ -435,6 +456,20 @@ The database grows with it. For raw data over many years, the optional InfluxDB 
 
 Easy TRV talks to a thermostat through a profile, a small YAML file that says which device it fits, from which firmware, and which attributes to write and read back. The shipped profile is `sonoff_trvzb_native` in [`custom_components/easy_trv/profiles/builtin/`](custom_components/easy_trv/profiles/builtin/). Shipped profiles are never edited in place. The `sonoff_trvzb_native` profile targets firmware 1.3.0 and 1.4.4; the first run on real hardware is pending (see [`docs/testing-on-device.md`](docs/testing-on-device.md)).
 
+### Add a profile in the UI
+
+**Settings > Devices & services > Easy TRV > Add thermostat profile** offers three ways. The profile is stored in Easy TRV and listed on the integration page; rooms choose it in their **Profile** field. Deleting it there removes it.
+
+- **Create your own profile (Beta):** name the profile, pick one of your thermostats as the sample, then choose which of its entities does what: the room temperature for the thermostat (a number, required), the temperature source (a select or switch), the open-window detection, frost protection, hysteresis and adaptive mode (all optional). Easy TRV then drives the thermostats through these Home Assistant entities, so it works with any integration (Zigbee2MQTT, deCONZ, ZHA, Tuya, ...). Other thermostats of the same model are found by the same entity key. All thermostats of a room must be the same model.
+- **Upload or paste a profile:** a `.yaml` file or its text. Easy TRV checks it and shows what is wrong before saving.
+- **Download from the community:** the profiles shared by other users in [`community/profiles/`](community/profiles/), installed with one click.
+
+**Show or edit profile** on a stored profile shows its text to copy, lets you change it, and has a link to share it: it opens a pre-filled form on GitHub, a workflow checks the profile and opens a pull request, and once it is merged the profile is in the community list.
+
+Entity profiles (`backend: entity`) are a Beta: a write is confirmed by the entity's new state instead of the Zigbee answer, and the TRVZB-specific signals (fail-safe, the thermostat's own schedule) are not available. The shipped Sonoff TRVZB profile stays native.
+
+### Profile files
+
 To adapt one:
 
 1. Copy the shipped file to `<config>/easy_trv/profiles/<name>.yaml` (create the folder if it does not exist).
@@ -449,9 +484,9 @@ Firmware minimums are part of a profile. Below the profile's minimum firmware no
 ## Limitations
 
 - **Hold by off and restore.** Window contacts and the cut-off switch the thermostats off and back on; they do not use a timer on the thermostat. If Home Assistant is down during a hold they stay off.
-- **No schedules.** Easy TRV never writes a thermostat's `auto` mode; a thermostat someone puts into it is left alone, except that a window or the outdoor cut-off switches it off, and it then stays off until you switch it back (Repairs issue `schedule_thermostat_off`).
+- **No thermostat schedules.** Schedules come from a Home Assistant helper (see [Schedule](#schedule)); Easy TRV never writes a thermostat's `auto` mode; a thermostat someone puts into it is left alone, except that a window or the outdoor cut-off switches it off, and it then stays off until you switch it back (Repairs issue `schedule_thermostat_off`).
 - **Writes while a room is off.** No temperature is written while the room is off or held. Whether a write could wake an `off` thermostat is one of the open checks in [`docs/testing-on-device.md`](docs/testing-on-device.md).
-- **ZHA and the Sonoff TRVZB only.** Other models need their own profile.
+- **Sonoff TRVZB built in.** Other models need a profile: your own (Beta, through their entities), an uploaded one or one from the community.
 - **ZHA's internal API.** Writing and verifying attributes needs ZHA's internal API. Easy TRV keeps all of it in one adapter module, so a future Home Assistant change is fixed in one place. If the API breaks, the `zha_api_incompatible` issue says so.
 - **Presence:** one entity per room (the global one or its own), no vacation with a return time, no away delay per room, no forced presence per room.
 - **Not used yet:** humidity sensors, presets, battery warnings.

@@ -93,9 +93,39 @@ Details that matter when writing a profile:
 - The keys of a `map` encoder (and of a `one_of` verify rule) are matched against the intent value rendered as text: a string as it is (`external`), any other value as `str(value).lower()`. For a boolean intent the keys are therefore `true` and `false`; quote them in YAML (`"true": 1`), otherwise YAML reads them as booleans and the schema rejects the file. The same goes for `"off"` (and `"on"`, `"yes"`, `"no"`), which YAML 1.1 reads as booleans. A `one_of` rule must list exactly the keys of the `map` encoder.
 - A user profile's `id` must be unique: an id that a shipped profile (or an earlier user file) already uses is rejected with a `profile_invalid` Repairs issue, and the file is skipped. Pick a new id when copying a shipped profile.
 
+## Entity profiles (Beta)
+
+A profile with `backend: entity` names, per capability, an entity of the thermostat's device instead of a Zigbee attribute. Easy TRV writes it with the entity's service (`number.set_value`, `switch.turn_on/off`, `select.select_option`, `climate.set_temperature`, `climate.set_hvac_mode`) and reads it from the entity's state, so any integration works.
+
+```yaml
+schema: 1
+id: acme_z2m
+name: Acme TRV (Zigbee2MQTT)
+backend: entity
+match: { manufacturer: Acme, model: TRV-1 }
+capabilities:
+  external_temperature:
+    intent: set_room_temperature
+    entity: { domain: number, key: external_temperature_input }
+  source_select:
+    intent: set_source
+    entity: { domain: select, key: temperature_sensor_select }
+    options: { external: external, internal: internal }   # intent value: select option
+  window_detection:
+    intent: set_window_detection
+    entity: { domain: switch, key: open_window }
+```
+
+- `key` finds the entity on each thermostat's device: its translation key, else an entity id (or unique id) that ends in `_<key>`. The setpoint and mode use the thermostat's climate entity and are added automatically (setpoint range 4 to 35 °C in 0.5 K steps unless the profile lists them).
+- Only `set_room_temperature` is required; `set_source` may be a select (with `options`) or a switch (on = external). `min_firmware` is optional; the firmware is read leniently from the device's `sw_version`.
+- Internally the document becomes a native profile with synthetic attribute numbers; `adapters/entity_gateway.py` maps them back to entities. The engine and the room logic do not change. A state change that brings back the value Easy TRV wrote is an echo, not a report.
+- Weaker than native: the write is confirmed by the entity's state, and the native signals (`failsafe`, `schedule`) do not exist.
+
+Profiles can also live in the entry as subentries of type `profile` (YAML text), added through **Add thermostat profile**; they load after the built-in profiles and the files.
+
 ## Selection
 
-Per room: `auto` (the shipped profile that matches the room's thermostats) or an explicit profile id from all shipped and user profiles that match. A thermostat matched by no profile is rejected in the room form (`no_profile`); a thermostat not matched by an explicitly chosen profile too (`profile_mismatch`). Per-thermostat selection is a later step.
+Per room: `auto` (the shipped profile that matches the room's thermostats) or an explicit profile id from all shipped and user profiles that match. A thermostat matched by no profile is rejected in the room form (`no_profile`); a thermostat not matched by an explicitly chosen profile too (`profile_mismatch`). All thermostats of a room use one profile, so they must be the same model. Per-thermostat selection is a later step.
 
 ## Boundaries
 

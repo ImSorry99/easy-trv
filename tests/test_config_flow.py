@@ -22,9 +22,10 @@ from custom_components.easy_trv.config_flow import (
     prefill_from_area,
     validate_room,
 )
-from custom_components.easy_trv.const import DOMAIN, SUBENTRY_ROOM
+from custom_components.easy_trv.const import DOMAIN, SUBENTRY_PROFILE, SUBENTRY_ROOM
 from custom_components.easy_trv.core.model import RoomParams
 from custom_components.easy_trv.core.settings import resolve_settings
+from custom_components.easy_trv.profile_flow import ProfileSubentryFlow
 from custom_components.easy_trv.profiles.loader import BUILTIN_DIR, async_load_profiles
 from tests import helpers_entry
 from tests.helpers_entry import (
@@ -344,7 +345,8 @@ async def test_config_flow_is_the_registered_handler(entry) -> None:
     assert not hasattr(helpers_entry, "_StandInFlow")
     assert not hasattr(helpers_entry, "CONFIG_FLOW_FILE")
     assert EasyTrvConfigFlow.async_get_supported_subentry_types(entry) == {
-        SUBENTRY_ROOM: RoomSubentryFlow
+        SUBENTRY_ROOM: RoomSubentryFlow,
+        SUBENTRY_PROFILE: ProfileSubentryFlow,
     }
     assert isinstance(
         EasyTrvConfigFlow.async_get_options_flow(entry), EasyTrvOptionsFlow
@@ -458,11 +460,11 @@ async def test_entities_form_fields_and_defaults(hass, entry) -> None:
         "temp_sensors",
         "humidity_sensors",
         "window_contacts",
+        "schedule_entity",
     ]
+    assert selectors["schedule_entity"].config["domain"] == ["schedule"]
     assert selectors["trvs"].config["multiple"] is True
-    assert selectors["trvs"].config["filter"] == [
-        {"integration": "zha", "domain": ["climate"]}
-    ]
+    assert selectors["trvs"].config["filter"] == [{"domain": ["climate"]}]
     assert selectors["temp_sensors"].config["multiple"] is True
     assert selectors["temp_sensors"].config["reorder"] is True
     assert selectors["temp_sensors"].config["filter"] == [
@@ -552,10 +554,11 @@ async def test_room_rejects_non_zha_and_thermostats_without_a_profile(
     result = await open_entities_step(hass, entry)
     flow_id = result["flow_id"]
 
+    # A thermostat of another integration resolves, but no profile fits it.
     result = await room_flows(hass).async_configure(
         flow_id, entities_input(trvs=["climate.mqtt_trv"])
     )
-    assert result["errors"] == {"trvs": "not_zha"}
+    assert result["errors"] == {"profile": "no_profile"}
 
     result = await room_flows(hass).async_configure(
         flow_id, entities_input(trvs=["climate.does_not_exist"])
@@ -737,14 +740,15 @@ async def test_prefill_walks_devices_and_filters(
     )
     add_entity(hass, "sensor.power", "test", device=multi, device_class="power")
     add_entity(hass, "sensor.no_class", "test", device=multi)
-    # A thermostat of another integration and sensors of another area.
+    # A thermostat of another integration (entity profiles can drive it) and
+    # sensors of another area.
     add_entity(hass, "climate.mqtt_in_area", "mqtt", area_id=area_with_trvs.id)
     add_entity(
         hass, "sensor.kitchen_t", "test", device=remote, device_class="temperature"
     )
 
     assert prefill_from_area(hass, area_with_trvs.id) == {
-        "trvs": ["climate.a", "climate.b"],
+        "trvs": ["climate.a", "climate.b", "climate.mqtt_in_area"],
         "temp_sensors": ["sensor.direct_t", "sensor.t1"],
         "humidity_sensors": ["sensor.direct_h", "sensor.h1"],
         "window_contacts": [],
@@ -853,6 +857,30 @@ async def test_custom_room_stores_contacts_from_any_area(hass, entry) -> None:
 
 
 @pytest.mark.usefixtures("area_with_trvs")
+async def test_custom_room_stores_its_schedule(hass, entry) -> None:
+    result = await open_settings_step(hass, entry, schedule_entity="schedule.bed")
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    sub = next(iter(entry.subentries.values()))
+    assert sub.data["schedule_entity"] == "schedule.bed"
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_removes_an_emptied_schedule(hass) -> None:
+    entry = make_entry(hass, [room_data(schedule_entity="schedule.bed")], {})
+    sub = next(iter(entry.subentries.values()))
+
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    assert suggested_values(result)["schedule_entity"] == "schedule.bed"
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living")
+    )
+    result = await room_flows(hass).async_configure(result["flow_id"], {})
+    assert result["reason"] == "reconfigure_successful"
+    assert "schedule_entity" not in entry.subentries[sub.subentry_id].data
+
+
+@pytest.mark.usefixtures("area_with_trvs")
 async def test_reconfigure_prefills_and_replaces_the_window_contacts(hass) -> None:
     entry = make_entry(
         hass,
@@ -904,10 +932,12 @@ SETTINGS_FIELDS = [
     "presence_unknown",
     "away_action",
     "away_setback_kelvin",
+    "schedule_setback_kelvin",
     "statistics",
 ]
 SETTING_NUMBERS = {
     "away_setback_kelvin": (0.5, 10.0, 0.5, "K"),
+    "schedule_setback_kelvin": (0.5, 15.0, 0.5, "K"),
     "frost_temperature": (4.0, 16.0, 0.5, "°C"),
     "refresh_minutes": (1, 120, 1, "min"),
     "verify_delay_seconds": (2, 60, 1, "s"),
@@ -955,6 +985,7 @@ async def test_room_flow_has_settings_step_with_global_defaults(hass, entry) -> 
         "global_presence_unknown": "Away",
         "global_away_action": "Lower",
         "global_away_setback_kelvin": "3.0 K",
+        "global_schedule_setback_kelvin": "3.0 K",
         "global_window_check_minutes": "30 min",
         "global_window_check_drop_kelvin": "0.3 K",
         "global_outdoor_cutoff_celsius": "Off",
@@ -1421,6 +1452,7 @@ async def test_reconfigure_updates_room(hass, entry_with_room) -> None:
         "temp_sensors",
         "humidity_sensors",
         "window_contacts",
+        "schedule_entity",
     ]
     # The form shows what is stored, not what the area would suggest.
     assert suggested_values(result) == {
@@ -1853,6 +1885,7 @@ SECTION_NAMES = [
     "room_thermostat",
     "windows_outdoor",
     "presence",
+    "schedule",
     "statistics",
 ]
 WRITES = ["refresh_minutes", "verify_delay_seconds", "max_attempts", "min_delta_kelvin"]
@@ -1865,8 +1898,9 @@ def options_input(  # noqa: PLR0913
     windows_outdoor=None,
     statistics=None,
     presence=None,
+    schedule=None,
 ) -> dict[str, Any]:
-    """Return what the options form submits: six sections."""
+    """Return what the options form submits: seven sections."""
     return {
         "writes": {
             "refresh_minutes": 30,
@@ -1886,11 +1920,12 @@ def options_input(  # noqa: PLR0913
         "room_thermostat": dict(room_thermostat or {}),
         "windows_outdoor": dict(windows_outdoor or {}),
         "presence": dict(presence or {}),
+        "schedule": dict(schedule or {}),
         "statistics": dict(statistics or {}),
     }
 
 
-async def test_options_form_is_grouped_in_five_sections(hass, entry) -> None:
+async def test_options_form_is_grouped_in_seven_sections(hass, entry) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "init"
@@ -1900,6 +1935,7 @@ async def test_options_form_is_grouped_in_five_sections(hass, entry) -> None:
         "room_thermostat",
         "windows_outdoor",
         "presence",
+        "schedule",
         "statistics",
         "reset_settings",
     ]
@@ -2050,6 +2086,7 @@ async def test_options_form_shows_the_saved_number_else_the_default(
         "default_setpoint_max": "30.0 °C",
         "default_window_open_delay_seconds": "30 s",
         "default_away_setback_kelvin": "3.0 K",
+        "default_schedule_setback_kelvin": "3.0 K",
         "default_away_delay_minutes": "15 min",
         "default_window_warn_minutes": "120 min",
         "default_window_check_minutes": "30 min",

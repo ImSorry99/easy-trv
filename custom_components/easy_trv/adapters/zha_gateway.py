@@ -10,11 +10,13 @@ import logging
 from collections import Counter
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
+from custom_components.easy_trv.core.link import LinkInfo
 from custom_components.easy_trv.core.values import parse_zha_sw_version
 
 if TYPE_CHECKING:
@@ -28,6 +30,11 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 ZHA_DOMAIN = "zha"
+
+# Power Configuration cluster: battery_percentage_remaining, in half percent.
+_POWER_CLUSTER = 0x0001
+_BATTERY_PERCENT = 0x0021
+_BATTERY_INVALID = 0xFF  # the ZCL's "invalid" value
 
 #: ``"report"``: the device reported (or a quirk re-published) the attribute.
 #: ``"written"``: someone other than this gateway wrote it successfully.
@@ -94,6 +101,10 @@ class TrvGateway(Protocol):
         self, ieee: str, endpoint: int, cluster: int, attribute: int
     ) -> int | None:
         """Return the value zigpy last knew, without radio traffic; None if unknown."""
+        ...
+
+    def link(self, ieee: str) -> LinkInfo:
+        """Return LQI, RSSI, last heard and battery from the cache; never raises."""
         ...
 
     def subscribe(
@@ -338,6 +349,24 @@ class ZhaLibraryGateway:
         except Exception:  # noqa: BLE001
             return None
 
+    def link(self, ieee: str) -> LinkInfo:
+        """Return what ZHA last knew about the device's radio, without traffic.
+
+        LQI and RSSI are those of the last frame received, ``last_seen`` is when
+        it arrived, the battery comes from the Power Configuration cluster's
+        cache. Each value is ``None`` when unknown or the internal API fails.
+        """
+        try:
+            device = self._device(ieee)
+        except GatewayError:
+            return LinkInfo()
+        return LinkInfo(
+            lqi=_int_or_none(lambda: device.lqi),
+            rssi=_int_or_none(lambda: device.rssi),
+            last_seen=_last_seen(device),
+            battery=_battery(device),
+        )
+
     def subscribe(
         self,
         ieee: str,
@@ -422,3 +451,42 @@ class ZhaLibraryGateway:
             # Internal API on a possibly dead device object, deliberately broad.
             with suppress(Exception):
                 unsubscribe()
+
+
+def _int_or_none(get: Callable[[], object]) -> int | None:
+    """Return ``get()`` as an int; ``None`` when unknown or it fails."""
+    try:
+        value = get()
+        return None if value is None else int(value)  # type: ignore[call-overload]
+    # Internal API, deliberately broad.
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _last_seen(device: Device) -> datetime | None:
+    """Return when ZHA last heard from ``device`` (zigpy keeps a POSIX time)."""
+    try:
+        seen = device.last_seen
+        return None if seen is None else datetime.fromtimestamp(float(seen), UTC)
+    # Internal API, deliberately broad.
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _battery(device: Device) -> int | None:
+    """Return the cached battery level in percent from any endpoint, if known."""
+    try:
+        endpoints = device.device.endpoints
+        for endpoint_id, endpoint in endpoints.items():
+            if endpoint_id == 0:  # ZDO
+                continue
+            cluster = endpoint.in_clusters.get(_POWER_CLUSTER)
+            if cluster is None:
+                continue
+            raw = cluster.get(_BATTERY_PERCENT)
+            if raw is not None and int(raw) != _BATTERY_INVALID:
+                return min(int(raw) // 2, 100)
+    # Internal API, deliberately broad.
+    except Exception:  # noqa: BLE001
+        return None
+    return None

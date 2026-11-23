@@ -170,20 +170,22 @@ PROFILE_SCHEMA = vol.Schema(
         },
         vol.Required("min_firmware"): _VERSION,
         vol.Optional("tested_firmware", default=list): [_VERSION],
+        vol.Optional("contributor"): str,
         vol.Required("capabilities"): {_SLUG: _CAPABILITY},
     },
 )
 
 
-def validate_profile_dict(data: dict[str, Any]) -> dict[str, Any]:
-    """Validate a parsed profile document and return it with defaults applied.
+def check_intents(
+    validated: dict[str, Any], required: tuple[str, ...] = REQUIRED_INTENTS
+) -> None:
+    """Check that no intent repeats and every required intent has a capability.
 
     Raises:
-        vol.Invalid: If the document violates the schema, two capabilities
-            declare the same intent or a required intent has no capability.
+        vol.Invalid: If two capabilities declare the same intent or a required
+            intent has no capability.
 
     """
-    validated: dict[str, Any] = PROFILE_SCHEMA(data)
     seen: dict[str, str] = {}
     for name, capability in validated["capabilities"].items():
         intent = capability["intent"]
@@ -194,8 +196,31 @@ def validate_profile_dict(data: dict[str, Any]) -> dict[str, Any]:
             )
             raise vol.Invalid(msg)
         seen[intent] = name
-    for intent in REQUIRED_INTENTS:
+    for intent in required:
         if intent not in seen:
             msg = f"a profile needs a capability for {intent}"
             raise vol.Invalid(msg)
+
+
+def validate_profile_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate a parsed profile document and return it with defaults applied.
+
+    A document with ``backend: entity`` is an entity profile; it comes back in
+    the native form with its entity bindings (see ``entity_profile``).
+
+    Raises:
+        vol.Invalid: If the document violates the schema, two capabilities
+            declare the same intent or a required intent has no capability.
+
+    """
+    if isinstance(data, dict) and data.get("backend", "zha") != "zha":
+        from custom_components.easy_trv.profiles.entity_profile import (  # noqa: PLC0415 - the module imports this one
+            validate_entity_profile,
+        )
+
+        return validate_entity_profile(data)
+    if isinstance(data, dict):
+        data = {key: value for key, value in data.items() if key != "backend"}
+    validated: dict[str, Any] = PROFILE_SCHEMA(data)
+    check_intents(validated)
     return validated

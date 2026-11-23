@@ -34,6 +34,7 @@ from custom_components.easy_trv.controller import (
     RoomStatistics,
     ThermostatStatistics,
 )
+from custom_components.easy_trv.core.link import UNKNOWN, LinkInfo
 from custom_components.easy_trv.core.model import (
     Note,
     OperatingMode,
@@ -1120,6 +1121,7 @@ async def test_snapshot_is_json_able(hass, controller, gateway) -> None:
         "window_off_at",
         "silent_contacts",
         "deviations",
+        "links",
     }
     assert snapshot["config"]["room_id"] == "room1"
     assert snapshot["config"]["trvs"][0] == {
@@ -3490,3 +3492,81 @@ async def test_a_thermostat_is_reported_after_an_hour(
     assert raised.severity == IssueSeverity.WARNING
     assert raised.translation_placeholders["minutes"] == "60"
     assert controller.status == RoomStatus.ERROR
+
+
+# --- Radio health ---------------------------------------------------------
+
+
+async def test_unreachable_issue_names_an_empty_battery(
+    hass, freezer, controller, gateway
+) -> None:
+    gateway.links[IEEE_A] = LinkInfo(
+        lqi=120, rssi=-60, last_seen=dt_util.utcnow(), battery=4
+    )
+    gateway.broken_write[(IEEE_A, WINDOW)] = "radio busy"
+    await controller.async_start()
+    await advance(hass, freezer, 25)
+    raised = issue(hass, "trv_unreachable_0011")
+    assert raised is not None
+    assert raised.translation_key == "trv_unreachable_battery"
+    assert raised.translation_placeholders["battery"] == "4 %"
+    assert raised.translation_placeholders["lqi"] == "120"
+    assert raised.translation_placeholders["rssi"] == "-60 dBm"
+
+
+async def test_unreachable_issue_names_a_silent_thermostat(
+    hass, freezer, controller, gateway
+) -> None:
+    gateway.links[IEEE_A] = LinkInfo(
+        lqi=120, last_seen=dt_util.utcnow() - timedelta(minutes=45), battery=80
+    )
+    gateway.broken_write[(IEEE_A, WINDOW)] = "radio busy"
+    await controller.async_start()
+    await advance(hass, freezer, 25)
+    raised = issue(hass, "trv_unreachable_0011")
+    assert raised is not None
+    assert raised.translation_key == "trv_unreachable_silent"
+    assert raised.translation_placeholders["rssi"] == UNKNOWN
+
+
+async def test_silent_thermostat_is_reported_and_cleared(
+    hass, freezer, controller, gateway, caplog
+) -> None:
+    gateway.links[IEEE_A] = LinkInfo(
+        lqi=30, last_seen=dt_util.utcnow() - timedelta(hours=2, minutes=58)
+    )
+    await controller.async_start()
+    await settle(hass)
+    await advance(hass, freezer, 60, step=60)
+    assert issue(hass, "trv_silent_0011") is None
+    await advance(hass, freezer, 60, step=60)
+    raised = issue(hass, "trv_silent_0011")
+    assert raised is not None
+    assert raised.translation_key == "trv_silent"
+    assert raised.translation_placeholders["lqi"] == "30"
+    assert raised.translation_placeholders["battery"] == UNKNOWN
+    assert issue(hass, "trv_silent_0022") is None
+    assert sum("nothing heard from" in r.getMessage() for r in caplog.records) == 1
+    await advance(hass, freezer, 60, step=60)
+    assert sum("nothing heard from" in r.getMessage() for r in caplog.records) == 1
+    gateway.links[IEEE_A] = LinkInfo(lqi=30, last_seen=dt_util.utcnow())
+    await advance(hass, freezer, 60, step=60)
+    assert issue(hass, "trv_silent_0011") is None
+
+
+async def test_snapshot_lists_the_radio_values(controller, gateway) -> None:
+    seen = dt_util.utcnow()
+    gateway.links[IEEE_A] = LinkInfo(lqi=90, rssi=-70, last_seen=seen, battery=55)
+    links = controller.snapshot()["links"]
+    assert links["climate.a"] == {
+        "lqi": 90,
+        "rssi": -70,
+        "last_seen": seen.isoformat(),
+        "battery": 55,
+    }
+    assert links["climate.b"] == {
+        "lqi": None,
+        "rssi": None,
+        "last_seen": None,
+        "battery": None,
+    }

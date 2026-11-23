@@ -540,6 +540,7 @@ async def test_the_extra_data_carries_frost_protection(hass, entry) -> None:
         "frost_return": 23.0,
         "preset": "frost",
         "away_override": False,
+        "schedule_override": False,
     }
 
 

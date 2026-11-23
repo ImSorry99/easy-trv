@@ -40,6 +40,7 @@ from custom_components.easy_trv.core.model import (
     RoomParams,
     RoomState,
     RoomStatus,
+    ScheduleChanged,
     ScheduleDebounce,
     ScheduleRetry,
     SensorChanged,
@@ -177,6 +178,7 @@ class RoomLogic:
                 WindowChanged()
                 | OutdoorChanged()
                 | PresenceChanged()
+                | ScheduleChanged()
                 | SettingsChanged()
             ):
                 state, commands = self._on_hold_event(event, now, state)
@@ -220,6 +222,7 @@ class RoomLogic:
             )
             trvs[trv.entity_id] = replace(known, health=self._baseline(known))
         readings = {**state.readings, **{r.entity_id: r for r in event.sensors}}
+        schedule_off = self._cfg.schedule_setback is not None and not event.schedule_on
         state = replace(
             state,
             readings=readings,
@@ -227,6 +230,13 @@ class RoomLogic:
             away=event.away,
             away_off=event.away and self._cfg.away_action == "off",
             away_override=state.away_override and event.away,
+            # The block temperature is only remembered: the restored wish wins
+            # at start, and the next block sets it.
+            schedule_off=schedule_off,
+            schedule_override=state.schedule_override and schedule_off,
+            schedule_temperature=(
+                event.schedule_temperature if event.schedule_on else None
+            ),
         )
         state, commands = self._apply_settings(state, self._writable(state))
         # The holds first: a room that starts held is compared with the
@@ -387,12 +397,20 @@ class RoomLogic:
 
     def _on_hold_event(
         self,
-        event: WindowChanged | OutdoorChanged | PresenceChanged | SettingsChanged,
+        event: WindowChanged
+        | OutdoorChanged
+        | PresenceChanged
+        | ScheduleChanged
+        | SettingsChanged,
         now: datetime,
         state: RoomState,
     ) -> _Step:
-        """Route a window, outdoor, presence or setback change to ``hold``."""
+        """Route a window, outdoor, presence, schedule or setback change to ``hold``."""
         cfg, capability_of = self._cfg, self._capability_of
+        if isinstance(event, ScheduleChanged):
+            return hold.on_schedule(
+                cfg, state, now, event.on, event.temperature, capability_of
+            )
         if isinstance(event, SettingsChanged):
             self._cfg = replace(cfg, away_setback=event.away_setback)
             return hold.on_setback(

@@ -74,9 +74,11 @@ CONF_PRESENCE_UNKNOWN: Final = "presence_unknown"
 CONF_AWAY_ACTION: Final = "away_action"
 CONF_AWAY_SETBACK: Final = "away_setback_kelvin"
 CONF_AWAY_DELAY: Final = "away_delay_minutes"
+CONF_SCHEDULE_SETBACK: Final = "schedule_setback_kelvin"
 # Entry-level and room entity configuration (not settings with a default)
 CONF_OUTDOOR_SENSOR: Final = "outdoor_sensor"
 CONF_WINDOW_CONTACTS: Final = "window_contacts"
+CONF_SCHEDULE_ENTITY: Final = "schedule_entity"
 
 # Defaults
 DEFAULT_REFRESH_MINUTES: Final = _settings.DEFAULT_REFRESH_MINUTES
@@ -103,6 +105,7 @@ DEFAULT_PRESENCE_UNKNOWN: Final = _settings.DEFAULT_PRESENCE_UNKNOWN
 DEFAULT_AWAY_ACTION: Final = _settings.DEFAULT_AWAY_ACTION
 DEFAULT_AWAY_SETBACK: Final = _settings.DEFAULT_AWAY_SETBACK
 DEFAULT_AWAY_DELAY: Final = _settings.DEFAULT_AWAY_DELAY
+DEFAULT_SCHEDULE_SETBACK: Final = _settings.DEFAULT_SCHEDULE_SETBACK
 
 # Timing
 DEBOUNCE_SECONDS: Final = 5.0
@@ -122,3 +125,15 @@ ISSUE_SETTINGS_MIGRATED: Final = "settings_migrated"
 # Profiles
 PROFILE_AUTO: Final = "auto"
 USER_PROFILES_DIR: Final = "easy_trv/profiles"
+
+# Profiles stored in the entry (uploaded, downloaded or made in the wizard)
+SUBENTRY_PROFILE: Final = "profile"
+CONF_PROFILE_YAML: Final = "yaml"
+# The shared profiles of the community live in the repository; the index lists them.
+COMMUNITY_BASE_URL: Final = (
+    "https://raw.githubusercontent.com/ImSorry99/easy-trv/main/community/profiles/"
+)
+COMMUNITY_INDEX_FILE: Final = "index.json"
+# Sharing a profile opens a pre-filled issue form; a workflow turns it into a PR.
+SHARE_BASE_URL: Final = "https://github.com/ImSorry99/easy-trv/issues/new"
+SHARE_TEMPLATE: Final = "profile.yml"

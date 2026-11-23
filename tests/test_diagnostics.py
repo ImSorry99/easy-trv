@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import CoreState
 from homeassistant.helpers.json import ExtendedJSONEncoder
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
@@ -86,8 +87,11 @@ async def test_diagnostics_room_snapshot_has_config_params_and_state(
         "window_off_at",
         "silent_contacts",
         "deviations",
+        "links",
         "presence_home",
         "away_from",
+        "schedule_entity",
+        "schedule",
     }
     assert room["config"]["name"] == "Living"
     assert room["config"]["trvs"][0]["ieee"] == IEEE_A
@@ -154,6 +158,7 @@ async def test_diagnostics_include_resolved_room_settings(hass, entry) -> None:
         "away_action": "setback",
         "away_setback_kelvin": 3.0,
         "away_delay_minutes": 15,
+        "schedule_setback_kelvin": 3.0,
     }
 
 
@@ -170,6 +175,7 @@ async def test_diagnostics_lists_profile_errors(hass, tmp_path, entry) -> None:
 
 async def test_diagnostics_of_an_entry_that_failed_to_set_up(hass) -> None:
     failed = make_entry(hass, [room_data()], OPTIONS)
+    MockConfigEntry(domain="zha").add_to_hass(hass)
     with patch(GATEWAY_FACTORY, side_effect=ZhaUnavailable("no zha")):
         assert not await hass.config_entries.async_setup(failed.entry_id)
     assert failed.state is ConfigEntryState.SETUP_RETRY

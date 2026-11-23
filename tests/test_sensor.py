@@ -189,6 +189,7 @@ HEATING_STATES = [
     "restricted_window_phase",
     "boost",
     "setback_away",
+    "setback_schedule",
     "frost",
     "heating",
 ]
@@ -742,6 +743,11 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
     assert strings["device"]["room"]["name"] == "{room} heating"
     assert set(strings["issues"]) == {
         "trv_unreachable",
+        "trv_unreachable_battery",
+        "trv_unreachable_silent",
+        "trv_unreachable_signal",
+        "trv_unreachable_unclear",
+        "trv_silent",
         "trv_firmware",
         "zha_api_incompatible",
         "profile_invalid",
@@ -774,6 +780,7 @@ def test_translations_cover_the_sensor_states_and_issues() -> None:
         "restricted_window_phase": "mdi:window-open",
         "boost": "mdi:fire",
         "setback_away": "mdi:home-thermometer-outline",
+        "setback_schedule": "mdi:calendar-clock",
         "frost": "mdi:snowflake-thermometer",
         "heating": "mdi:radiator",
     }

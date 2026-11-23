@@ -240,6 +240,9 @@ class RoomConfig:
     away_action: Literal["setback", "off"] | None = None
     # How far a room is lowered while away (kelvin).
     away_setback: float = 3.0
+    # How far a room is lowered while its schedule is off (kelvin); ``None``:
+    # the room has no schedule.
+    schedule_setback: float | None = None
 
 
 # --- State ---------------------------------------------------------------
@@ -358,6 +361,13 @@ class RoomState:
     away_override: bool = False
     # Presence reads away and the room's ``away_action`` is ``off``.
     away_off: bool = False
+    # The room's schedule reads off; only matters with a ``schedule_setback``.
+    schedule_off: bool = False
+    # A target set while the schedule is off: the room heats normally until the
+    # schedule is on again.
+    schedule_override: bool = False
+    # The block temperature last applied, so the same block sets the wish once.
+    schedule_temperature: float | None = None
     window_warned: bool = False
     window_suspect: bool = False
     # Whether the stuck-contact check already ran for the current opening.
@@ -443,6 +453,9 @@ class Start:
     outdoor: float | None = None
     # Presence reads away at start (after the unknown policy).
     away: bool = False
+    # The schedule at start: on (or no schedule) and the block temperature.
+    schedule_on: bool = True
+    schedule_temperature: float | None = None
 
 
 @dataclass(frozen=True)
@@ -520,6 +533,8 @@ class RestoreRoom:
     frost_return: float | None = None
     # A target set while away; the start drops it if presence reads home.
     away_override: bool = False
+    # A target set while the schedule was off; dropped if the schedule is on.
+    schedule_override: bool = False
 
 
 @dataclass(frozen=True)
@@ -556,6 +571,18 @@ class PresenceChanged:
 
 
 @dataclass(frozen=True)
+class ScheduleChanged:
+    """The room's schedule turned on or off, or its block temperature changed.
+
+    ``temperature`` is the ``temperature`` of the active block, ``None`` when
+    the schedule is off or the block carries none.
+    """
+
+    on: bool
+    temperature: float | None = None
+
+
+@dataclass(frozen=True)
 class OutdoorChanged:
     """The outdoor temperature changed; ``None`` means unknown."""
 
@@ -586,6 +613,7 @@ Event = (
     | WindowChanged
     | OutdoorChanged
     | PresenceChanged
+    | ScheduleChanged
     | SettingsChanged
 )
 

@@ -37,6 +37,7 @@ DEFAULT_PRESENCE_UNKNOWN: Final = "away"
 DEFAULT_AWAY_ACTION: Final = "setback"
 DEFAULT_AWAY_SETBACK: Final = 3.0
 DEFAULT_AWAY_DELAY: Final = 15
+DEFAULT_SCHEDULE_SETBACK: Final = 3.0
 
 _KEY_HYSTERESIS: Final = "hysteresis"
 _KEY_SETPOINT_RANGE: Final = "setpoint_range"
@@ -77,6 +78,7 @@ DEFAULTS: Final[Mapping[str, Any]] = {
     "away_action": DEFAULT_AWAY_ACTION,
     "away_setback_kelvin": DEFAULT_AWAY_SETBACK,
     "away_delay_minutes": DEFAULT_AWAY_DELAY,
+    "schedule_setback_kelvin": DEFAULT_SCHEDULE_SETBACK,
 }
 
 
@@ -117,6 +119,8 @@ class RoomSettings:
     away_setback_kelvin: float
     # Minutes presence must read away before away counts; 0 = at once
     away_delay_minutes: int
+    # How far the target goes down while the room's schedule is off
+    schedule_setback_kelvin: float
 
 
 def hysteresis_kelvin(stored: str | float) -> float:

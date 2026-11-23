@@ -34,7 +34,7 @@ from custom_components.easy_trv.core.setpoint import (
     ECHO_WINDOW,
     OWN_MODES,
     SAME,
-    away_acts,
+    away_lowered,
     clamp,
     device_driven,
     held_by_away_only,
@@ -42,8 +42,10 @@ from custom_components.easy_trv.core.setpoint import (
     lowered,
     on_schedule,
     resume,
+    schedule_acts,
     suspended,
     target,
+    with_overrides,
     writable,
     write,
 )
@@ -596,7 +598,8 @@ def _adopt_setpoint(  # noqa: PLR0913
     # Any other value while lowered or held by presence is an override until
     # presence is home; ending the away hold resumes the room.
     ends_away_hold = held_by_away_only(state)
-    override = state.away_override or lowered(cfg, state) or ends_away_hold
+    override = state.away_override or away_lowered(cfg, state) or ends_away_hold
+    schedule_override = state.schedule_override or schedule_acts(cfg, state)
     capability = capability_of(SetSetpoint(adopted))
     changed = state.setpoint is None or abs(adopted - state.setpoint) > SAME
     waking = state.mode is RoomMode.OFF and not holding(state)
@@ -616,12 +619,14 @@ def _adopt_setpoint(  # noqa: PLR0913
         preset=Preset.NONE,
         frost_return=None,
         away_override=override,
+        schedule_override=schedule_override,
         # A turn during a hold only changes the wish; the room stays as it was.
         mode=state.mode if holding(state) else RoomMode.HEAT,
     )
-    if waking and away_acts(cfg, state):
-        # A turn that switches the room on while away is an override as well.
-        state = replace(state, away_override=True)
+    if waking:
+        # A turn that switches the room on while away or outside the schedule is
+        # an override as well.
+        state = with_overrides(cfg, state)
     event = _adopted(cfg, trv, adopted)
     if holding(state):
         return state, [event]
