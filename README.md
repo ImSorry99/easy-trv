@@ -149,7 +149,7 @@ Each room has one `climate.<room>_heating` (for example `climate.living_room_hea
 - **No presets.** Frost protection is a mode of the room thermostat, not a preset.
 - **Range:** with the setpoint range **automatic** (the default), the `min_temp` and `max_temp` the thermostats show in Home Assistant when the room is set up; with several thermostats the narrowest range that all of them accept. A thermostat that shows no limits is left out, and without any the profile's range applies (4 to 35 °C for the TRVZB). With **manual**, the room's minimum and maximum target temperature. Either way the range is narrowed to the profile's limits, in 0.5 K steps for the TRVZB. A changed limit on a thermostat is read at the next reload of the integration.
 - **`current_temperature`:** the value last sent to the thermostats, else the active sensor's.
-- **Attributes:** `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost` or `initial`), `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff`, `note`, `presence`, `away_target` and `away_override` (see [Presence](#presence)), `schedule_entity`, `schedule` and `schedule_override` (see [Schedule](#schedule)).
+- **Attributes:** `setpoint_source` (`ha`, `device:<entity_id>`, `restore`, `frost`, `schedule` or `initial`), `in_sync`, `thermostats`, `window_open`, `outdoor_cutoff`, `note`, `presence`, `away_target` and `away_override` (see [Presence](#presence)), `schedule_entity`, `schedule` and `schedule_override` (see [Schedule](#schedule)).
 - **`in_sync`** is true when every thermostat is verified at what it should show now (off during a hold).
 
 ### Modes
