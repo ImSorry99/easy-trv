@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-23
+
 ### Added
 
 - Schedules from a Home Assistant schedule helper: each room can get a **Schedule** (`schedule_entity`, chosen with the thermostats and sensors). While it is on, the room heats; while it is off, the room is lowered by **Setback outside the schedule** (`schedule_setback_kelvin`, new options section Schedule, room override, 0.5 to 15 K, default 3), never below frost protection. A block with the data field `temperature` sets the room's target when it starts. A target set while the schedule is off holds until it is on again. Away and schedule do not add up: the larger setback applies
@@ -226,7 +228,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fail-safe detection: a thermostat that fell back to its internal sensor is switched back to the external source.
 - Repairs issues for failed writes, outdated firmware and invalid profiles, plus a status sensor per room.
 
-[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/ImSorry99/easy-trv/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/ImSorry99/easy-trv/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/ImSorry99/easy-trv/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/ImSorry99/easy-trv/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/ImSorry99/easy-trv/compare/v0.7.2...v0.8.0
