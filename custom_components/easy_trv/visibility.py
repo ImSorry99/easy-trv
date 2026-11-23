@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Final
 
 from homeassistant.helpers import entity_registry as er
 
+from custom_components.easy_trv.adapters.entity_gateway import find_device_entity
 from custom_components.easy_trv.const import DOMAIN
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 # The options (under the domain of Easy TRV) of an entity Easy TRV has hidden.
 MARKER: Final = {"hidden": True}
 
-# The platform of the thermostat entities that a profile names.
+# The platform of the thermostat entities that a native profile names.
 _THERMOSTAT_PLATFORM: Final = "zha"
 
 
@@ -109,6 +110,14 @@ def controlled_entities(
             continue
         controlled.add(climate)
         if entry.device_id is None:
+            continue
+        if profile.backend != _THERMOSTAT_PLATFORM:
+            # Entity profiles (Beta) find their entities by key, as the
+            # entity gateway does.
+            for domain, key in named:
+                found = find_device_entity(hass, entry.device_id, domain, key)
+                if found is not None:
+                    controlled.add(found)
             continue
         for sibling in er.async_entries_for_device(
             registry, entry.device_id, include_disabled_entities=True

@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import CoreState
 from homeassistant.helpers.json import ExtendedJSONEncoder
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
@@ -173,6 +174,7 @@ async def test_diagnostics_lists_profile_errors(hass, tmp_path, entry) -> None:
 
 async def test_diagnostics_of_an_entry_that_failed_to_set_up(hass) -> None:
     failed = make_entry(hass, [room_data()], OPTIONS)
+    MockConfigEntry(domain="zha").add_to_hass(hass)
     with patch(GATEWAY_FACTORY, side_effect=ZhaUnavailable("no zha")):
         assert not await hass.config_entries.async_setup(failed.entry_id)
     assert failed.state is ConfigEntryState.SETUP_RETRY

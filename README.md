@@ -12,7 +12,7 @@ Status: version 0.8.0 is released (a quieter, more robust write path: a thermost
 |---|---|---|---|
 | Sonoff TRVZB (Gen 1) | ZHA | 1.2.1 or newer | Hysteresis needs 1.3.0 or newer, the adaptive mode 1.4.4 or newer. Targeted firmware: 1.3.0 and 1.4.4. The first hardware run is pending (see [`docs/testing-on-device.md`](docs/testing-on-device.md)). |
 
-Home Assistant 2026.8 or newer is required. The thermostats must already be paired with ZHA. Use ZHA's built-in quirk for the TRVZB; do not add a custom quirk for the same model, the two conflict.
+Home Assistant 2026.8 or newer is required. The shipped profile needs the thermostats paired with ZHA; thermostats of other integrations work with an entity profile (Beta, see [Profiles](#profiles)). Use ZHA's built-in quirk for the TRVZB; do not add a custom quirk for the same model, the two conflict.
 
 Other thermostats, Zigbee2MQTT and other Zigbee integrations are not supported.
 
@@ -34,7 +34,7 @@ The room form asks for:
 
 | Field | Meaning |
 |---|---|
-| Thermostats (ZHA) | One or more ZHA thermostats of a supported model. A thermostat can belong to one room only. |
+| Thermostats | One or more thermostats of the same model that a profile fits. A thermostat can belong to one room only. |
 | Temperature sensors | The room's sensors in priority order (drag to reorder). The first usable one is used. Without any sensor Easy TRV does not touch the thermostats' temperature source. |
 | Humidity sensors | Stored for later use. Not evaluated yet. |
 | Window and door contacts | Optional. `binary_sensor` entities of the class window, door, opening or garage door, from any area. See [Window contacts](#window-contacts). |
@@ -455,6 +455,20 @@ The database grows with it. For raw data over many years, the optional InfluxDB 
 
 Easy TRV talks to a thermostat through a profile, a small YAML file that says which device it fits, from which firmware, and which attributes to write and read back. The shipped profile is `sonoff_trvzb_native` in [`custom_components/easy_trv/profiles/builtin/`](custom_components/easy_trv/profiles/builtin/). Shipped profiles are never edited in place. The `sonoff_trvzb_native` profile targets firmware 1.3.0 and 1.4.4; the first run on real hardware is pending (see [`docs/testing-on-device.md`](docs/testing-on-device.md)).
 
+### Add a profile in the UI
+
+**Settings > Devices & services > Easy TRV > Add thermostat profile** offers three ways. The profile is stored in Easy TRV and listed on the integration page; rooms choose it in their **Profile** field. Deleting it there removes it.
+
+- **Create your own profile (Beta):** name the profile, pick one of your thermostats as the sample, then choose which of its entities does what: the room temperature for the thermostat (a number, required), the temperature source (a select or switch), the open-window detection, frost protection, hysteresis and adaptive mode (all optional). Easy TRV then drives the thermostats through these Home Assistant entities, so it works with any integration (Zigbee2MQTT, deCONZ, ZHA, Tuya, ...). Other thermostats of the same model are found by the same entity key. All thermostats of a room must be the same model.
+- **Upload or paste a profile:** a `.yaml` file or its text. Easy TRV checks it and shows what is wrong before saving.
+- **Download from the community:** the profiles shared by other users in [`community/profiles/`](community/profiles/), installed with one click.
+
+**Show or edit profile** on a stored profile shows its text to copy, lets you change it, and has a link to share it: it opens a pre-filled form on GitHub, a workflow checks the profile and opens a pull request, and once it is merged the profile is in the community list.
+
+Entity profiles (`backend: entity`) are a Beta: a write is confirmed by the entity's new state instead of the Zigbee answer, and the TRVZB-specific signals (fail-safe, the thermostat's own schedule) are not available. The shipped Sonoff TRVZB profile stays native.
+
+### Profile files
+
 To adapt one:
 
 1. Copy the shipped file to `<config>/easy_trv/profiles/<name>.yaml` (create the folder if it does not exist).
@@ -471,7 +485,7 @@ Firmware minimums are part of a profile. Below the profile's minimum firmware no
 - **Hold by off and restore.** Window contacts and the cut-off switch the thermostats off and back on; they do not use a timer on the thermostat. If Home Assistant is down during a hold they stay off.
 - **No thermostat schedules.** Schedules come from a Home Assistant helper (see [Schedule](#schedule)); Easy TRV never writes a thermostat's `auto` mode; a thermostat someone puts into it is left alone, except that a window or the outdoor cut-off switches it off, and it then stays off until you switch it back (Repairs issue `schedule_thermostat_off`).
 - **Writes while a room is off.** No temperature is written while the room is off or held. Whether a write could wake an `off` thermostat is one of the open checks in [`docs/testing-on-device.md`](docs/testing-on-device.md).
-- **ZHA and the Sonoff TRVZB only.** Other models need their own profile.
+- **Sonoff TRVZB built in.** Other models need a profile: your own (Beta, through their entities), an uploaded one or one from the community.
 - **ZHA's internal API.** Writing and verifying attributes needs ZHA's internal API. Easy TRV keeps all of it in one adapter module, so a future Home Assistant change is fixed in one place. If the API breaks, the `zha_api_incompatible` issue says so.
 - **Presence:** one entity per room (the global one or its own), no vacation with a return time, no away delay per room, no forced presence per room.
 - **Not used yet:** humidity sensors, presets, battery warnings.

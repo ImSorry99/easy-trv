@@ -211,6 +211,7 @@ async def test_unload_before_start_cancels_the_pending_start(
 
 
 async def test_setup_zha_unavailable_retries_and_clears_issue(hass, entry) -> None:
+    MockConfigEntry(domain="zha").add_to_hass(hass)
     with patch(GATEWAY_FACTORY, side_effect=ZhaUnavailable("no zha")):
         assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state is ConfigEntryState.SETUP_RETRY
@@ -224,6 +225,16 @@ async def test_setup_zha_unavailable_retries_and_clears_issue(hass, entry) -> No
     assert entry.state is ConfigEntryState.LOADED
     assert zha_issue(hass) is None
     assert hass.states.get("sensor.living_heating_state").state == "heating"
+
+
+async def test_setup_without_zha_loads_for_entity_rooms(hass, entry) -> None:
+    # ZHA is not set up at all and no room has a ZHA thermostat: the entry
+    # loads, so rooms with entity profiles can work; the ZHA room is skipped.
+    with patch(GATEWAY_FACTORY, side_effect=ZhaUnavailable("no zha")):
+        await start(hass, entry)
+    assert entry.state is ConfigEntryState.LOADED
+    assert zha_issue(hass) is None
+    assert entry.runtime_data.rooms == {}
 
 
 async def test_profile_auto_selects_builtin_and_rejects_unmatched(
@@ -254,7 +265,7 @@ async def test_non_zha_thermostat_invalidates_only_its_room(hass) -> None:
     issue = room_issue(hass, subentry_of(entry, "Living").subentry_id)
     assert issue is not None
     assert (
-        "climate.mqtt is not a ZHA thermostat"
+        "climate.mqtt is not a thermostat with a device"
         in (issue.translation_placeholders["error"])
     )
 
@@ -329,7 +340,7 @@ async def test_one_unresolvable_room_leaves_the_other_rooms_running(
     assert issue.translation_key == "room_invalid"
     assert issue.translation_placeholders == {
         "room": "Bedroom",
-        "error": "climate.ghost is not a ZHA thermostat",
+        "error": "climate.ghost is not a thermostat with a device",
     }
     assert "Room Bedroom could not be set up" in caplog.text
 

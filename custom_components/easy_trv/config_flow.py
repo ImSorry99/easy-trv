@@ -24,8 +24,10 @@ from homeassistant.helpers.selector import (
     TextSelector,
 )
 
+from custom_components.easy_trv.adapters.entity_gateway import (
+    resolve_entity_device,
+)
 from custom_components.easy_trv.adapters.zha_gateway import (
-    ZHA_DOMAIN,
     DeviceRef,
     NotZhaEntity,
     resolve_device,
@@ -43,6 +45,7 @@ from custom_components.easy_trv.const import (
     DOMAIN,
     PROFILE_AUTO,
     SETTING_GLOBAL,
+    SUBENTRY_PROFILE,
     SUBENTRY_ROOM,
 )
 from custom_components.easy_trv.core.settings import (
@@ -63,7 +66,14 @@ from custom_components.easy_trv.flow_settings import (
     stored_options,
     timeout_error,
 )
-from custom_components.easy_trv.profiles.loader import async_load_profiles
+from custom_components.easy_trv.profile_flow import (
+    ProfileSubentryFlow,
+    profile_documents,
+)
+from custom_components.easy_trv.profiles.loader import (
+    add_documents,
+    async_load_profiles,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -132,11 +142,7 @@ def prefill_from_area(hass: HomeAssistant, area_id: str) -> dict[str, list[str]]
             if entry.area_id in (None, area_id):
                 entries.setdefault(entry.entity_id, entry)
 
-    trvs = [
-        entry
-        for entry in entries.values()
-        if entry.domain == CLIMATE_DOMAIN and entry.platform == ZHA_DOMAIN
-    ]
+    trvs = [entry for entry in entries.values() if entry.domain == CLIMATE_DOMAIN]
     trv_devices = {entry.device_id for entry in trvs if entry.device_id is not None}
 
     def of_class(domain: str, *device_classes: str) -> list[str]:
@@ -198,13 +204,17 @@ def validate_room(
     refs: list[DeviceRef] = []
     for entity_id in trvs:
         # The entity picker only filters in the browser, so a posted entity can
-        # be any ZHA entity (a switch of a thermostat, for instance).
+        # be any entity (a switch of a thermostat, for instance).
         if entity_id.partition(".")[0] != CLIMATE_DOMAIN:
             return {CONF_TRVS: _ERR_NOT_ZHA}
         try:
             refs.append(resolve_device(hass, entity_id))
         except NotZhaEntity:
-            return {CONF_TRVS: _ERR_NOT_ZHA}
+            # Not ZHA: any thermostat with a device can use an entity profile.
+            try:
+                refs.append(resolve_entity_device(hass, entity_id))
+            except NotZhaEntity:
+                return {CONF_TRVS: _ERR_NOT_ZHA}
 
     taken = {
         entity_id
@@ -225,7 +235,7 @@ def _entity_fields() -> dict[Any, Any]:
         vol.Required(CONF_TRVS): EntitySelector(
             EntitySelectorConfig(
                 multiple=True,
-                filter=[{"integration": ZHA_DOMAIN, "domain": CLIMATE_DOMAIN}],
+                filter=[{"domain": CLIMATE_DOMAIN}],
             )
         ),
         vol.Optional(CONF_TEMP_SENSORS, default=[]): EntitySelector(
@@ -293,8 +303,8 @@ class EasyTrvConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_supported_subentry_types(
         cls, _config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
-        """Return the subentry flows: a room."""
-        return {SUBENTRY_ROOM: RoomSubentryFlow}
+        """Return the subentry flows: a room and a thermostat profile."""
+        return {SUBENTRY_ROOM: RoomSubentryFlow, SUBENTRY_PROFILE: ProfileSubentryFlow}
 
 
 # --- Room subentry flow -----------------------------------------------------
@@ -337,9 +347,7 @@ class RoomSubentryFlow(ConfigSubentryFlow):
         schema = vol.Schema(
             {
                 vol.Required(CONF_AREA): AreaSelector(
-                    AreaSelectorConfig(
-                        entity=[{"integration": ZHA_DOMAIN, "domain": CLIMATE_DOMAIN}]
-                    )
+                    AreaSelectorConfig(entity=[{"domain": CLIMATE_DOMAIN}])
                 )
             }
         )
@@ -568,7 +576,10 @@ class RoomSubentryFlow(ConfigSubentryFlow):
             if entry.state is ConfigEntryState.LOADED:
                 self._profiles = entry.runtime_data.profiles.profiles
             else:
-                self._profiles = (await async_load_profiles(self.hass)).profiles
+                loaded = await async_load_profiles(self.hass)
+                self._profiles = add_documents(
+                    loaded, profile_documents(self._get_entry())
+                ).profiles
         return self._profiles
 
 

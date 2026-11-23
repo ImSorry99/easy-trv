@@ -12,6 +12,8 @@ from custom_components.easy_trv.profiles.engine import Profile
 from custom_components.easy_trv.profiles.schema import validate_profile_dict
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from homeassistant.core import HomeAssistant
 
 BUILTIN_DIR = Path(__file__).parent / "builtin"
@@ -53,6 +55,54 @@ def load_profile_file(path: Path) -> dict[str, Any]:
         OverflowError,
     ) as err:
         raise ProfileLoadError(path.name, str(err)) from err
+
+
+def parse_profile_text(text: str, name: str) -> tuple[dict[str, Any], Profile]:
+    """Validate and build a profile from YAML text (an upload or a download).
+
+    ``name`` labels the source in the error (a file name or a title).
+
+    Raises:
+        ProfileLoadError: If the text is not valid YAML, violates the schema
+            or cannot be built.
+
+    """
+    try:
+        data = validate_profile_dict(yaml.safe_load(text))
+    except (
+        yaml.YAMLError,
+        vol.Invalid,
+        ValueError,
+        TypeError,
+        OverflowError,
+    ) as err:
+        raise ProfileLoadError(name, str(err)) from err
+    try:
+        return data, Profile.from_dict(data)
+    except ValueError as err:
+        raise ProfileLoadError(name, str(err)) from err
+
+
+def add_documents(result: LoadResult, documents: Mapping[str, str]) -> LoadResult:
+    """Add profiles stored as YAML text (``{name: text}``) after the loaded ones.
+
+    The same rules apply as for user files: a document that is invalid or
+    reuses an id already loaded is recorded in ``errors`` and skipped.
+    """
+    profiles = dict(result.profiles)
+    errors = list(result.errors)
+    for name, text in documents.items():
+        try:
+            _data, profile = parse_profile_text(text, name)
+        except ProfileLoadError as err:
+            errors.append(err)
+            continue
+        if profile.id in profiles:
+            msg = f"profile id {profile.id!r} is already used by another profile"
+            errors.append(ProfileLoadError(name, msg))
+            continue
+        profiles[profile.id] = profile
+    return LoadResult(profiles=profiles, errors=tuple(errors))
 
 
 def _load_profile(path: Path) -> Profile:
