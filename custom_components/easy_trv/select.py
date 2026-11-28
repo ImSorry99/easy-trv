@@ -9,7 +9,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.util import dt as dt_util
 
-from custom_components.easy_trv.house import OPTIONS, house_device_info
+from custom_components.easy_trv.house import OPTIONS
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -52,7 +52,7 @@ async def async_setup_entry(
     entry: EasyTrvConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add the presence select to the house device."""
+    """Add the presence select; it belongs to the entry, not to a device."""
     async_add_entities([PresenceSelect(entry.runtime_data.house)])
 
 
@@ -68,7 +68,6 @@ class PresenceSelect(SelectEntity, RestoreEntity):
         self._house = house
         self._attr_options = list(OPTIONS)
         self._attr_unique_id = f"{house.entry_id}_presence"
-        self._attr_device_info = house_device_info(house.entry_id)
 
     @property
     def current_option(self) -> str:

@@ -27,7 +27,7 @@ async def _setup(hass, options=OPTIONS):
     return entry
 
 
-async def test_the_select_sits_on_the_house_device(hass) -> None:
+async def test_the_select_belongs_to_the_entry_without_a_device(hass) -> None:
     with patched_gateway(hass):
         entry = await _setup(hass)
         state = hass.states.get(SELECT)
@@ -38,9 +38,14 @@ async def test_the_select_sits_on_the_house_device(hass) -> None:
 
         registered = er.async_get(hass).async_get(SELECT)
         assert registered.unique_id == f"{entry.entry_id}_presence"
-        device = dr.async_get(hass).async_get(registered.device_id)
-        assert device.identifiers == {(DOMAIN, entry.entry_id)}
-        assert (device.manufacturer, device.name) == ("Easy TRV", "Easy TRV")
+        assert registered.config_entry_id == entry.entry_id
+        assert registered.device_id is None
+        assert (
+            dr.async_get(hass).async_get_device_by_identifier(
+                (DOMAIN, entry.entry_id), entry.entry_id
+            )
+            is None
+        )
 
 
 async def test_select_option_forces_and_fires_the_event(hass) -> None:
@@ -134,3 +139,31 @@ async def test_reload_while_running_keeps_the_forced_option(hass) -> None:
         assert hass.states.get(SELECT).state == "away"
         room = next(iter(entry.runtime_data.rooms.values()))
         assert room.presence == "away"
+
+
+async def test_the_old_house_device_goes_and_its_entities_stay(hass) -> None:
+    hass.states.async_set("person.a", "home")
+    entry = make_entry(hass, [room_data()], OPTIONS)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        manufacturer="Easy TRV",
+        name="Easy TRV",
+    )
+    entities = er.async_get(hass)
+    old = entities.async_get_or_create(
+        "select",
+        DOMAIN,
+        f"{entry.entry_id}_presence",
+        config_entry=entry,
+        device_id=device.id,
+        suggested_object_id="haus_anwesenheit",
+    )
+    with patched_gateway(hass):
+        await start(hass, entry)
+        registered = entities.async_get(old.entity_id)
+        assert registered is not None
+        assert registered.entity_id == "select.haus_anwesenheit"
+        assert registered.device_id is None
+        assert dr.async_get(hass).async_get(device.id) is None
+        assert hass.states.get("select.haus_anwesenheit").state == "auto"

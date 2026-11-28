@@ -9,7 +9,6 @@ from homeassistant.const import EntityCategory, UnitOfTemperature
 
 from custom_components.easy_trv.const import CONF_AWAY_SETBACK, DEFAULT_AWAY_SETBACK
 from custom_components.easy_trv.core.settings import overrides
-from custom_components.easy_trv.house import house_device_info
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -25,7 +24,7 @@ async def async_setup_entry(
     entry: EasyTrvConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add the away setback number to the house device."""
+    """Add the away setback number; it belongs to the entry, not to a device."""
     async_add_entities([AwaySetbackNumber(entry)])
 
 
@@ -46,7 +45,6 @@ class AwaySetbackNumber(NumberEntity):
         """Link the number to the config entry."""
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_away_setback"
-        self._attr_device_info = house_device_info(entry.entry_id)
 
     @property
     def native_value(self) -> float:

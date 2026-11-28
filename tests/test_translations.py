@@ -44,6 +44,19 @@ def load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def room_settings_step(data: dict[str, Any]) -> dict[str, Any]:
+    """Return the room's settings step with the fields of its sections merged in."""
+    step = data["config_subentries"]["room"]["step"]["settings"]
+    merged = {
+        "data": dict(step["data"]),
+        "data_description": dict(step["data_description"]),
+    }
+    for group in step.get("sections", {}).values():
+        merged["data"].update(group["data"])
+        merged["data_description"].update(group["data_description"])
+    return {**step, **merged}
+
+
 def leaves(node: Any, prefix: tuple[str, ...] = ()) -> dict[tuple[str, ...], str]:
     """Flatten nested dicts to ``{path: text}``."""
     if isinstance(node, dict):
@@ -146,8 +159,30 @@ def test_flow_steps_cover_all_form_fields(path: Path) -> None:
     }
     # The reset switch ends the settings of a room that is reconfigured.
     reset = {"reset_settings"}
-    assert set(room["step"]["settings"]["data"]) == settings_fields | reset
-    assert set(room["step"]["settings"]["data_description"]) == settings_fields | reset
+    settings = room["step"]["settings"]
+    assert (
+        set(settings["data"])
+        == set(settings["data_description"])
+        == {
+            "profile",
+            *reset,
+        }
+    )
+    assert list(settings["sections"]) == [
+        "presence",
+        "schedule",
+        "windows_outdoor",
+        "room_thermostat",
+        "thermostat",
+        "statistics",
+        "writes",
+    ]
+    for group in settings["sections"].values():
+        assert set(group) == {"name", "description", "data", "data_description"}
+        assert set(group["data"]) == set(group["data_description"])
+    merged = room_settings_step(data)
+    assert set(merged["data"]) == settings_fields | reset
+    assert set(merged["data_description"]) == settings_fields | reset
     assert set(room["step"]["from_area"]["data"]) == {"area_id"}
     assert set(room["step"]["custom"]["data"]) == {"name", "area_id"}
     # The optional area field says what it does.
@@ -651,7 +686,7 @@ def test_room_and_options_forms_explain_window_contacts_and_cutoff(path: Path) -
     sections = data["options"]["step"]["init"]["sections"]
     for step in ("entities", "reconfigure"):
         assert room[step]["data_description"]["window_contacts"].strip()
-    settings = room["settings"]["data_description"]
+    settings = room_settings_step(data)["data_description"]
     for key in (
         "setpoint_min",
         "setpoint_max",
@@ -671,7 +706,7 @@ def test_room_and_options_forms_explain_window_contacts_and_cutoff(path: Path) -
     assert "{default_window_warn_minutes}" in windows["window_warn_minutes"]
     assert "{default_window_open_delay_seconds}" in windows["window_open_delay_seconds"]
     assert "{global_window_open_delay_seconds}" in settings["window_open_delay_seconds"]
-    assert room["settings"]["data_description"]["setpoint_max"]
+    assert settings["setpoint_max"]
 
 
 def test_window_contact_texts_name_another_area_en() -> None:
@@ -702,7 +737,7 @@ def test_setpoint_range_error_texts() -> None:
 
 def test_window_and_outdoor_field_texts_en() -> None:
     en = load(EN)
-    settings = en["config_subentries"]["room"]["step"]["settings"]["data_description"]
+    settings = room_settings_step(en)["data_description"]
     assert "0 = never" in settings["window_warn_minutes"]
     assert "Repairs" in settings["window_warn_minutes"]
     assert "0 = off" in settings["window_check_minutes"]
@@ -712,7 +747,7 @@ def test_window_and_outdoor_field_texts_en() -> None:
 
 def test_window_and_outdoor_field_texts_de() -> None:
     de = load(DE)
-    settings = de["config_subentries"]["room"]["step"]["settings"]["data_description"]
+    settings = room_settings_step(de)["data_description"]
     assert "0 = nie" in settings["window_warn_minutes"]
     assert "Reparaturen" in settings["window_warn_minutes"]
     assert "0 = aus" in settings["window_check_minutes"]
@@ -722,8 +757,8 @@ def test_window_and_outdoor_field_texts_de() -> None:
 
 def test_window_open_delay_texts() -> None:
     en, de = load(EN), load(DE)
-    en_room = en["config_subentries"]["room"]["step"]["settings"]
-    de_room = de["config_subentries"]["room"]["step"]["settings"]
+    en_room = room_settings_step(en)
+    de_room = room_settings_step(de)
     label = "Delay before a window counts as open (seconds, 0 = immediately)"
     assert en_room["data"]["window_open_delay_seconds"] == label
     assert de_room["data"]["window_open_delay_seconds"] == (
@@ -733,11 +768,7 @@ def test_window_open_delay_texts() -> None:
         section = data["options"]["step"]["init"]["sections"]["windows_outdoor"]
         assert (
             section["data"]["window_open_delay_seconds"]
-            == (
-                data["config_subentries"]["room"]["step"]["settings"]["data"][
-                    "window_open_delay_seconds"
-                ]
-            )
+            == (room_settings_step(data)["data"]["window_open_delay_seconds"])
         )
 
 
@@ -747,7 +778,7 @@ def test_field_references_use_the_name_of_the_field() -> None:
         (en, "Cooling expected by the check (K)", "the cooling below"),
         (de, "Erwartete Abkühlung bei der Prüfung (K)", "Abkühlung unten"),
     ):
-        room = data["config_subentries"]["room"]["step"]["settings"]
+        room = room_settings_step(data)
         windows = data["options"]["step"]["init"]["sections"]["windows_outdoor"]
         assert room["data"]["window_check_drop_kelvin"] == name
         for texts in (room["data_description"], windows["data_description"]):
@@ -757,9 +788,7 @@ def test_field_references_use_the_name_of_the_field() -> None:
 
 def test_the_room_cutoff_text_shows_the_global_value_and_the_own_threshold() -> None:
     for path, own in ((EN, "unless you enter"), (DE, "solange du unten keine")):
-        text = load(path)["config_subentries"]["room"]["step"]["settings"][
-            "data_description"
-        ]["outdoor_cutoff"]
+        text = room_settings_step(load(path))["data_description"]["outdoor_cutoff"]
         assert "{global_outdoor_cutoff_celsius}" in text
         assert own in text
         assert not text.startswith(("Global uses", "Global verwendet"))
@@ -767,7 +796,7 @@ def test_the_room_cutoff_text_shows_the_global_value_and_the_own_threshold() -> 
 
 def test_german_setpoint_labels() -> None:
     de = load(DE)
-    settings = de["config_subentries"]["room"]["step"]["settings"]["data"]
+    settings = room_settings_step(de)["data"]
     section = de["options"]["step"]["init"]["sections"]["room_thermostat"]["data"]
     for texts in (settings, section):
         assert texts["setpoint_min"] == "Minimale Solltemperatur (°C)"
@@ -776,7 +805,7 @@ def test_german_setpoint_labels() -> None:
 
 def test_hide_setting_texts_en() -> None:
     en = load(EN)
-    room = en["config_subentries"]["room"]["step"]["settings"]
+    room = room_settings_step(en)
     section = en["options"]["step"]["init"]["sections"]["thermostat"]
     assert room["data"]["hide_thermostat_entities"] == "Hide thermostat entities"
     assert section["data"]["hide_thermostat_entities"] == "Hide thermostat entities"
@@ -796,7 +825,7 @@ def test_hide_setting_texts_en() -> None:
 
 def test_hide_setting_texts_de() -> None:
     de = load(DE)
-    room = de["config_subentries"]["room"]["step"]["settings"]
+    room = room_settings_step(de)
     section = de["options"]["step"]["init"]["sections"]["thermostat"]
     assert room["data"]["hide_thermostat_entities"] == "TRV-Entitäten ausblenden"
     assert section["data"]["hide_thermostat_entities"] == "TRV-Entitäten ausblenden"
@@ -830,7 +859,7 @@ STATISTICS_TEXT_DE = (
 
 def test_statistics_setting_texts_en() -> None:
     en = load(EN)
-    room = en["config_subentries"]["room"]["step"]["settings"]
+    room = room_settings_step(en)
     section = en["options"]["step"]["init"]["sections"]["statistics"]
     assert room["data"]["statistics"] == "Collect statistics"
     assert section["data"]["statistics"] == "Collect statistics"
@@ -851,7 +880,7 @@ def test_statistics_setting_texts_en() -> None:
 
 def test_statistics_setting_texts_de() -> None:
     de = load(DE)
-    room = de["config_subentries"]["room"]["step"]["settings"]
+    room = room_settings_step(de)
     section = de["options"]["step"]["init"]["sections"]["statistics"]
     assert room["data"]["statistics"] == "Statistik erfassen"
     assert section["data"]["statistics"] == "Statistik erfassen"

@@ -56,7 +56,7 @@ from custom_components.easy_trv.core.settings import (
     resolve_settings,
 )
 from custom_components.easy_trv.frontend import async_register_card
-from custom_components.easy_trv.house import HousePresence
+from custom_components.easy_trv.house import HousePresence, retire_house_device
 from custom_components.easy_trv.labels import (
     async_capability_labels,
     localized_number,
@@ -719,6 +719,7 @@ async def async_setup_entry(  # noqa: PLR0915 - the steps of one entry
         {sid: sub.title for sid, sub in entry.subentries.items()},
     )
     _remove_unused_entities(hass, entry, invalid)
+    retire_house_device(hass, entry.entry_id)
 
     await _set_up_platforms(hass, entry, room_profiles, resolved, invalid)
     _assign_room_areas(hass, entry)

@@ -5,10 +5,9 @@ from homeassistant.components.number import ATTR_VALUE
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import EntityCategory
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.easy_trv.const import DOMAIN, SUBENTRY_ROOM
+from custom_components.easy_trv.const import SUBENTRY_ROOM
 from tests.helpers_entry import (
     FAST_OPTIONS,
     make_entry,
@@ -54,7 +53,7 @@ def _room(entry, name="Living"):
     raise AssertionError(name)
 
 
-async def test_the_number_sits_on_the_house_device(hass) -> None:
+async def test_the_number_belongs_to_the_entry_without_a_device(hass) -> None:
     _states(hass)
     with patched_gateway(hass):
         entry = await _setup(hass)
@@ -70,8 +69,7 @@ async def test_the_number_sits_on_the_house_device(hass) -> None:
         registered = er.async_get(hass).async_get(NUMBER)
         assert registered.unique_id == f"{entry.entry_id}_away_setback"
         assert registered.entity_category is EntityCategory.CONFIG
-        device = dr.async_get(hass).async_get(registered.device_id)
-        assert device.identifiers == {(DOMAIN, entry.entry_id)}
+        assert registered.device_id is None
 
 
 async def test_the_number_shows_the_default_without_the_option(hass) -> None:
