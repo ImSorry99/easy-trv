@@ -81,68 +81,126 @@
         },
         "settings": {
           "title": "Room settings",
-          "description": "Every setting follows the integration options (Global) unless you set it for this room. A number field left empty also means Global.",
+          "description": "Every setting follows the integration options (Global) unless you set it for this room. A number field left empty also means Global. Sections where this room has values of its own are open.",
           "data": {
             "profile": "Profile",
-            "window_detection": "Thermostat's open-window detection",
-            "hysteresis": "Hysteresis",
-            "adaptive_mode": "Adaptive mode (firmware 1.4.4 and newer)",
-            "frost_temperature": "Frost protection temperature",
-            "hide_thermostat_entities": "Hide thermostat entities",
-            "refresh_minutes": "Refresh interval (minutes)",
-            "verify_delay_seconds": "Read-back delay (seconds)",
-            "max_attempts": "Attempts",
-            "min_delta_kelvin": "Minimum change (K)",
-            "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)",
-            "setpoint_range": "Setpoint range",
-            "setpoint_min": "Minimum target temperature",
-            "setpoint_max": "Maximum target temperature",
-            "window_open_delay_seconds": "Delay before a window counts as open (seconds, 0 = immediately)",
-            "window_warn_minutes": "Open-window warning (minutes, 0 = never)",
-            "window_warn_colder": "Warn only when it is colder outside",
-            "window_check_minutes": "Window contact check (minutes, 0 = off)",
-            "window_check_drop_kelvin": "Cooling expected by the check (K)",
-            "outdoor_cutoff": "Outdoor cut-off",
-            "outdoor_cutoff_celsius": "Outdoor cut-off temperature",
-            "presence": "Presence",
-            "presence_entity": "Presence entity",
-            "presence_unknown": "When presence is unknown",
-            "away_action": "While away",
-            "away_setback_kelvin": "Setback (K)",
-            "statistics": "Collect statistics",
-            "reset_settings": "Reset all settings of this room to Global",
-            "schedule_setback_kelvin": "Setback outside the schedule (K)"
+            "reset_settings": "Reset all settings of this room to Global"
           },
           "data_description": {
             "profile": "Auto picks the first profile that matches all thermostats of the room. Global is currently {global_profile}.",
-            "window_detection": "Switches the thermostat's own open-window detection on or off. It triggers when the temperature falls by about 1.5 K within 4.5 minutes and ends the heating pause after 30 minutes at the latest. It has nothing to do with window contacts in Home Assistant. Global is currently {global_window_detection}.",
-            "hysteresis": "Temperature hysteresis of the thermostats. It is ignored while the adaptive mode is on. Global is currently {global_hysteresis}.",
-            "adaptive_mode": "The thermostat adapts to the room itself. While it is on, the hysteresis is ignored. Needs firmware 1.4.4 or newer. Global is currently {global_adaptive_mode}.",
-            "frost_temperature": "The temperature the thermostat keeps as frost protection. 4.0 to 16.0 °C. Global is currently {global_frost_temperature}.",
-            "hide_thermostat_entities": "Hides the climate entity of the TRVs and the settings that Easy TRV controls. They keep working but no longer appear on automatic dashboards. Turning this off shows them again. Global is currently {global_hide_thermostat_entities}.",
-            "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Global is currently {global_refresh_minutes}.",
-            "verify_delay_seconds": "How long to wait after writing the room temperature, the source, the target or the mode before reading it back (fail-safe, schedule, knob turns). Settings are not read back. 2 to 60 seconds. Global is currently {global_verify_delay_seconds}.",
-            "max_attempts": "How often a failed write is tried in quick succession before Easy TRV retries it once per refresh interval. A thermostat is reported only when its writes keep failing for an hour. 1 to 10. Global is currently {global_max_attempts}.",
-            "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Global is currently {global_min_delta_kelvin}.",
-            "sensor_timeout_minutes": "A silent sensor still counts as long as it is available; battery sensors often report only on a change. The timeout is for sensors that report regularly: one that has not reported for this long is ignored. 0 = off (default), otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}.",
-            "setpoint_range": "Automatic reads, when the room is set up, the minimum and maximum target temperature the thermostats show in Home Assistant (with several, the narrowest common range, else the range of the profile). Manual takes the minimum and maximum below. Global is currently {global_setpoint_range}.",
-            "setpoint_min": "The lowest target temperature the room accepts. 4.0 to 35.0 °C and below the maximum. Only used with the setpoint range Manual. Global is currently {global_setpoint_min}.",
-            "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Only used with the setpoint range Manual. Global is currently {global_setpoint_max}.",
-            "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Global is currently {global_window_open_delay_seconds}.",
-            "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Global is currently {global_window_warn_minutes}.",
-            "window_warn_colder": "The open-window warning is raised only while the outdoor temperature is below the room temperature. If it gets colder later, it is raised then. Needs the outdoor temperature sensor; with the outdoor temperature unknown, it warns. The heating is switched off while the window is open either way. Global is currently {global_window_warn_colder}.",
-            "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the amount set in \"Cooling expected by the check (K)\", otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
-            "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Global is currently {global_window_check_drop_kelvin}.",
-            "outdoor_cutoff": "Global follows the outdoor cut-off temperature of the integration options (currently {global_outdoor_cutoff_celsius}), unless you enter a temperature of your own below. Off never switches this room off because of the outdoor temperature.",
-            "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. Needs an outdoor sensor in the integration options. -10.0 to 30.0 °C. Empty = Global, currently {global_outdoor_cutoff_celsius}.",
-            "presence": "Global takes the presence entity of the integration options (currently {global_presence_entity}). None ignores presence for this room. Own takes the entity below.",
-            "presence_entity": "Only with presence Own: this room's entity (person, device tracker, zone, group, binary sensor or input boolean).",
-            "presence_unknown": "How an unknown or unavailable state of the entity counts. Global is currently {global_presence_unknown}.",
-            "away_action": "Lower takes the target down by the setback, never below the frost protection temperature. Off switches the thermostats off like an open window. Global is currently {global_away_action}.",
-            "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Global is currently {global_away_setback_kelvin}.",
-            "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones. Global is currently {global_statistics}.",
-            "reset_settings": "On submit every setting of this room follows the global options again and the values above are ignored. Where the room's presence comes from stays.",
-            "schedule_setback_kelvin": "How far the target goes down while the room's schedule is off. 0.5 to 15 K, never below frost protection. Global is currently {global_schedule_setback_kelvin}."
+            "reset_settings": "On submit every setting of this room follows the global options again and the values above are ignored. Where the room's presence comes from stays."
+          },
+          "sections": {
+            "presence": {
+              "name": "Presence",
+              "description": "What this room does while nobody is home, and where its presence comes from.",
+              "data": {
+                "presence": "Presence",
+                "presence_entity": "Presence entity",
+                "presence_unknown": "When presence is unknown",
+                "away_action": "While away",
+                "away_setback_kelvin": "Setback (K)"
+              },
+              "data_description": {
+                "presence": "Global takes the presence entity of the integration options (currently {global_presence_entity}). None ignores presence for this room. Own takes the entity below.",
+                "presence_entity": "Only with presence Own: this room's entity (person, device tracker, zone, group, binary sensor or input boolean).",
+                "presence_unknown": "How an unknown or unavailable state of the entity counts. Global is currently {global_presence_unknown}.",
+                "away_action": "Lower takes the target down by the setback, never below the frost protection temperature. Off switches the thermostats off like an open window. Global is currently {global_away_action}.",
+                "away_setback_kelvin": "How far the target goes down while away. 0.5 to 10 K. Global is currently {global_away_setback_kelvin}."
+              }
+            },
+            "schedule": {
+              "name": "Schedule",
+              "description": "How far this room is lowered while its schedule helper is off.",
+              "data": {
+                "schedule_setback_kelvin": "Setback outside the schedule (K)"
+              },
+              "data_description": {
+                "schedule_setback_kelvin": "How far the target goes down while the room's schedule is off. 0.5 to 15 K, never below frost protection. Global is currently {global_schedule_setback_kelvin}."
+              }
+            },
+            "windows_outdoor": {
+              "name": "Windows and outdoor",
+              "description": "Window contacts of this room, and switching off when it is warm outside.",
+              "data": {
+                "window_open_delay_seconds": "Delay before a window counts as open (seconds, 0 = immediately)",
+                "window_warn_minutes": "Open-window warning (minutes, 0 = never)",
+                "window_warn_colder": "Warn only when it is colder outside",
+                "window_check_minutes": "Window contact check (minutes, 0 = off)",
+                "window_check_drop_kelvin": "Cooling expected by the check (K)",
+                "outdoor_cutoff": "Outdoor cut-off",
+                "outdoor_cutoff_celsius": "Outdoor cut-off temperature"
+              },
+              "data_description": {
+                "window_open_delay_seconds": "How long a window contact must stay open before the window counts as open and the heating is switched off. Airing for a moment switches nothing off. 0 = immediately, otherwise 1 to 600 seconds. Global is currently {global_window_open_delay_seconds}.",
+                "window_warn_minutes": "After how many minutes an open window raises a Repairs issue (0 = never). The heating stays off until the window is closed. 0 to 1440 minutes. Global is currently {global_window_warn_minutes}.",
+                "window_warn_colder": "The open-window warning is raised only while the outdoor temperature is below the room temperature. If it gets colder later, it is raised then. Needs the outdoor temperature sensor; with the outdoor temperature unknown, it warns. The heating is switched off while the window is open either way. Global is currently {global_window_warn_colder}.",
+                "window_check_minutes": "After how many minutes with an open window the room must have cooled by at least the amount set in \"Cooling expected by the check (K)\", otherwise a hint is raised that the contact may be stuck (0 = off). 0 to 240 minutes. Global is currently {global_window_check_minutes}.",
+                "window_check_drop_kelvin": "How far the room temperature must have fallen since the window was opened for the contact to count as plausible. 0.1 to 3.0 K. Global is currently {global_window_check_drop_kelvin}.",
+                "outdoor_cutoff": "Global follows the outdoor cut-off temperature of the integration options (currently {global_outdoor_cutoff_celsius}), unless you enter a temperature of your own below. Off never switches this room off because of the outdoor temperature.",
+                "outdoor_cutoff_celsius": "The room switches off when the outdoor temperature reaches this value and back on 0.5 K below it. Needs an outdoor sensor in the integration options. -10.0 to 30.0 °C. Empty = Global, currently {global_outdoor_cutoff_celsius}."
+              }
+            },
+            "room_thermostat": {
+              "name": "Target temperature range",
+              "description": "The lowest and highest target temperature this room accepts.",
+              "data": {
+                "setpoint_range": "Setpoint range",
+                "setpoint_min": "Minimum target temperature",
+                "setpoint_max": "Maximum target temperature"
+              },
+              "data_description": {
+                "setpoint_range": "Automatic reads, when the room is set up, the minimum and maximum target temperature the thermostats show in Home Assistant (with several, the narrowest common range, else the range of the profile). Manual takes the minimum and maximum below. Global is currently {global_setpoint_range}.",
+                "setpoint_min": "The lowest target temperature the room accepts. 4.0 to 35.0 °C and below the maximum. Only used with the setpoint range Manual. Global is currently {global_setpoint_min}.",
+                "setpoint_max": "The highest target temperature the room accepts. 4.0 to 35.0 °C and above the minimum. Only used with the setpoint range Manual. Global is currently {global_setpoint_max}."
+              }
+            },
+            "thermostat": {
+              "name": "Thermostat settings",
+              "description": "Written to the thermostats of this room (except hiding).",
+              "data": {
+                "window_detection": "Thermostat's open-window detection",
+                "hysteresis": "Hysteresis",
+                "adaptive_mode": "Adaptive mode (firmware 1.4.4 and newer)",
+                "frost_temperature": "Frost protection temperature",
+                "hide_thermostat_entities": "Hide thermostat entities"
+              },
+              "data_description": {
+                "window_detection": "Switches the thermostat's own open-window detection on or off. It triggers when the temperature falls by about 1.5 K within 4.5 minutes and ends the heating pause after 30 minutes at the latest. It has nothing to do with window contacts in Home Assistant. Global is currently {global_window_detection}.",
+                "hysteresis": "Temperature hysteresis of the thermostats. It is ignored while the adaptive mode is on. Global is currently {global_hysteresis}.",
+                "adaptive_mode": "The thermostat adapts to the room itself. While it is on, the hysteresis is ignored. Needs firmware 1.4.4 or newer. Global is currently {global_adaptive_mode}.",
+                "frost_temperature": "The temperature the thermostat keeps as frost protection. 4.0 to 16.0 °C. Global is currently {global_frost_temperature}.",
+                "hide_thermostat_entities": "Hides the climate entity of the TRVs and the settings that Easy TRV controls. They keep working but no longer appear on automatic dashboards. Turning this off shows them again. Global is currently {global_hide_thermostat_entities}."
+              }
+            },
+            "statistics": {
+              "name": "Statistics",
+              "description": "What Easy TRV records about this room as long-term statistics.",
+              "data": {
+                "statistics": "Collect statistics"
+              },
+              "data_description": {
+                "statistics": "Control deviation, heating time, windows and Zigbee counters as long-term statistics. Hidden collects without filling lists and dashboards. Off creates no statistics sensors and removes existing ones. Global is currently {global_statistics}."
+              }
+            },
+            "writes": {
+              "name": "Advanced: writes",
+              "description": "How often and how carefully the room temperature is written to the thermostats. Rarely needs changing.",
+              "data": {
+                "refresh_minutes": "Refresh interval (minutes)",
+                "verify_delay_seconds": "Read-back delay (seconds)",
+                "max_attempts": "Attempts",
+                "min_delta_kelvin": "Minimum change (K)",
+                "sensor_timeout_minutes": "Sensor timeout (minutes, 0 = off)"
+              },
+              "data_description": {
+                "refresh_minutes": "How often the current room temperature is written to the thermostats again, even if it has not changed. 1 to 120 minutes. Global is currently {global_refresh_minutes}.",
+                "verify_delay_seconds": "How long to wait after writing the room temperature, the source, the target or the mode before reading it back (fail-safe, schedule, knob turns). Settings are not read back. 2 to 60 seconds. Global is currently {global_verify_delay_seconds}.",
+                "max_attempts": "How often a failed write is tried in quick succession before Easy TRV retries it once per refresh interval. A thermostat is reported only when its writes keep failing for an hour. 1 to 10. Global is currently {global_max_attempts}.",
+                "min_delta_kelvin": "A new room temperature is only written when it differs from the last written value by at least this much. 0.0 to 1.0 K. Global is currently {global_min_delta_kelvin}.",
+                "sensor_timeout_minutes": "A silent sensor still counts as long as it is available; battery sensors often report only on a change. The timeout is for sensors that report regularly: one that has not reported for this long is ignored. 0 = off (default), otherwise 10 to 1440 minutes. Global is currently {global_sensor_timeout_minutes}."
+              }
+            }
           }
         }
       },
@@ -353,7 +411,7 @@
     },
     "select": {
       "presence": {
-        "name": "Presence",
+        "name": "Easy TRV presence",
         "state": {
           "auto": "Automatic",
           "home": "Home",
@@ -363,7 +421,7 @@
     },
     "number": {
       "away_setback": {
-        "name": "Away setback"
+        "name": "Easy TRV away setback"
       }
     }
   },

@@ -81,68 +81,126 @@
         },
         "settings": {
           "title": "Einstellungen des Raums",
-          "description": "Jede Einstellung folgt den Integrationsoptionen (Global), solange du sie nicht für diesen Raum festlegst. Ein leeres Zahlenfeld bedeutet ebenfalls Global.",
+          "description": "Jede Einstellung folgt den Integrationsoptionen (Global), solange du sie nicht für diesen Raum festlegst. Ein leeres Zahlenfeld bedeutet ebenfalls Global. Bereiche, in denen dieser Raum eigene Werte hat, sind aufgeklappt.",
           "data": {
             "profile": "Profil",
-            "window_detection": "Fenster-offen-Erkennung des Thermostats",
-            "hysteresis": "Hysterese",
-            "adaptive_mode": "Adaptiver Modus (ab Firmware 1.4.4)",
-            "frost_temperature": "Frostschutz-Temperatur",
-            "hide_thermostat_entities": "TRV-Entitäten ausblenden",
-            "refresh_minutes": "Auffrischung (Minuten)",
-            "verify_delay_seconds": "Rücklese-Verzögerung (Sekunden)",
-            "max_attempts": "Versuche",
-            "min_delta_kelvin": "Mindeständerung (K)",
-            "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)",
-            "setpoint_range": "Sollwertbereich",
-            "setpoint_min": "Minimale Solltemperatur (°C)",
-            "setpoint_max": "Maximale Solltemperatur (°C)",
-            "window_open_delay_seconds": "Verzögerung, bis ein Fenster als offen gilt (Sekunden, 0 = sofort)",
-            "window_warn_minutes": "Warnung bei offenem Fenster (Minuten, 0 = nie)",
-            "window_warn_colder": "Warnung nur, wenn es draußen kälter ist",
-            "window_check_minutes": "Fensterkontakt-Prüfung (Minuten, 0 = aus)",
-            "window_check_drop_kelvin": "Erwartete Abkühlung bei der Prüfung (K)",
-            "outdoor_cutoff": "Außentemperatur-Abschaltung",
-            "outdoor_cutoff_celsius": "Abschalttemperatur außen",
-            "presence": "Anwesenheit",
-            "presence_entity": "Anwesenheits-Entität",
-            "presence_unknown": "Bei unbekannter Anwesenheit",
-            "away_action": "Bei Abwesenheit",
-            "away_setback_kelvin": "Absenkung (K)",
-            "statistics": "Statistik erfassen",
-            "reset_settings": "Alle Einstellungen dieses Raums auf Global zurücksetzen",
-            "schedule_setback_kelvin": "Absenkung außerhalb des Zeitplans (K)"
+            "reset_settings": "Alle Einstellungen dieses Raums auf Global zurücksetzen"
           },
           "data_description": {
             "profile": "Auto wählt das erste Profil, das zu allen Thermostaten des Raums passt. Global ist derzeit {global_profile}.",
-            "window_detection": "Schaltet die eigene Fenster-offen-Erkennung des Thermostats ein oder aus. Sie löst aus, wenn die Temperatur innerhalb von 4,5 Minuten um etwa 1,5 K fällt, und beendet die Heizpause spätestens nach 30 Minuten. Mit Fensterkontakten in Home Assistant hat sie nichts zu tun. Global ist derzeit {global_window_detection}.",
-            "hysteresis": "Temperatur-Hysterese der Thermostate. Sie wird ignoriert, solange der adaptive Modus an ist. Global ist derzeit {global_hysteresis}.",
-            "adaptive_mode": "Das Thermostat stellt sich selbst auf den Raum ein. Solange er an ist, wird die Hysterese ignoriert. Braucht Firmware 1.4.4 oder neuer. Global ist derzeit {global_adaptive_mode}.",
-            "frost_temperature": "Die Temperatur, die das Thermostat als Frostschutz hält. 4,0 bis 16,0 °C. Global ist derzeit {global_frost_temperature}.",
-            "hide_thermostat_entities": "Blendet die Klima-Entität der TRVs und die Einstellungen aus, die Easy TRV steuert. Sie arbeiten weiter, stehen aber nicht mehr auf automatischen Dashboards. Ausschalten blendet sie wieder ein. Global ist derzeit {global_hide_thermostat_entities}.",
-            "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 1 bis 120 Minuten. Global ist derzeit {global_refresh_minutes}.",
-            "verify_delay_seconds": "Wie lange nach dem Schreiben von Raumtemperatur, Quelle, Soll oder Modus gewartet wird, bevor der Wert zurückgelesen wird (Fail-safe, Wochenplan, Drehen am Knopf). Einstellungen werden nicht zurückgelesen. 2 bis 60 Sekunden. Global ist derzeit {global_verify_delay_seconds}.",
-            "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang kurz hintereinander wiederholt wird, bevor Easy TRV es einmal pro Auffrischungsintervall erneut versucht. Gemeldet wird ein Thermostat erst, wenn seine Schreibvorgänge eine Stunde lang fehlschlagen. 1 bis 10. Global ist derzeit {global_max_attempts}.",
-            "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Global ist derzeit {global_min_delta_kelvin}.",
-            "sensor_timeout_minutes": "Ein stiller Sensor zählt, solange er verfügbar ist; Batteriesensoren melden oft nur bei einer Änderung. Das Timeout ist für Sensoren gedacht, die regelmäßig melden: Ein Sensor, der so lange nichts gemeldet hat, wird ignoriert. 0 = aus (Standard), sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}.",
-            "setpoint_range": "Automatisch liest beim Einrichten des Raums die minimale und maximale Solltemperatur, die die Thermostate in Home Assistant zeigen (bei mehreren gilt der engste gemeinsame Bereich, sonst der Bereich des Profils). Manuell nimmt das Minimum und das Maximum unten. Global ist derzeit {global_setpoint_range}.",
-            "setpoint_min": "Die niedrigste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_min}.",
-            "setpoint_max": "Die höchste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_max}.",
-            "window_open_delay_seconds": "Wie lange ein Fensterkontakt offen sein muss, bis das Fenster als offen gilt und die Heizung ausgeschaltet wird. Kurzes Lüften schaltet nichts aus. 0 = sofort, sonst 1 bis 600 Sekunden. Global ist derzeit {global_window_open_delay_seconds}.",
-            "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Global ist derzeit {global_window_warn_minutes}.",
-            "window_warn_colder": "Die Warnung bei offenem Fenster kommt nur, wenn die Außentemperatur unter der Raumtemperatur liegt. Wird es später kälter, kommt sie dann. Braucht den Außentemperatursensor; ist die Außentemperatur unbekannt, wird gewarnt. Die Heizung geht bei offenem Fenster trotzdem aus. Global ist derzeit {global_window_warn_colder}.",
-            "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um den Wert unter „Erwartete Abkühlung bei der Prüfung (K)“ abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Global ist derzeit {global_window_check_minutes}.",
-            "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Global ist derzeit {global_window_check_drop_kelvin}.",
-            "outdoor_cutoff": "Global folgt der Abschalttemperatur aus den Integrationsoptionen (derzeit {global_outdoor_cutoff_celsius}), solange du unten keine eigene Temperatur einträgst. Aus schaltet diesen Raum nie wegen der Außentemperatur ab.",
-            "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Braucht einen Außensensor in den Integrationsoptionen. -10,0 bis 30,0 °C. Leer = Global, derzeit {global_outdoor_cutoff_celsius}.",
-            "presence": "Global nimmt die Anwesenheits-Entität aus den Integrationsoptionen (derzeit {global_presence_entity}). Keine ignoriert die Abwesenheit für diesen Raum. Eigene nimmt die Entität darunter.",
-            "presence_entity": "Nur bei Anwesenheit Eigene: die Entität dieses Raums (Person, Gerät, Zone, Gruppe, Binärsensor oder Eingabe-Schalter).",
-            "presence_unknown": "Wie ein unbekannter oder nicht verfügbarer Zustand der Entität zählt. Global ist derzeit {global_presence_unknown}.",
-            "away_action": "Absenken senkt die Zieltemperatur um die Absenkung, nie unter die Frostschutztemperatur. Aus schaltet die Thermostate aus wie bei offenem Fenster. Global ist derzeit {global_away_action}.",
-            "away_setback_kelvin": "Um wie viel die Zieltemperatur bei Abwesenheit sinkt. 0,5 bis 10 K. Global ist derzeit {global_away_setback_kelvin}.",
-            "statistics": "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine Statistik-Sensoren an und entfernt vorhandene. Global ist derzeit {global_statistics}.",
-            "reset_settings": "Beim Absenden folgen alle Einstellungen dieses Raums wieder den globalen Optionen, die Werte oben werden ignoriert. Woher der Raum seine Anwesenheit nimmt, bleibt.",
-            "schedule_setback_kelvin": "Um wie viel die Zieltemperatur sinkt, solange der Zeitplan des Raums aus ist. 0,5 bis 15 K, nie unter Frostschutz. Global ist derzeit {global_schedule_setback_kelvin}."
+            "reset_settings": "Beim Absenden folgen alle Einstellungen dieses Raums wieder den globalen Optionen, die Werte oben werden ignoriert. Woher der Raum seine Anwesenheit nimmt, bleibt."
+          },
+          "sections": {
+            "presence": {
+              "name": "Abwesenheit",
+              "description": "Was dieser Raum macht, wenn niemand zuhause ist, und woher er seine Anwesenheit nimmt.",
+              "data": {
+                "presence": "Anwesenheit",
+                "presence_entity": "Anwesenheits-Entität",
+                "presence_unknown": "Bei unbekannter Anwesenheit",
+                "away_action": "Bei Abwesenheit",
+                "away_setback_kelvin": "Absenkung (K)"
+              },
+              "data_description": {
+                "presence": "Global nimmt die Anwesenheits-Entität aus den Integrationsoptionen (derzeit {global_presence_entity}). Keine ignoriert die Abwesenheit für diesen Raum. Eigene nimmt die Entität darunter.",
+                "presence_entity": "Nur bei Anwesenheit Eigene: die Entität dieses Raums (Person, Gerät, Zone, Gruppe, Binärsensor oder Eingabe-Schalter).",
+                "presence_unknown": "Wie ein unbekannter oder nicht verfügbarer Zustand der Entität zählt. Global ist derzeit {global_presence_unknown}.",
+                "away_action": "Absenken senkt die Zieltemperatur um die Absenkung, nie unter die Frostschutztemperatur. Aus schaltet die Thermostate aus wie bei offenem Fenster. Global ist derzeit {global_away_action}.",
+                "away_setback_kelvin": "Um wie viel die Zieltemperatur bei Abwesenheit sinkt. 0,5 bis 10 K. Global ist derzeit {global_away_setback_kelvin}."
+              }
+            },
+            "schedule": {
+              "name": "Zeitplan",
+              "description": "Wie weit dieser Raum abgesenkt wird, solange sein Zeitplan-Helfer aus ist.",
+              "data": {
+                "schedule_setback_kelvin": "Absenkung außerhalb des Zeitplans (K)"
+              },
+              "data_description": {
+                "schedule_setback_kelvin": "Um wie viel die Zieltemperatur sinkt, solange der Zeitplan des Raums aus ist. 0,5 bis 15 K, nie unter Frostschutz. Global ist derzeit {global_schedule_setback_kelvin}."
+              }
+            },
+            "windows_outdoor": {
+              "name": "Fenster und Außentemperatur",
+              "description": "Die Fensterkontakte dieses Raums und das Abschalten, wenn es draußen warm ist.",
+              "data": {
+                "window_open_delay_seconds": "Verzögerung, bis ein Fenster als offen gilt (Sekunden, 0 = sofort)",
+                "window_warn_minutes": "Warnung bei offenem Fenster (Minuten, 0 = nie)",
+                "window_warn_colder": "Warnung nur, wenn es draußen kälter ist",
+                "window_check_minutes": "Fensterkontakt-Prüfung (Minuten, 0 = aus)",
+                "window_check_drop_kelvin": "Erwartete Abkühlung bei der Prüfung (K)",
+                "outdoor_cutoff": "Außentemperatur-Abschaltung",
+                "outdoor_cutoff_celsius": "Abschalttemperatur außen"
+              },
+              "data_description": {
+                "window_open_delay_seconds": "Wie lange ein Fensterkontakt offen sein muss, bis das Fenster als offen gilt und die Heizung ausgeschaltet wird. Kurzes Lüften schaltet nichts aus. 0 = sofort, sonst 1 bis 600 Sekunden. Global ist derzeit {global_window_open_delay_seconds}.",
+                "window_warn_minutes": "Nach wie vielen Minuten ein offenes Fenster eine Meldung unter Reparaturen auslöst (0 = nie). Die Heizung bleibt aus, bis das Fenster geschlossen ist. 0 bis 1440 Minuten. Global ist derzeit {global_window_warn_minutes}.",
+                "window_warn_colder": "Die Warnung bei offenem Fenster kommt nur, wenn die Außentemperatur unter der Raumtemperatur liegt. Wird es später kälter, kommt sie dann. Braucht den Außentemperatursensor; ist die Außentemperatur unbekannt, wird gewarnt. Die Heizung geht bei offenem Fenster trotzdem aus. Global ist derzeit {global_window_warn_colder}.",
+                "window_check_minutes": "Nach wie vielen Minuten bei offenem Fenster der Raum mindestens um den Wert unter „Erwartete Abkühlung bei der Prüfung (K)“ abgekühlt sein muss, sonst kommt ein Hinweis, dass der Kontakt klemmen könnte (0 = aus). 0 bis 240 Minuten. Global ist derzeit {global_window_check_minutes}.",
+                "window_check_drop_kelvin": "Um wie viel die Raumtemperatur seit dem Öffnen des Fensters gefallen sein muss, damit der Kontakt als plausibel gilt. 0,1 bis 3,0 K. Global ist derzeit {global_window_check_drop_kelvin}.",
+                "outdoor_cutoff": "Global folgt der Abschalttemperatur aus den Integrationsoptionen (derzeit {global_outdoor_cutoff_celsius}), solange du unten keine eigene Temperatur einträgst. Aus schaltet diesen Raum nie wegen der Außentemperatur ab.",
+                "outdoor_cutoff_celsius": "Der Raum schaltet ab, wenn die Außentemperatur diesen Wert erreicht, und wieder ein, sobald sie 0,5 K unter dem Wert liegt. Braucht einen Außensensor in den Integrationsoptionen. -10,0 bis 30,0 °C. Leer = Global, derzeit {global_outdoor_cutoff_celsius}."
+              }
+            },
+            "room_thermostat": {
+              "name": "Sollwertbereich",
+              "description": "Die niedrigste und höchste Solltemperatur, die dieser Raum annimmt.",
+              "data": {
+                "setpoint_range": "Sollwertbereich",
+                "setpoint_min": "Minimale Solltemperatur (°C)",
+                "setpoint_max": "Maximale Solltemperatur (°C)"
+              },
+              "data_description": {
+                "setpoint_range": "Automatisch liest beim Einrichten des Raums die minimale und maximale Solltemperatur, die die Thermostate in Home Assistant zeigen (bei mehreren gilt der engste gemeinsame Bereich, sonst der Bereich des Profils). Manuell nimmt das Minimum und das Maximum unten. Global ist derzeit {global_setpoint_range}.",
+                "setpoint_min": "Die niedrigste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und unter dem Maximum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_min}.",
+                "setpoint_max": "Die höchste Solltemperatur, die der Raum annimmt. 4,0 bis 35,0 °C und über dem Minimum. Gilt nur bei Sollwertbereich Manuell. Global ist derzeit {global_setpoint_max}."
+              }
+            },
+            "thermostat": {
+              "name": "Thermostat-Einstellungen",
+              "description": "Werden in die Thermostate dieses Raums geschrieben (außer dem Ausblenden).",
+              "data": {
+                "window_detection": "Fenster-offen-Erkennung des Thermostats",
+                "hysteresis": "Hysterese",
+                "adaptive_mode": "Adaptiver Modus (ab Firmware 1.4.4)",
+                "frost_temperature": "Frostschutz-Temperatur",
+                "hide_thermostat_entities": "TRV-Entitäten ausblenden"
+              },
+              "data_description": {
+                "window_detection": "Schaltet die eigene Fenster-offen-Erkennung des Thermostats ein oder aus. Sie löst aus, wenn die Temperatur innerhalb von 4,5 Minuten um etwa 1,5 K fällt, und beendet die Heizpause spätestens nach 30 Minuten. Mit Fensterkontakten in Home Assistant hat sie nichts zu tun. Global ist derzeit {global_window_detection}.",
+                "hysteresis": "Temperatur-Hysterese der Thermostate. Sie wird ignoriert, solange der adaptive Modus an ist. Global ist derzeit {global_hysteresis}.",
+                "adaptive_mode": "Das Thermostat stellt sich selbst auf den Raum ein. Solange er an ist, wird die Hysterese ignoriert. Braucht Firmware 1.4.4 oder neuer. Global ist derzeit {global_adaptive_mode}.",
+                "frost_temperature": "Die Temperatur, die das Thermostat als Frostschutz hält. 4,0 bis 16,0 °C. Global ist derzeit {global_frost_temperature}.",
+                "hide_thermostat_entities": "Blendet die Klima-Entität der TRVs und die Einstellungen aus, die Easy TRV steuert. Sie arbeiten weiter, stehen aber nicht mehr auf automatischen Dashboards. Ausschalten blendet sie wieder ein. Global ist derzeit {global_hide_thermostat_entities}."
+              }
+            },
+            "statistics": {
+              "name": "Statistik",
+              "description": "Was Easy TRV für diesen Raum als Langzeit-Statistik aufzeichnet.",
+              "data": {
+                "statistics": "Statistik erfassen"
+              },
+              "data_description": {
+                "statistics": "Regelabweichung, Heizzeit, Fenster und Zigbee-Zähler als Langzeit-Statistik. Ausgeblendet sammelt, ohne Listen und Dashboards zu füllen. Aus legt keine Statistik-Sensoren an und entfernt vorhandene. Global ist derzeit {global_statistics}."
+              }
+            },
+            "writes": {
+              "name": "Erweitert: Schreibvorgänge",
+              "description": "Wie oft und wie sorgfältig die Raumtemperatur an die Thermostate geschrieben wird. Muss selten geändert werden.",
+              "data": {
+                "refresh_minutes": "Auffrischung (Minuten)",
+                "verify_delay_seconds": "Rücklese-Verzögerung (Sekunden)",
+                "max_attempts": "Versuche",
+                "min_delta_kelvin": "Mindeständerung (K)",
+                "sensor_timeout_minutes": "Sensor-Timeout (Minuten, 0 = aus)"
+              },
+              "data_description": {
+                "refresh_minutes": "Wie oft die aktuelle Raumtemperatur erneut an die Thermostate geschrieben wird, auch wenn sie sich nicht geändert hat. 1 bis 120 Minuten. Global ist derzeit {global_refresh_minutes}.",
+                "verify_delay_seconds": "Wie lange nach dem Schreiben von Raumtemperatur, Quelle, Soll oder Modus gewartet wird, bevor der Wert zurückgelesen wird (Fail-safe, Wochenplan, Drehen am Knopf). Einstellungen werden nicht zurückgelesen. 2 bis 60 Sekunden. Global ist derzeit {global_verify_delay_seconds}.",
+                "max_attempts": "Wie oft ein fehlgeschlagener Schreibvorgang kurz hintereinander wiederholt wird, bevor Easy TRV es einmal pro Auffrischungsintervall erneut versucht. Gemeldet wird ein Thermostat erst, wenn seine Schreibvorgänge eine Stunde lang fehlschlagen. 1 bis 10. Global ist derzeit {global_max_attempts}.",
+                "min_delta_kelvin": "Eine neue Raumtemperatur wird nur geschrieben, wenn sie sich um mindestens so viel vom zuletzt geschriebenen Wert unterscheidet. 0,0 bis 1,0 K. Global ist derzeit {global_min_delta_kelvin}.",
+                "sensor_timeout_minutes": "Ein stiller Sensor zählt, solange er verfügbar ist; Batteriesensoren melden oft nur bei einer Änderung. Das Timeout ist für Sensoren gedacht, die regelmäßig melden: Ein Sensor, der so lange nichts gemeldet hat, wird ignoriert. 0 = aus (Standard), sonst 10 bis 1440 Minuten. Global ist derzeit {global_sensor_timeout_minutes}."
+              }
+            }
           }
         }
       },
@@ -353,7 +411,7 @@
     },
     "select": {
       "presence": {
-        "name": "Anwesenheit",
+        "name": "Easy TRV Anwesenheit",
         "state": {
           "auto": "Automatisch",
           "home": "Zuhause",
@@ -363,7 +421,7 @@
     },
     "number": {
       "away_setback": {
-        "name": "Abwesenheits-Absenkung"
+        "name": "Easy TRV Abwesenheits-Absenkung"
       }
     }
   },

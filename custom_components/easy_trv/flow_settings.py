@@ -62,7 +62,7 @@ from custom_components.easy_trv.core.settings import DEFAULTS, overrides
 from custom_components.easy_trv.labels import async_option_labels, localized_number
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
     from homeassistant.core import HomeAssistant
 
@@ -184,36 +184,52 @@ SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
 }
 # The entity pickers of the options form; stored only when one is chosen.
 _OPTION_ENTITIES: Final = (CONF_OUTDOOR_SENSOR, CONF_PRESENCE_ENTITY)
-# The order of the room's settings form.
+# How the room's settings form groups its fields, in the order of the form:
+# what is changed often first, the write tuning last. The profile stands above
+# the sections, the reset switch below them; the stored data stays flat.
+ROOM_SECTIONS: Final[Mapping[str, tuple[str, ...]]] = {
+    _SECTION_PRESENCE: (
+        CONF_PRESENCE,
+        CONF_PRESENCE_ENTITY,
+        CONF_PRESENCE_UNKNOWN,
+        CONF_AWAY_ACTION,
+        CONF_AWAY_SETBACK,
+    ),
+    _SECTION_SCHEDULE: (CONF_SCHEDULE_SETBACK,),
+    _SECTION_WINDOWS_OUTDOOR: (
+        CONF_WINDOW_OPEN_DELAY,
+        CONF_WINDOW_WARN_MINUTES,
+        CONF_WINDOW_WARN_COLDER,
+        CONF_WINDOW_CHECK_MINUTES,
+        CONF_WINDOW_CHECK_DROP,
+        CONF_OUTDOOR_CUTOFF,
+        CONF_OUTDOOR_CUTOFF_CELSIUS,
+    ),
+    _SECTION_ROOM_THERMOSTAT: (
+        CONF_SETPOINT_RANGE,
+        CONF_SETPOINT_MIN,
+        CONF_SETPOINT_MAX,
+    ),
+    _SECTION_THERMOSTAT: (
+        CONF_WINDOW_DETECTION,
+        CONF_HYSTERESIS,
+        CONF_ADAPTIVE_MODE,
+        CONF_FROST_TEMPERATURE,
+        CONF_HIDE_THERMOSTAT_ENTITIES,
+    ),
+    _SECTION_STATISTICS: (CONF_STATISTICS,),
+    _SECTION_WRITES: (
+        CONF_REFRESH_MINUTES,
+        CONF_VERIFY_DELAY,
+        CONF_MAX_ATTEMPTS,
+        CONF_MIN_DELTA,
+        CONF_SENSOR_TIMEOUT,
+    ),
+}
+# Every setting of a room, in the order of the form.
 ROOM_SETTING_KEYS: Final = (
     CONF_PROFILE,
-    CONF_WINDOW_DETECTION,
-    CONF_HYSTERESIS,
-    CONF_ADAPTIVE_MODE,
-    CONF_FROST_TEMPERATURE,
-    CONF_HIDE_THERMOSTAT_ENTITIES,
-    CONF_REFRESH_MINUTES,
-    CONF_VERIFY_DELAY,
-    CONF_MAX_ATTEMPTS,
-    CONF_MIN_DELTA,
-    CONF_SENSOR_TIMEOUT,
-    CONF_SETPOINT_RANGE,
-    CONF_SETPOINT_MIN,
-    CONF_SETPOINT_MAX,
-    CONF_WINDOW_OPEN_DELAY,
-    CONF_WINDOW_WARN_MINUTES,
-    CONF_WINDOW_WARN_COLDER,
-    CONF_WINDOW_CHECK_MINUTES,
-    CONF_WINDOW_CHECK_DROP,
-    CONF_OUTDOOR_CUTOFF,
-    CONF_OUTDOOR_CUTOFF_CELSIUS,
-    CONF_PRESENCE,
-    CONF_PRESENCE_ENTITY,
-    CONF_PRESENCE_UNKNOWN,
-    CONF_AWAY_ACTION,
-    CONF_AWAY_SETBACK,
-    CONF_SCHEDULE_SETBACK,
-    CONF_STATISTICS,
+    *(key for keys in ROOM_SECTIONS.values() for key in keys),
 )
 ROOM_SELECT_KEYS: Final = (
     CONF_PROFILE,
@@ -358,11 +374,16 @@ def effective_settings(
 
 
 def room_settings_schema(
-    profiles: Mapping[str, Profile], *, with_reset: bool = False
+    profiles: Mapping[str, Profile],
+    *,
+    with_reset: bool = False,
+    expanded: Collection[str] = (),
 ) -> vol.Schema:
     """Return the room's settings form: "global" or a value, empty = global.
 
-    ``with_reset`` ends it with the switch that sets everything to global.
+    The profile comes first, the other settings sit in collapsed sections;
+    the sections named in ``expanded`` are open. ``with_reset`` ends the form
+    with the switch that sets everything to global.
     """
     profile_options = [
         SelectOptionDict(value=SETTING_GLOBAL, label="Global"),
@@ -372,31 +393,81 @@ def room_settings_schema(
             for profile_id, profile in profiles.items()
         ),
     ]
-    schema: dict[Any, Any] = {}
-    for key in ROOM_SETTING_KEYS:
-        if key == CONF_PROFILE:
-            schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
-                key, profile_options
-            )
-        elif key in ROOM_SELECT_VALUES:
-            schema[vol.Optional(key, default=SETTING_GLOBAL)] = _select_selector(
+
+    def field(key: str) -> tuple[Any, Any]:
+        if key in ROOM_SELECT_VALUES:
+            return vol.Optional(key, default=SETTING_GLOBAL), _select_selector(
                 key, [SETTING_GLOBAL, *ROOM_SELECT_VALUES[key]]
             )
-        elif key == CONF_PRESENCE_ENTITY:
-            schema[vol.Optional(key)] = _presence_selector()
-        else:
-            schema[vol.Optional(key)] = _number_selector(key)
+        if key == CONF_PRESENCE_ENTITY:
+            return vol.Optional(key), _presence_selector()
+        return vol.Optional(key), _number_selector(key)
+
+    schema: dict[Any, Any] = {
+        vol.Optional(CONF_PROFILE, default=SETTING_GLOBAL): _select_selector(
+            CONF_PROFILE, profile_options
+        )
+    }
+    for name, keys in ROOM_SECTIONS.items():
+        schema[vol.Required(name)] = section(
+            vol.Schema(dict(field(key) for key in keys)),
+            {"collapsed": name not in expanded},
+        )
     if with_reset:
         schema[vol.Optional(CONF_RESET_SETTINGS, default=False)] = BooleanSelector()
     return vol.Schema(schema)
 
 
+def room_sections_in_use(data: Mapping[str, Any]) -> set[str]:
+    """Return the sections in which a room has a value of its own.
+
+    The form opens them, so a room shows at once what it does differently.
+    """
+    own = {
+        key
+        for key, value in data.items()
+        if value is not None and value != SETTING_GLOBAL
+    }
+    return {name for name, keys in ROOM_SECTIONS.items() if own & set(keys)}
+
+
+def room_form_values(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the flat stored data of a room as the sectioned values of its form."""
+    values: dict[str, Any] = {
+        key: data[key] for key in (CONF_PROFILE, CONF_RESET_SETTINGS) if key in data
+    }
+    for name, keys in ROOM_SECTIONS.items():
+        values[name] = {key: data[key] for key in keys if key in data}
+    return values
+
+
+def flat_room_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the submitted room form without its sections."""
+    flat = {key: value for key, value in user_input.items() if key not in ROOM_SECTIONS}
+    for name in ROOM_SECTIONS:
+        flat.update(user_input.get(name, {}))
+    return flat
+
+
+def section_errors(
+    errors: Mapping[str, str], sections: Mapping[str, Sequence[str]]
+) -> dict[str, str]:
+    """Return ``errors`` with each field inside a section keyed by the section.
+
+    Home Assistant shows the error of a field inside a section nowhere; the
+    error of the section shows above it.
+    """
+    owner = {key: name for name, keys in sections.items() for key in keys}
+    return {owner.get(key, key): error for key, error in errors.items()}
+
+
 def room_settings(user_input: Mapping[str, Any]) -> dict[str, Any]:
     """Return what a room stores of its settings: the selects and filled numbers.
 
-    The room's own presence entity is kept only with ``presence: own``. The
-    reset switch sets every setting to global; where the room's presence comes
-    from is an assignment and stays.
+    ``user_input`` is flat (see ``flat_room_input``). The room's own presence
+    entity is kept only with ``presence: own``. The reset switch sets every
+    setting to global; where the room's presence comes from is an assignment
+    and stays.
     """
     if user_input.get(CONF_RESET_SETTINGS):
         user_input = {
@@ -428,8 +499,12 @@ def presence_error(user_input: Mapping[str, Any]) -> dict[str, str]:
 # --- The options form --------------------------------------------------
 
 
-def options_schema(current: Mapping[str, Any]) -> vol.Schema:
+def options_schema(
+    current: Mapping[str, Any], *, expanded: Collection[str] = ()
+) -> vol.Schema:
     """Return the form of the global options in collapsed sections.
+
+    The sections named in ``expanded`` (those with an error) are open.
 
     The selects default to what is saved (else the built-in default). The
     numbers get no default: they are suggested by ``options_suggestions``, and
@@ -437,7 +512,7 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
     """
     effective = {**DEFAULTS, **overrides(current)}
 
-    def group(keys: Sequence[str]) -> section:
+    def group(name: str, keys: Sequence[str]) -> section:
         fields: dict[Any, Any] = {}
         for key in keys:
             if key in SELECT_VALUES:
@@ -450,10 +525,10 @@ def options_schema(current: Mapping[str, Any]) -> vol.Schema:
                 fields[vol.Optional(key)] = _presence_selector()
             else:
                 fields[vol.Optional(key)] = _number_selector(key)
-        return section(vol.Schema(fields), {"collapsed": True})
+        return section(vol.Schema(fields), {"collapsed": name not in expanded})
 
     form: dict[Any, Any] = {
-        vol.Required(name): group(keys) for name, keys in SECTIONS.items()
+        vol.Required(name): group(name, keys) for name, keys in SECTIONS.items()
     }
     form[vol.Optional(CONF_RESET_SETTINGS, default=False)] = BooleanSelector()
     return vol.Schema(form)

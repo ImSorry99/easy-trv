@@ -54,13 +54,19 @@ from custom_components.easy_trv.core.settings import (
 )
 from custom_components.easy_trv.flow_settings import (
     NUMBERS,
+    ROOM_SECTIONS,
     ROOM_SETTING_KEYS,
+    SECTIONS,
     effective_settings,
+    flat_room_input,
     options_schema,
     options_suggestions,
     presence_error,
+    room_form_values,
+    room_sections_in_use,
     room_settings,
     room_settings_schema,
+    section_errors,
     setpoint_range_error,
     setting_texts,
     stored_options,
@@ -452,14 +458,16 @@ class RoomSubentryFlow(ConfigSubentryFlow):
         profiles = await self._async_profiles()
         errors: dict[str, str] = {}
         if user_input is not None:
-            settings = room_settings(user_input)
-            errors = (
+            flat = flat_room_input(user_input)
+            settings = room_settings(flat)
+            errors = section_errors(
                 timeout_error(settings)
-                or presence_error(user_input)
+                or presence_error(flat)
                 or setpoint_range_error(entry.options, settings)
                 or self._profile_errors(
                     entry, subentry, settings[CONF_PROFILE], profiles
-                )
+                ),
+                ROOM_SECTIONS,
             )
             if not errors:
                 data = {
@@ -496,11 +504,18 @@ class RoomSubentryFlow(ConfigSubentryFlow):
         )
         suggested = user_input
         if user_input is None and subentry is not None:
-            suggested = dict(subentry.data)
+            suggested = room_form_values(subentry.data)
+        # Open the sections where the room has values of its own or an error.
+        expanded = room_sections_in_use(
+            flat_room_input(suggested) if suggested else {}
+        ) | set(errors)
         return self.async_show_form(
             step_id=_STEP_SETTINGS,
             data_schema=self.add_suggested_values_to_schema(
-                room_settings_schema(profiles, with_reset=reconfiguring), suggested
+                room_settings_schema(
+                    profiles, with_reset=reconfiguring, expanded=expanded
+                ),
+                suggested,
             ),
             errors=errors,
             description_placeholders={
@@ -596,7 +611,9 @@ class EasyTrvOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             options = stored_options(user_input)
-            errors = timeout_error(options) or setpoint_range_error({}, options)
+            errors = section_errors(
+                timeout_error(options) or setpoint_range_error({}, options), SECTIONS
+            )
             if not errors:
                 return self.async_create_entry(data=options)
         # Each number says what an empty field means: the built-in default.
@@ -606,7 +623,7 @@ class EasyTrvOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
-                options_schema(self.config_entry.options),
+                options_schema(self.config_entry.options, expanded=set(errors)),
                 options_suggestions(self.config_entry.options)
                 if user_input is None
                 else user_input,

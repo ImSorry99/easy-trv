@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- The room settings page groups its settings in collapsible sections (Presence, Schedule, Windows and outdoor, Target temperature range, Thermostat settings, Statistics, Advanced: writes) instead of one long list. Sections where the room has values of its own open by themselves. The stored data does not change
+- The presence select and the away setback number no longer sit on a device "Easy TRV", so the integration page no longer shows the group "Devices that don't belong to a sub-entry". Their entity ids, unique ids and customizations stay; the old device is removed at start. New names: **Easy TRV presence** and **Easy TRV away setback** (German: Easy TRV Anwesenheit, Easy TRV Abwesenheits-Absenkung)
+
+### Fixed
+
+- A form error of a field inside a section (sensor timeout out of range, own presence without an entity) was not shown anywhere; it now shows on its section, which opens
+
 ## [0.10.0b1] - 2026-11-23 (pre-release)
 
 ### Added

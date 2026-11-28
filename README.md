@@ -54,7 +54,7 @@ Every setting exists in three layers, and the most specific one that is set wins
 
 1. **Built-in default**, the value in the table below.
 2. **Global**: the integration's options (**Configure** on the integration page). They apply to all rooms. Every number field shows its value, the built-in default until you change it. A field left at its default or emptied is not stored and follows the built-in default. The sections of the form start collapsed.
-3. **Room**: the **Room settings** page of a room. Every choice there has the first option **Global**, and a number field left empty means global too. Only what you change is stored for the room, so a later change of the global value reaches every room that does not set its own.
+3. **Room**: the **Room settings** page of a room. Every choice there has the first option **Global**, and a number field left empty means global too. Only what you change is stored for the room, so a later change of the global value reaches every room that does not set its own. Besides the profile the page groups its settings in sections (Presence, Schedule, Windows and outdoor, Target temperature range, Thermostat settings, Statistics, Advanced: writes). They start closed; a section in which the room has a value of its own opens by itself.
 
 **Reset.** The last field of the options form, **Reset all settings to their defaults**, sets every global setting back to its built-in default when you submit; the outdoor temperature sensor and the presence entity stay. The room settings of a room you reconfigure end with **Reset all settings of this room to Global**; where the room's presence comes from stays.
 
@@ -104,7 +104,7 @@ The entities come back when you turn the setting off, when the thermostat or the
 
 Besides the room thermostat and the sensors, Easy TRV has these entities.
 
-On the house device **Easy TRV**:
+Of the whole integration (they belong to no device, so the integration page lists only the rooms; find them under **Entities** or by searching):
 
 | Entity | What it is |
 |---|---|
@@ -246,7 +246,7 @@ This is a Home Assistant helper, not the thermostat's own weekly schedule (`auto
 
 ### Force presence for the house
 
-The select `select.easy_trv_presence` on the device **Easy TRV** has three options: **Automatic** (default), **Home** and **Away** (German: Automatisch, Zuhause, Abwesend).
+The select `select.easy_trv_presence` (named **Easy TRV presence**, German: Easy TRV Anwesenheit) has three options: **Automatic** (default), **Home** and **Away** (German: Automatisch, Zuhause, Abwesend).
 
 - **Home** and **Away** override what every room with presence reads, at once and without the away delay. Rooms without presence are not affected.
 - The select returns to **Automatic** by itself when the global presence entity changes between home and away. Without a global presence entity it stays until you set it back. A change of a room's own entity does not end it.

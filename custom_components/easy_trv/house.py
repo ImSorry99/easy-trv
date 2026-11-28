@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final, Literal
 
 from homeassistant.core import CALLBACK_TYPE, callback
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
@@ -24,13 +25,25 @@ type ForcedReason = Literal["user", "presence_changed"]
 OPTIONS: Final = ("auto", "home", "away")
 
 
-def house_device_info(entry_id: str) -> DeviceInfo:
-    """Return the device of the house, the one the house entities sit on."""
-    return DeviceInfo(
-        identifiers={(DOMAIN, entry_id)},
-        manufacturer="Easy TRV",
-        name="Easy TRV",
-    )
+def retire_house_device(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove the house device of versions before 0.10.0b2, keeping its entities.
+
+    The presence select and the away setback number sat on a device "Easy TRV".
+    Next to the rooms (config subentries) Home Assistant lists such a device in
+    a group of devices that belong to no subentry. The two entities have no
+    device now. They are detached first, because removing a device removes the
+    entities on it; so their entity ids, names and areas stay.
+    """
+    devices = dr.async_get(hass)
+    device = devices.async_get_device_by_identifier((DOMAIN, entry_id), entry_id)
+    if device is None:
+        return
+    entities = er.async_get(hass)
+    for registered in er.async_entries_for_device(
+        entities, device.id, include_disabled_entities=True
+    ):
+        entities.async_update_entity(registered.entity_id, device_id=None)
+    devices.async_remove_device(device.id)
 
 
 class HousePresence:

@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 import voluptuous as vol
 from homeassistant.config_entries import HANDLERS, ConfigEntryState
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, section
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -25,6 +25,7 @@ from custom_components.easy_trv.config_flow import (
 from custom_components.easy_trv.const import DOMAIN, SUBENTRY_PROFILE, SUBENTRY_ROOM
 from custom_components.easy_trv.core.model import RoomParams
 from custom_components.easy_trv.core.settings import resolve_settings
+from custom_components.easy_trv.flow_settings import ROOM_SECTIONS, room_form_values
 from custom_components.easy_trv.profile_flow import ProfileSubentryFlow
 from custom_components.easy_trv.profiles.loader import BUILTIN_DIR, async_load_profiles
 from tests import helpers_entry
@@ -212,8 +213,32 @@ def area_with_contacts(hass, device_owner, area_with_trvs):
 # --- Flow helpers ---------------------------------------------------------
 
 
+class _RoomFlows:
+    """The subentry flows; a flat input to a room's settings form is sectioned.
+
+    The settings form groups its fields in sections, the tests name them flat.
+    """
+
+    def __init__(self, hass) -> None:
+        self._flows = hass.config_entries.subentries
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._flows, name)
+
+    async def async_configure(self, flow_id, user_input=None):
+        if (
+            user_input is not None
+            and self._flows.async_get(flow_id)["step_id"] == "settings"
+            and not any(
+                isinstance(user_input.get(name), dict) for name in ROOM_SECTIONS
+            )
+        ):
+            user_input = room_form_values(user_input)
+        return await self._flows.async_configure(flow_id, user_input)
+
+
 def room_flows(hass):
-    return hass.config_entries.subentries
+    return _RoomFlows(hass)
 
 
 async def open_room_flow(hass, entry, choice):
@@ -277,9 +302,39 @@ ALL_GLOBAL = {
 }
 
 
+def _is_room_settings(result) -> bool:
+    return result.get("step_id") == "settings"
+
+
+def _flat(schema: dict) -> dict:
+    """Return ``schema`` with the fields of its sections in place of the sections."""
+    flat: dict = {}
+    for key, value in schema.items():
+        if isinstance(value, section):
+            flat.update(value.schema.schema)
+        else:
+            flat[key] = value
+    return flat
+
+
 def fields(result) -> dict[str, Any]:
-    """Map the field names of a form to their selectors."""
-    return {str(key): value for key, value in result["data_schema"].schema.items()}
+    """Map the field names of a form to their selectors.
+
+    A room's settings form is read flat: the fields of its sections in order.
+    """
+    schema = result["data_schema"].schema
+    if _is_room_settings(result):
+        schema = _flat(schema)
+    return {str(key): value for key, value in schema.items()}
+
+
+def room_sections(result) -> dict[str, list[str]]:
+    """Map the sections of a room's settings form to their field names."""
+    return {
+        str(key): [str(inner) for inner in value.schema.schema]
+        for key, value in result["data_schema"].schema.items()
+        if isinstance(value, section)
+    }
 
 
 def section_fields(result, name) -> dict[str, Any]:
@@ -290,7 +345,9 @@ def section_fields(result, name) -> dict[str, Any]:
 
 def _schema(result, group):
     schema = result["data_schema"].schema
-    return schema if group is None else schema[group].schema.schema
+    if group is not None:
+        return schema[group].schema.schema
+    return _flat(schema) if _is_room_settings(result) else schema
 
 
 def suggested_values(result, group=None) -> dict[str, Any]:
@@ -907,19 +964,12 @@ async def test_reconfigure_prefills_and_replaces_the_window_contacts(hass) -> No
 
 SETTINGS_FIELDS = [
     "profile",
-    "window_detection",
-    "hysteresis",
-    "adaptive_mode",
-    "frost_temperature",
-    "hide_thermostat_entities",
-    "refresh_minutes",
-    "verify_delay_seconds",
-    "max_attempts",
-    "min_delta_kelvin",
-    "sensor_timeout_minutes",
-    "setpoint_range",
-    "setpoint_min",
-    "setpoint_max",
+    "presence",
+    "presence_entity",
+    "presence_unknown",
+    "away_action",
+    "away_setback_kelvin",
+    "schedule_setback_kelvin",
     "window_open_delay_seconds",
     "window_warn_minutes",
     "window_warn_colder",
@@ -927,14 +977,30 @@ SETTINGS_FIELDS = [
     "window_check_drop_kelvin",
     "outdoor_cutoff",
     "outdoor_cutoff_celsius",
-    "presence",
-    "presence_entity",
-    "presence_unknown",
-    "away_action",
-    "away_setback_kelvin",
-    "schedule_setback_kelvin",
+    "setpoint_range",
+    "setpoint_min",
+    "setpoint_max",
+    "window_detection",
+    "hysteresis",
+    "adaptive_mode",
+    "frost_temperature",
+    "hide_thermostat_entities",
     "statistics",
+    "refresh_minutes",
+    "verify_delay_seconds",
+    "max_attempts",
+    "min_delta_kelvin",
+    "sensor_timeout_minutes",
 ]
+ROOM_SECTION_FIELDS = {
+    "presence": SETTINGS_FIELDS[1:6],
+    "schedule": ["schedule_setback_kelvin"],
+    "windows_outdoor": SETTINGS_FIELDS[7:14],
+    "room_thermostat": SETTINGS_FIELDS[14:17],
+    "thermostat": SETTINGS_FIELDS[17:22],
+    "statistics": ["statistics"],
+    "writes": SETTINGS_FIELDS[23:],
+}
 SETTING_NUMBERS = {
     "away_setback_kelvin": (0.5, 10.0, 0.5, "K"),
     "schedule_setback_kelvin": (0.5, 15.0, 0.5, "K"),
@@ -1152,8 +1218,8 @@ async def test_room_statistics_select_is_global_off_hidden_or_visible(
     assert option_values(statistics) == ["global", "off", "hidden", "visible"]
     assert statistics.config["translation_key"] == "statistics"
     assert defaults(result)["statistics"] == "global"
-    # It is the last field of the form, after the outdoor cut-off.
-    assert list(fields(result))[-1] == "statistics"
+    # It has a section of its own, before the advanced write settings.
+    assert room_sections(result)["statistics"] == ["statistics"]
 
 
 @pytest.mark.usefixtures("area_with_trvs")
@@ -1242,7 +1308,7 @@ async def test_room_sensor_timeout_is_off_or_ten_to_1440(
         assert result["type"] is FlowResultType.CREATE_ENTRY
     else:
         assert result["type"] is FlowResultType.FORM
-        assert result["errors"] == {"sensor_timeout_minutes": "timeout_range"}
+        assert result["errors"] == {"writes": "timeout_range"}
         assert suggested_values(result)["sensor_timeout_minutes"] == minutes
         assert not entry.subentries
 
@@ -2345,7 +2411,7 @@ async def test_options_flow_sensor_timeout_is_off_or_ten_to_1440(
         assert entry.options.get("sensor_timeout_minutes", 0) == minutes
     else:
         assert result["type"] is FlowResultType.FORM
-        assert result["errors"] == {"sensor_timeout_minutes": "timeout_range"}
+        assert result["errors"] == {"writes": "timeout_range"}
         assert suggested_values(result, "writes")["sensor_timeout_minutes"] == minutes
         assert not entry.options
 
@@ -2510,7 +2576,7 @@ async def test_room_presence_own_needs_an_entity(hass, entry) -> None:
         result["flow_id"], {"presence": "own"}
     )
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"presence_entity": "presence_entity_required"}
+    assert result["errors"] == {"presence": "presence_entity_required"}
 
 
 @pytest.mark.usefixtures("area_with_trvs")
@@ -2625,3 +2691,54 @@ async def test_reconfigure_reset_sets_every_setting_to_global(hass) -> None:
 async def test_a_new_room_has_no_reset_switch(hass, entry) -> None:
     result = await open_settings_step(hass, entry)
     assert "reset_settings" not in fields(result)
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_sit_in_collapsed_sections(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+
+    assert room_sections(result) == ROOM_SECTION_FIELDS
+    schema = result["data_schema"].schema
+    assert next(map(str, schema)) == "profile"
+    # A new room has no values of its own: every section is closed.
+    assert all(
+        value.options["collapsed"]
+        for value in schema.values()
+        if isinstance(value, section)
+    )
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_reconfigure_opens_the_sections_with_own_values(hass) -> None:
+    entry = make_entry(
+        hass,
+        [room_data("Living", hysteresis="0_8", away_setback_kelvin=2.0)],
+        {},
+    )
+    sub = next(iter(entry.subentries.values()))
+    result = await start_reconfigure(hass, entry, sub.subentry_id)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], entities_input(name="Living")
+    )
+
+    opened = {
+        str(key)
+        for key, value in result["data_schema"].schema.items()
+        if isinstance(value, section) and not value.options["collapsed"]
+    }
+    assert opened == {"thermostat", "presence"}
+    assert suggested_values(result, "thermostat") == {
+        "window_detection": "on",
+        "hysteresis": "0_8",
+    }
+
+
+@pytest.mark.usefixtures("area_with_trvs")
+async def test_room_settings_open_the_section_with_an_error(hass, entry) -> None:
+    result = await open_settings_step(hass, entry)
+    result = await room_flows(hass).async_configure(
+        result["flow_id"], {"sensor_timeout_minutes": 5}
+    )
+
+    assert result["errors"] == {"writes": "timeout_range"}
+    assert not result["data_schema"].schema["writes"].options["collapsed"]
