@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/logo.svg" alt="Easy TRV logo" width="128"></p>
+
 # Easy TRV
 
 **Room-temperature control for Sonoff TRVZB radiator thermostats in Home Assistant.**
