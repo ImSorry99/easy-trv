@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- The Easy TRV card is loaded when Home Assistant starts, no longer only once the Easy TRV entry has been set up. A dashboard opened while the entry was failing or still waiting (for example for ZHA) showed "Custom element doesn't exist: easy-trv-card" until the browser was reloaded
+
 ## [0.10.0b1] - 2026-11-23 (pre-release)
 
 ### Added

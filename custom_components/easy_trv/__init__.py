@@ -11,6 +11,7 @@ from homeassistant.components.climate.const import ATTR_MAX_TEMP, ATTR_MIN_TEMP
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
@@ -87,6 +88,7 @@ if TYPE_CHECKING:
 
     from homeassistant.config_entries import ConfigSubentry
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.typing import ConfigType
 
     from custom_components.easy_trv.profiles.engine import Profile
 
@@ -554,6 +556,21 @@ def _assign_room_areas(hass: HomeAssistant, entry: EasyTrvConfigEntry) -> None:
             devices.async_update_device(device.id, area_id=area_id)
 
 
+CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
+    """Load the Easy TRV card when Home Assistant starts.
+
+    Done here and not in the entry setup, so the card is in the dashboards even
+    while the entry fails or waits for ZHA; a dashboard opened before a late
+    entry setup would otherwise never get the card.
+    """
+    integration = await async_get_integration(hass, DOMAIN)
+    await async_register_card(hass, str(integration.version))
+    return True
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate an entry to the current version.
 
@@ -650,9 +667,6 @@ async def async_setup_entry(  # noqa: PLR0915 - the steps of one entry
         zha = None
     issues.clear_zha_api(hass)
     gateway = RoutingGateway(hass, zha)
-    integration = await async_get_integration(hass, DOMAIN)
-    await async_register_card(hass, str(integration.version))
-
     profiles = add_documents(await async_load_profiles(hass), profile_documents(entry))
     for error in profiles.errors:
         issues.raise_profile_invalid(hass, error.file, str(error))
