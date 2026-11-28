@@ -2,7 +2,9 @@
 
 | Read this if you want… | File |
 |---|---|
-| how to install, configure and use Easy TRV (user guide) | `../README.md` |
+| what Easy TRV is, what it supports, how to install it (overview) | `../README.md` |
+| how to install, configure and use Easy TRV (user guide) | `guide/` (start at `guide/README.md`) |
+| how to contribute (profiles, pull requests) | `../CONTRIBUTING.md` |
 | what Easy TRV must do (the owner's requirements, short) | `../REQUIREMENTS.md` |
 | why devices are driven through profiles | `concept/profiles.md` |
 | exactly how the Sonoff TRVZB is addressed (attributes, firmware, spikes) | `profiles/sonoff-trvzb-native.md` |
