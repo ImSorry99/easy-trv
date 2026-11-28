@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from homeassistant.setup import async_setup_component
+
 from custom_components.easy_trv import frontend
 
 CARD = Path(frontend.__file__).parent / "www" / "easy-trv-card.js"
@@ -41,3 +43,15 @@ def test_manifest_depends_on_http_and_frontend() -> None:
     assert {"http", "frontend"} <= set(manifest["dependencies"])
     # ZHA is optional since entity profiles; it is set up first when present.
     assert manifest["after_dependencies"] == ["zha"]
+
+
+async def test_card_is_loaded_at_start_without_any_entry(hass) -> None:
+    """The card is registered by the component itself, not by the entry."""
+    hass.config.components.add("frontend")
+    with patch(
+        "custom_components.easy_trv.async_register_card", AsyncMock()
+    ) as register:
+        assert await async_setup_component(hass, "easy_trv", {})
+        await hass.async_block_till_done()
+    register.assert_awaited_once()
+    assert register.await_args.args[1] == json.loads(MANIFEST.read_text())["version"]
